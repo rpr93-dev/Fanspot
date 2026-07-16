@@ -21,7 +21,7 @@ export default function TeamCard({ team, sport }: { team: Team; sport: string })
   return (
     <Link
       href={`/${sport}/${team.id}`}
-      className="group rounded-xl p-5 transition-all duration-300 hover:-translate-y-0.5"
+      className="group rounded-xl p-5 transition-all duration-300 hover:-translate-y-0.5 animate-fade-in"
       style={{ backgroundColor: `${team.colors.primary}15`, border: `1px solid ${team.colors.primary}20` }}
     >
       <div className="flex flex-col items-center text-center">

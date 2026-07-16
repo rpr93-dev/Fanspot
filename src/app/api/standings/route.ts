@@ -218,5 +218,8 @@ export async function GET(request: Request) {
   }
 
   const grouped = groupStandings(standings)
-  return NextResponse.json({ standings: grouped, teamStanding: `${teamConference} ${teamDivision}`.trim() })
+  return NextResponse.json(
+    { standings: grouped, teamStanding: `${teamConference} ${teamDivision}`.trim() },
+    { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } }
+  )
 }

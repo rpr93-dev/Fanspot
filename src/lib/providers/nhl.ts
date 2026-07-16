@@ -90,25 +90,30 @@ export async function fetchTeamSchedule(
   let allGames: any[] = []
   const seenIds = new Set<string>()
 
-  for (const month of months) {
-    try {
-      const url = `https://api-web.nhle.com/v1/club-schedule/${abbr}/month/${month}`
-      const res = await fetch(url, { next: { revalidate: 300 } })
-      if (!res.ok) {
-        problems.push(`NHL API ${month} returned ${res.status}`)
-        continue
-      }
-      const data = await res.json()
-      if (data?.games) {
-        for (const g of data.games) {
-          if (!seenIds.has(String(g.id))) {
-            allGames.push(g)
-            seenIds.add(String(g.id))
-          }
+  const results = await Promise.all(
+    months.map(async (month) => {
+      try {
+        const url = `https://api-web.nhle.com/v1/club-schedule/${abbr}/month/${month}`
+        const res = await fetch(url, { next: { revalidate: 300 } })
+        if (!res.ok) {
+          problems.push(`NHL API ${month} returned ${res.status}`)
+          return []
         }
+        const data = await res.json()
+        return data?.games ?? []
+      } catch (err) {
+        problems.push(`NHL API ${month} failed: ${err}`)
+        return []
       }
-    } catch (err) {
-      problems.push(`NHL API ${month} failed: ${err}`)
+    })
+  )
+
+  for (const games of results) {
+    for (const g of games) {
+      if (!seenIds.has(String(g.id))) {
+        allGames.push(g)
+        seenIds.add(String(g.id))
+      }
     }
   }
 

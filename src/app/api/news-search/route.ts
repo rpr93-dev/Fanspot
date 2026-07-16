@@ -198,5 +198,8 @@ export async function GET(request: Request) {
     })
     .slice(0, 6)
 
-  return NextResponse.json({ articles: scored })
+  return NextResponse.json(
+    { articles: scored },
+    { headers: { 'Cache-Control': 'public, s-maxage=180, stale-while-revalidate=300' } }
+  )
 }

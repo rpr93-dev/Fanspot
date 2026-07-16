@@ -143,7 +143,7 @@ export async function GET(request: Request) {
     const sbUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${gameDate}&limit=100`
     log(`Fetching scoreboard: ${sbUrl}`)
 
-    const sbRes = await fetch(sbUrl, { cache: 'no-store' })
+    const sbRes = await fetch(sbUrl, { next: { revalidate: 60 } })
     if (!sbRes.ok) {
       log(`Scoreboard fetch failed: ${sbRes.status} ${sbRes.statusText}`)
       return NextResponse.json({ odds: null, source: 'espn' })
@@ -265,7 +265,7 @@ export async function GET(request: Request) {
         isHome,
       },
       source: 'espn',
-    })
+    }, { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=120' } })
   } catch (err) {
     log(`Unexpected error: ${err instanceof Error ? err.message : String(err)}`)
     return NextResponse.json({ odds: null, source: 'espn' })

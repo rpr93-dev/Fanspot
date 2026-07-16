@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import Link from 'next/link'
 import { teams, sportConfig } from '@/data/teams'
 import { useParams } from 'next/navigation'
@@ -106,6 +106,10 @@ export default function TeamDashboard() {
   const [loading, setLoading] = useState(true)
   const [logoFailed, setLogoFailed] = useState(false)
   const [showAllStandings, setShowAllStandings] = useState(false)
+  const [showRoster, setShowRoster] = useState(false)
+  const [rosterData, setRosterData] = useState<any[] | null>(null)
+  const [rosterLoading, setRosterLoading] = useState(false)
+  const upcomingGameRef = useRef<{ id: string; date: string } | null>(null)
 
   const team = teams.find((t) => t.id === teamId && t.sport === sport.toUpperCase())
   const config = sportConfig[sport.toUpperCase()]
@@ -114,54 +118,38 @@ export default function TeamDashboard() {
     if (!team) { setLoading(false); return }
     let cancelled = false
     const t = team
-    const espnAbbr = getEspnAbbr(t.id, t.abbreviation)
 
     async function load() {
       try {
         const espnAbbrForApi = getEspnAbbr(t.id, t.abbreviation)
-        const schedule = await getTeamSchedule(t.sport, t.id, t.abbreviation)
 
-        // Pass the upcoming game's event ID and date to odds so it uses the same game
+        // Fire schedule, news, and standings in parallel immediately
+        const schedulePromise = getTeamSchedule(t.sport, t.id, t.abbreviation)
+        const newsPromise = getTeamNews(t.sport, t.id, t.name, t.abbreviation)
+        const standingsPromise = fetch(`/api/standings?sport=${t.sport}&team=${espnAbbrForApi}`)
+          .then((r) => r.ok ? r.json() : null)
+
+        // Await schedule first so we can build the odds URL with the event ID
+        const schedule = await schedulePromise
+
+        const schedForState = processScheduleForState(schedule, espnAbbrForApi, t.sport)
+        upcomingGameRef.current = schedForState.upcomingEventId
+          ? { id: schedForState.upcomingEventId, date: schedForState.upcomingDate! }
+          : null
+
         let oddsUrl = `/api/odds?sport=${t.sport}&team=${espnAbbrForApi}`
-        if (schedule.upcoming) {
-          const gameDate = schedule.upcoming.date.slice(0, 10).replace(/-/g, '')
-          oddsUrl += `&eventId=${encodeURIComponent(schedule.upcoming.id)}&date=${gameDate}`
+        if (schedForState.upcomingEventId && schedForState.upcomingDate) {
+          oddsUrl += `&eventId=${encodeURIComponent(schedForState.upcomingEventId)}&date=${schedForState.upcomingDate}`
         }
 
+        // Await remaining fetches in parallel with odds (already in-flight)
         const [news, standingsRes, oddsRes] = await Promise.all([
-          getTeamNews(t.sport, t.id, t.name, t.abbreviation),
-          fetch(`/api/standings?sport=${t.sport}&team=${espnAbbrForApi}`).then((r) => r.ok ? r.json() : null),
+          newsPromise,
+          standingsPromise,
           fetch(oddsUrl).then((r) => r.ok ? r.json() : null),
         ])
 
         if (cancelled) return
-
-        const lastFive = schedule.lastFive.map((e) => {
-          const opp = getOpponent(e, espnAbbr, t.sport)
-          return {
-            date: getShortDate(e),
-            opponent: opp.name,
-            opponentLogo: opp.logo,
-            result: getResult(e, espnAbbr),
-            score: getScore(e, espnAbbr),
-            isPreseason: e.seasonType?.type === 1 || e.season?.type === 1,
-          }
-        })
-
-        let upcoming: TeamDashboardData['upcoming'] = null
-
-        if (schedule.upcoming) {
-          const opp = getOpponent(schedule.upcoming, espnAbbr, t.sport)
-          const venue = schedule.upcoming.competitions?.[0]?.venue?.fullName
-          upcoming = {
-            date: getGameDetail(schedule.upcoming),
-            opponent: opp.name,
-            opponentLogo: opp.logo,
-            location: opp.location,
-            venue,
-            isPreseason: schedule.upcoming.seasonType?.type === 1 || schedule.upcoming.season?.type === 1,
-          }
-        }
 
         const newsItems = news.map((a: any) => ({
           title: a.headline ?? a.title ?? '',
@@ -178,8 +166,8 @@ export default function TeamDashboard() {
         }))
 
         setData({
-          upcoming,
-          lastFive,
+          upcoming: schedForState.upcoming,
+          lastFive: schedForState.lastFive,
           oddsInfo: oddsRes?.odds ?? null,
           news: newsItems.length > 0 ? newsItems : getFallbackNews(t.name, t.sport),
           standings: standingsRes?.standings ?? [],
@@ -197,6 +185,96 @@ export default function TeamDashboard() {
     load()
     return () => { cancelled = true }
   }, [team])
+
+  useEffect(() => {
+    if (!showRoster || rosterData || rosterLoading || !team) return
+    setRosterLoading(true)
+    const abbr = getEspnAbbr(team.id, team.abbreviation)
+    fetch(`/api/roster?sport=${team.sport}&team=${abbr}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((res) => {
+        setRosterData(res?.athletes ?? null)
+        setRosterLoading(false)
+      })
+      .catch(() => setRosterLoading(false))
+  }, [showRoster])
+
+  // Odds poll every 30s
+  useEffect(() => {
+    if (!team) return
+    const abbr = getEspnAbbr(team.id, team.abbreviation)
+    const id = setInterval(async () => {
+      try {
+        let url = `/api/odds?sport=${team.sport}&team=${abbr}`
+        const ug = upcomingGameRef.current
+        if (ug) url += `&eventId=${encodeURIComponent(ug.id)}&date=${ug.date}`
+        const res = await fetch(url)
+        if (res.ok) {
+          const json = await res.json()
+          setData(p => p ? { ...p, oddsInfo: json.odds ?? null } : p)
+        }
+      } catch { /* silent */ }
+    }, 30000)
+    return () => clearInterval(id)
+  }, [team?.id])
+
+  // News poll every 120s
+  useEffect(() => {
+    if (!team) return
+    const id = setInterval(async () => {
+      try {
+        const raw = await getTeamNews(team.sport, team.id, team.name, team.abbreviation)
+        const items = raw.map((a: any) => ({
+          title: a.headline ?? a.title ?? '',
+          source: a.source ?? 'ESPN',
+          date: a.published
+            ? new Date(a.published).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+            : a.date
+              ? new Date(a.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+              : '',
+          snippet: a.description ?? a.snippet ?? '',
+          url: a.links?.web?.href
+            ? (a.links.web.href.startsWith('http') ? a.links.web.href : `https://www.espn.com${a.links.web.href}`)
+            : a.url ?? '#',
+        }))
+        setData(p => p ? { ...p, news: items.length > 0 ? items : getFallbackNews(team.name, team.sport) } : p)
+      } catch { /* silent */ }
+    }, 120000)
+    return () => clearInterval(id)
+  }, [team?.id])
+
+  // Standings poll every 120s
+  useEffect(() => {
+    if (!team) return
+    const abbr = getEspnAbbr(team.id, team.abbreviation)
+    const id = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/standings?sport=${team.sport}&team=${abbr}`)
+        if (res.ok) {
+          const json = await res.json()
+          setData(p => p ? { ...p, standings: json.standings ?? [], teamStanding: json.teamStanding ?? '', standingsMessage: json.message ?? '' } : p)
+        }
+      } catch { /* silent */ }
+    }, 120000)
+    return () => clearInterval(id)
+  }, [team?.id])
+
+  // Schedule poll every 300s
+  useEffect(() => {
+    if (!team) return
+    const id = setInterval(async () => {
+      try {
+        const schedule = await getTeamSchedule(team.sport, team.id, team.abbreviation)
+        const abbr = getEspnAbbr(team.id, team.abbreviation)
+        const result = processScheduleForState(schedule, abbr, team.sport)
+        upcomingGameRef.current = result.upcomingEventId
+          ? { id: result.upcomingEventId, date: result.upcomingDate! }
+          : null
+        setData(p => p ? { ...p, upcoming: result.upcoming, lastFive: result.lastFive } : p)
+      } catch { /* silent */ }
+    }, 300000)
+    return () => clearInterval(id)
+  }, [team?.id])
 
   if (!team || !config) {
     return (
@@ -227,7 +305,7 @@ export default function TeamDashboard() {
                   <div className="h-4 rounded w-1/2" style={{ backgroundColor: `${team.colors.primary}15` }} />
                 </div>
               ) : data?.upcoming ? (
-                <>
+                <div className="animate-fade-in-up">
                   <div className="flex items-center gap-3 mb-2">
                     {data.upcoming.opponentLogo && (
                       <img src={data.upcoming.opponentLogo} alt="" className="w-7 h-7 object-contain" />
@@ -280,13 +358,14 @@ export default function TeamDashboard() {
                       <p className="text-sm text-gray-600">Odds not yet available</p>
                     </div>
                   )}
-                </>
+                </div>
               ) : (
-                <p className="text-sm text-gray-600">{sport === 'nfl' ? 'Season starts September' : sport === 'nba' || sport === 'nhl' ? 'Season starts October' : 'Season in progress'}</p>
+                <p className="text-sm text-gray-600 animate-fade-in">{sport === 'nfl' ? 'Season starts September' : sport === 'nba' || sport === 'nhl' ? 'Season starts October' : 'Season in progress'}</p>
               )}
             </div>
 
-            <div className="rounded-xl p-6 flex flex-col items-center justify-center" style={{ backgroundColor: `${team.colors.primary}10`, border: `1px solid ${team.colors.primary}18` }}>
+            <div className="rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 hover:scale-[1.02]" style={{ backgroundColor: `${team.colors.primary}10`, border: `1px solid ${team.colors.primary}18` }}
+              onClick={() => setShowRoster((v) => !v)}>
               <div className="w-28 h-28 flex items-center justify-center mb-4">
                 {logoFailed ? (
                   <div className="w-28 h-28 rounded-full flex items-center justify-center" style={{ backgroundColor: team.colors.primary }}>
@@ -301,138 +380,283 @@ export default function TeamDashboard() {
             </div>
           </div>
 
-        <div className="mb-5">
-          <div className="rounded-xl p-5" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">Last 5 Games</h2>
-              {data?.teamStanding && <span className="text-xs text-gray-500">{data.teamStanding}</span>}
-            </div>
-            {loading ? (
-              <div className="grid grid-cols-5 gap-3">
-                {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-24 rounded-lg animate-pulse" style={{ backgroundColor: `${team.colors.primary}15` }} />
-                ))}
-              </div>
-            ) : data?.lastFive.length ? (
-              <div className="grid grid-cols-5 gap-3">
-                {data.lastFive.map((game, i) => (
-                  <div key={i} className="rounded-lg p-3 flex flex-col items-center text-center transition-colors" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${team.colors.primary}10` }}
-                    onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18` }}
-                    onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a` }}>
-                    <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium mb-1 ${
-                      game.result === 'W' ? 'text-green-400' : 'text-red-400'
-                    }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)' }}>
-                      {game.result}
-                    </span>
-                    {game.opponentLogo && (
-                      <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain mb-1" />
-                    )}
-                    <span className="text-xs text-white/80 truncate max-w-full">{game.opponent}</span>
-                    <span className="text-xs mt-0.5 text-gray-400">{game.score}</span>
-                    <div className="flex items-center gap-1 mt-0.5">
-                      <span className="text-[10px] text-gray-500">{game.date}</span>
-                      {game.isPreseason && <span className="text-[10px] text-amber-400/70">Pre</span>}
-                    </div>
+        {showRoster ? (
+          <RosterPanel
+            team={team}
+            roster={rosterData}
+            loading={rosterLoading}
+            onBack={() => setShowRoster(false)}
+          />
+        ) : (
+          <>
+            <div className="mb-5">
+              <div className="rounded-xl p-5" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">Last 5 Games</h2>
+                  {data?.teamStanding && <span className="text-xs text-gray-500">{data.teamStanding}</span>}
+                </div>
+                {loading ? (
+                  <div className="grid grid-cols-5 gap-3">
+                    {[...Array(5)].map((_, i) => (
+                      <div key={i} className="h-24 rounded-lg animate-pulse" style={{ backgroundColor: `${team.colors.primary}15` }} />
+                    ))}
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-sm text-gray-500">No recent games</p>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">
-                Standings
-              </h2>
-              {data?.standings.some((c) => c.name !== team?.conference) && (
-                <button onClick={() => setShowAllStandings((v) => !v)}
-                  className="text-xs px-2.5 py-1 rounded-full transition-colors text-gray-400"
-                  style={{
-                    backgroundColor: showAllStandings ? `${team?.colors.primary}25` : `${team.colors.primary}10`,
-                    border: `1px solid ${team.colors.primary}20`,
-                  }}>
-                  {showAllStandings ? `Show ${team?.conference} Only` : 'All Conferences'}
-                </button>
-              )}
-            </div>
-            {loading ? (
-              <div className="animate-pulse space-y-3">
-                {[...Array(8)].map((_, i) => (
-                  <div key={i} className="h-8 rounded-lg" style={{ backgroundColor: `${team.colors.primary}12` }} />
-                ))}
-              </div>
-            ) : data?.standingsMessage ? (
-              <p className="text-sm text-gray-500">{data.standingsMessage}</p>
-            ) : data?.standings.length ? (
-              <div className="space-y-4">
-                {(showAllStandings ? data.standings : data.standings.filter((c) => c.name === team?.conference)).map((conf) => (
-                  <div key={conf.name}>
-                    <p className="text-xs font-medium mb-2 uppercase tracking-wider text-gray-400">{conf.name}</p>
-                    {conf.divisions.map((div) => (
-                      <div key={div.name} className="mb-3">
-                        <p className="text-xs mb-1 ml-1 text-gray-500">{div.name}</p>
-                        <div className="space-y-0.5">
-                          {div.teams.map((entry, i) => {
-                            const isMyTeam = entry.abbr === getEspnAbbr(team.id, team.abbreviation)
-                            return (
-                              <div key={entry.abbr} className="flex items-center gap-2 rounded-lg px-2.5 py-1" style={{
-                                backgroundColor: isMyTeam ? `${team.colors.primary}18` : 'transparent',
-                              }}>
-                                <span className="text-xs w-4 text-right text-gray-600">{i + 1}</span>
-                                <img src={entry.logo} alt="" className="w-4 h-4 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                                <span className={`text-xs flex-1 truncate ${isMyTeam ? 'text-white/90' : 'text-white/60'}`}>{entry.name.replace(/^(Los Angeles|Las Vegas|New York|New England|San Francisco|San Diego|Tampa Bay|Green Bay|Kansas City|Oklahoma City|Golden State|New Orleans|Salt Lake City|St\. Louis|Portland|Oklahoma )/, '')}</span>
-                                {entry.record && <span className="text-xs font-mono text-gray-400">{entry.record}</span>}
-                              </div>
-                            )
-                          })}
+                ) : data?.lastFive.length ? (
+                  <div className="grid grid-cols-5 gap-3 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
+                    {data.lastFive.map((game, i) => (
+                      <div key={i} className="rounded-lg p-3 flex flex-col items-center text-center transition-colors" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${team.colors.primary}10` }}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18` }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a` }}>
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium mb-1 ${
+                          game.result === 'W' ? 'text-green-400' : 'text-red-400'
+                        }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)' }}>
+                          {game.result}
+                        </span>
+                        {game.opponentLogo && (
+                          <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain mb-1" />
+                        )}
+                        <span className="text-xs text-white/80 truncate max-w-full">{game.opponent}</span>
+                        <span className="text-xs mt-0.5 text-gray-400">{game.score}</span>
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <span className="text-[10px] text-gray-500">{game.date}</span>
+                          {game.isPreseason && <span className="text-[10px] text-amber-400/70">Pre</span>}
                         </div>
                       </div>
                     ))}
                   </div>
-                ))}
+                ) : (
+                  <p className="text-sm text-gray-500 animate-fade-in">No recent games</p>
+                )}
               </div>
-            ) : (
-              <p className="text-sm text-gray-500">Standings unavailable</p>
-            )}
-          </div>
+            </div>
 
-          <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
-            <h2 className="text-xs font-medium tracking-wider uppercase mb-4 text-gray-400">Latest News</h2>
-            {loading ? (
-              <div className="animate-pulse space-y-4">
-                {[...Array(4)].map((_, i) => (
-                  <div key={i} className="space-y-2">
-                    <div className="h-4 rounded w-3/4" style={{ backgroundColor: `${team.colors.primary}15` }} />
-                    <div className="h-3 rounded w-full" style={{ backgroundColor: `${team.colors.primary}10` }} />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+              <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">
+                    Standings
+                  </h2>
+                  {data?.standings.some((c) => c.name !== team?.conference) && (
+                    <button onClick={() => setShowAllStandings((v) => !v)}
+                      className="text-xs px-2.5 py-1 rounded-full transition-colors text-gray-400"
+                      style={{
+                        backgroundColor: showAllStandings ? `${team?.colors.primary}25` : `${team.colors.primary}10`,
+                        border: `1px solid ${team.colors.primary}20`,
+                      }}>
+                      {showAllStandings ? `Show ${team?.conference} Only` : 'All Conferences'}
+                    </button>
+                  )}
+                </div>
+                {loading ? (
+                  <div className="animate-pulse space-y-3">
+                    {[...Array(8)].map((_, i) => (
+                      <div key={i} className="h-8 rounded-lg" style={{ backgroundColor: `${team.colors.primary}12` }} />
+                    ))}
                   </div>
-                ))}
+                ) : data?.standingsMessage ? (
+                  <p className="text-sm text-gray-500 animate-fade-in-up">{data.standingsMessage}</p>
+                ) : data?.standings.length ? (
+                  <div className="space-y-4 animate-fade-in-up" style={{ animationDelay: '100ms' }}>
+                    {(showAllStandings ? data.standings : data.standings.filter((c) => c.name === team?.conference)).map((conf) => (
+                      <div key={conf.name}>
+                        <p className="text-xs font-medium mb-2 uppercase tracking-wider text-gray-400">{conf.name}</p>
+                        {conf.divisions.map((div) => (
+                          <div key={div.name} className="mb-3">
+                            <p className="text-xs mb-1 ml-1 text-gray-500">{div.name}</p>
+                            <div className="space-y-0.5">
+                              {div.teams.map((entry, i) => {
+                                const isMyTeam = entry.abbr === getEspnAbbr(team.id, team.abbreviation)
+                                return (
+                                  <div key={entry.abbr} className="flex items-center gap-2 rounded-lg px-2.5 py-1" style={{
+                                    backgroundColor: isMyTeam ? `${team.colors.primary}18` : 'transparent',
+                                  }}>
+                                    <span className="text-xs w-4 text-right text-gray-600">{i + 1}</span>
+                                    <img src={entry.logo} alt="" className="w-4 h-4 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
+                                    <span className={`text-xs flex-1 truncate ${isMyTeam ? 'text-white/90' : 'text-white/60'}`}>{entry.name.replace(/^(Los Angeles|Las Vegas|New York|New England|San Francisco|San Diego|Tampa Bay|Green Bay|Kansas City|Oklahoma City|Golden State|New Orleans|Salt Lake City|St\. Louis|Portland|Oklahoma )/, '')}</span>
+                                    {entry.record && <span className="text-xs font-mono text-gray-400">{entry.record}</span>}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 animate-fade-in">Standings unavailable</p>
+                )}
               </div>
-            ) : data?.news.length ? (
-              <div className="space-y-3">
-                {data.news.map((item, i) => (
-                  <a key={i} href={item.url} target="_blank" rel="noopener noreferrer"
-                     className="block rounded-lg p-3.5 transition-all" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${team.colors.primary}08` }}
-                     onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18`; e.currentTarget.style.borderColor = `${team.colors.primary}30` }}
-                     onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a`; e.currentTarget.style.borderColor = `${team.colors.primary}08` }}>
-                    <h3 className="text-sm font-medium text-white/80 leading-snug mb-1.5 line-clamp-2">{item.title}</h3>
-                    <p className="text-xs mb-2 line-clamp-2 text-gray-400">{item.snippet}</p>
-                    <div className="flex items-center gap-2 text-xs text-gray-500">
-                      <span>{item.source}</span>
-                      <span className="text-gray-600">&middot;</span>
-                      <span>{item.date}</span>
-                    </div>
-                  </a>
-                ))}
+
+              <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
+                <h2 className="text-xs font-medium tracking-wider uppercase mb-4 text-gray-400">Latest News</h2>
+                {loading ? (
+                  <div className="animate-pulse space-y-4">
+                    {[...Array(4)].map((_, i) => (
+                      <div key={i} className="space-y-2">
+                        <div className="h-4 rounded w-3/4" style={{ backgroundColor: `${team.colors.primary}15` }} />
+                        <div className="h-3 rounded w-full" style={{ backgroundColor: `${team.colors.primary}10` }} />
+                      </div>
+                    ))}
+                  </div>
+                ) : data?.news.length ? (
+                  <div className="space-y-3 animate-fade-in-up" style={{ animationDelay: '150ms' }}>
+                    {data.news.map((item, i) => (
+                      <a key={i} href={item.url} target="_blank" rel="noopener noreferrer"
+                         className="block rounded-lg p-3.5 transition-all" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${team.colors.primary}08` }}
+                         onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18`; e.currentTarget.style.borderColor = `${team.colors.primary}30` }}
+                         onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a`; e.currentTarget.style.borderColor = `${team.colors.primary}08` }}>
+                        <h3 className="text-sm font-medium text-white/80 leading-snug mb-1.5 line-clamp-2">{item.title}</h3>
+                        <p className="text-xs mb-2 line-clamp-2 text-gray-400">{item.snippet}</p>
+                        <div className="flex items-center gap-2 text-xs text-gray-500">
+                          <span>{item.source}</span>
+                          <span className="text-gray-600">&middot;</span>
+                          <span>{item.date}</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500 animate-fade-in">No news available</p>
+                )}
               </div>
-            ) : (
-              <p className="text-sm text-gray-500">No news available</p>
-            )}
-          </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFive: EspnEvent[] }, espnAbbr: string, sport: string) {
+  const lastFive = schedule.lastFive.map((e) => {
+    const opp = getOpponent(e, espnAbbr, sport)
+    return {
+      date: getShortDate(e),
+      opponent: opp.name,
+      opponentLogo: opp.logo,
+      result: getResult(e, espnAbbr),
+      score: getScore(e, espnAbbr),
+      isPreseason: e.seasonType?.type === 1 || e.season?.type === 1,
+    }
+  })
+
+  let upcoming: TeamDashboardData['upcoming'] = null
+  let upcomingEventId: string | null = null
+  let upcomingDate: string | null = null
+
+  if (schedule.upcoming) {
+    const opp = getOpponent(schedule.upcoming, espnAbbr, sport)
+    const venue = schedule.upcoming.competitions?.[0]?.venue?.fullName
+    upcoming = {
+      date: getGameDetail(schedule.upcoming),
+      opponent: opp.name,
+      opponentLogo: opp.logo,
+      location: opp.location,
+      venue,
+      isPreseason: schedule.upcoming.seasonType?.type === 1 || schedule.upcoming.season?.type === 1,
+    }
+    upcomingEventId = schedule.upcoming.id
+    upcomingDate = schedule.upcoming.date.slice(0, 10).replace(/-/g, '')
+  }
+
+  return { lastFive, upcoming, upcomingEventId, upcomingDate }
+}
+
+function checkRookie(athlete: any): boolean {
+  const exp = athlete?.experience
+  if (!exp) return true
+  if (typeof exp.years === 'number' && exp.years <= 0) return true
+  if (String(exp.displayValue ?? '').toUpperCase() === 'R') return true
+  if (String(exp.abbreviation ?? '').toUpperCase() === 'R') return true
+  return false
+}
+
+const sportPositionOrder: Record<string, string[]> = {
+  NFL: ['QB', 'RB', 'FB', 'WR', 'TE', 'OT', 'OG', 'C', 'DE', 'DT', 'NT', 'OLB', 'MLB', 'ILB', 'LB', 'CB', 'S', 'SS', 'FS', 'K', 'P', 'LS'],
+  NBA: ['PG', 'SG', 'SF', 'PF', 'C'],
+  NHL: ['G', 'D', 'LW', 'C', 'RW'],
+  MLB: ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH', 'IF', 'OF'],
+}
+
+function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any[] | null; loading: boolean; onBack: () => void }) {
+  const order = sportPositionOrder[team.sport] ?? []
+  const posRank: Record<string, number> = {}
+  order.forEach((p, i) => { posRank[p] = i })
+
+  const groups: Record<string, any[]> = {}
+  if (roster) {
+    for (const a of roster) {
+      const abbr = a.position?.abbreviation ?? 'POS'
+      if (!groups[abbr]) groups[abbr] = []
+      groups[abbr].push(a)
+    }
+    for (const key of Object.keys(groups)) {
+      groups[key].sort((a, b) => {
+        const aNum = parseInt(a.jersey) || 0
+        const bNum = parseInt(b.jersey) || 0
+        return aNum - bNum
+      })
+    }
+  }
+
+  const sortedPositions = Object.keys(groups).sort((a, b) => (posRank[a] ?? 999) - (posRank[b] ?? 999))
+
+  return (
+    <div className="animate-fade-in-up">
+      <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">Roster</h2>
+          <button onClick={onBack}
+            className="text-xs px-3 py-1.5 rounded-full transition-colors text-gray-400 hover:text-white"
+            style={{ backgroundColor: `${team.colors.primary}15`, border: `1px solid ${team.colors.primary}25` }}>
+            &larr; Dashboard
+          </button>
         </div>
+
+        {loading ? (
+          <div className="animate-pulse space-y-4">
+            {[...Array(4)].map((_, i) => (
+              <div key={i} className="space-y-2">
+                <div className="h-4 w-16 rounded" style={{ backgroundColor: `${team.colors.primary}20` }} />
+                {[...Array(3)].map((_, j) => (
+                  <div key={j} className="h-7 rounded-lg" style={{ backgroundColor: `${team.colors.primary}10` }} />
+                ))}
+              </div>
+            ))}
+          </div>
+        ) : !roster || sortedPositions.length === 0 ? (
+          <p className="text-sm text-gray-500">Roster unavailable</p>
+        ) : (
+          <div className="space-y-5">
+            {sortedPositions.map((abbr, pi) => {
+              const posName = groups[abbr][0]?.position?.name ?? abbr
+              return (
+                <div key={abbr || `pos-${pi}`}>
+                  <p className="text-xs font-medium mb-2 tracking-wider text-gray-400">{posName} <span className="text-gray-600">({abbr})</span></p>
+                  <div className="space-y-0.5">
+                    {groups[abbr].map((athlete: any, ai) => {
+                      const rookie = checkRookie(athlete)
+                      return (
+                        <div key={athlete.id ?? `athlete-${pi}-${ai}`} className="flex items-center gap-3 rounded-lg px-3 py-1.5" style={{ backgroundColor: rookie ? `${team.colors.primary}12` : 'transparent' }}>
+                          <span className="text-xs w-6 text-right font-mono text-gray-500">{athlete.jersey}</span>
+                          <span className="text-sm flex-1 truncate text-white/80">{athlete.fullName ?? `${athlete.firstName ?? ''} ${athlete.lastName ?? ''}`}</span>
+                          {athlete.college?.name && (
+                            <span className="text-[10px] text-gray-600 hidden md:inline truncate max-w-24">{athlete.college.name}</span>
+                          )}
+                          <span className="text-xs text-gray-500">{athlete.experience?.displayValue ?? ''}</span>
+                          {rookie && (
+                            <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold" style={{ backgroundColor: `${team.colors.primary}40`, color: team.colors.secondary }}>R</span>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
       </div>
     </div>
   )
