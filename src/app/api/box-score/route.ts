@@ -187,6 +187,11 @@ export async function GET(request: Request) {
           }
 
           if (athletes.length > 0) {
+            // Fallback: use cat.displayNames/labels as stat names when athlete stats are empty
+            if (statNames.size === 0) {
+              const labels = cat.labels ?? cat.displayNames?.map((d: any) => d.displayName ?? d.name ?? '') ?? []
+              for (const l of labels) if (l) statNames.add(l)
+            }
             let label = raw.charAt(0).toUpperCase() + raw.slice(1)
             if (raw === 'defensive') label = 'Defense'
             categories.push({ label, statNames: Array.from(statNames), athletes })

@@ -288,6 +288,20 @@ export default function TeamDashboard() {
     fetch(`/api/box-score?sport=${team.sport}&eventId=${selectedGameId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((res) => {
+        if (res?.boxScore?.playerStats) {
+          for (const team of res.boxScore.playerStats) {
+            for (const cat of (team.categories ?? [])) {
+              if (cat.athletes?.length > 0 && cat.statNames?.length === 0) {
+                console.warn('[BoxScore] Category has athletes but no statNames', team.teamAbbr, cat.label, cat.athletes[0])
+              }
+              for (const a of (cat.athletes ?? [])) {
+                if (Object.keys(a.stats ?? {}).length === 0) {
+                  console.warn('[BoxScore] Athlete has no stats', team.teamAbbr, cat.label, a.displayName, a)
+                }
+              }
+            }
+          }
+        }
         setBoxScoreData(res?.boxScore ?? null)
         setBoxScoreLoading(false)
       })
