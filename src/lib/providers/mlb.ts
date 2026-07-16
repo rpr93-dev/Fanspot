@@ -6,6 +6,8 @@ const mlbTeamIds: Record<string, number> = {
   PHI: 143, ATL: 144, CWS: 145, MIA: 146, NYY: 147, MIL: 158,
 }
 
+import { deduplicateById } from '@/lib/schedule-types'
+
 const gameTypeMap: Record<string, number> = {
   S: 1, E: 1, R: 2, P: 3, D: 3, F: 3, L: 3, W: 3, C: 3,
 }
@@ -102,13 +104,7 @@ export async function fetchTeamSchedule(
   }
 
   const events = allGames.map((g) => toEspnEvent(g, abbr))
-
-  const seen = new Set<string>()
-  const unique = events.filter((e) => {
-    if (seen.has(e.id)) return false
-    seen.add(e.id)
-    return true
-  })
+  const unique = deduplicateById(events)
 
   return { events: unique, problems }
 }

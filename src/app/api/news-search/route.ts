@@ -124,31 +124,6 @@ async function fetchGoogleNews(query: string): Promise<NewsItem[]> {
   }
 }
 
-async function fetchEspnNews(sport: string): Promise<NewsItem[]> {
-  const sportPath: Record<string, string> = { NFL: 'nfl', NBA: 'nba', NHL: 'nhl', MLB: 'mlb' }
-  const path = sportPath[sport.toUpperCase()]
-  if (!path) return []
-
-  try {
-    const res = await fetch(`https://www.espn.com/espn/rss/${path}/news`, { signal: AbortSignal.timeout(15000), next: { revalidate: 180 } })
-    if (!res.ok) return []
-    const xml = await res.text()
-    const data = parser.parse(xml)
-    const items = data?.rss?.channel?.item ?? []
-    return (Array.isArray(items) ? items : []).map((item: any) => ({
-      title: item.title ?? '',
-      source: item['dc:creator'] ?? 'ESPN',
-      sourceUrl: '',
-      date: item.pubDate ?? '',
-      snippet: extractSnippet(item),
-      url: item.link ?? '#',
-      score: 0,
-    }))
-  } catch {
-    return []
-  }
-}
-
 function isRecent(dateStr: string): boolean {
   if (!dateStr) return false
   const d = new Date(dateStr)

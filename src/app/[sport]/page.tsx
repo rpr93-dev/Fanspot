@@ -3,13 +3,6 @@ import type { Metadata } from 'next'
 import { teams, sportConfig } from '@/data/teams'
 import TeamCard from './TeamCard'
 
-const sportNames: Record<string, string> = {
-  nfl: 'NFL',
-  nba: 'NBA',
-  nhl: 'NHL',
-  mlb: 'MLB',
-}
-
 export async function generateMetadata({ params }: { params: Promise<{ sport: string }> }): Promise<Metadata> {
   const { sport } = await params
   const sportKey = sport.toUpperCase()

@@ -104,4 +104,36 @@ Any change to an ESPN API path (e.g., adding a new sport) required updating all 
 ### Tradeoffs
 - Adds a dependency from API route files to `@/lib/providers/espn.ts`. However, `standings/route.ts` already had this dependency, so it's not a new coupling pattern.
 
+## Commit 4 — Add 15-second fetch timeouts to all API route HTTP calls
+
+**Commit hash**: `aa49060`
+**Date**: 2026-07-16
+
+### Problem
+9 out of 10 `fetch` calls across the 6 API route files had no timeout. If an ESPN endpoint hangs (network issue, server overload, DNS failure), the serverless function would hang until its hard timeout (typically 10-30s on Vercel). This also wastes connection pool resources.
+
+### Solution
+Added `signal: AbortSignal.timeout(15000)` to every `fetch` call in every API route. The 15-second timeout is generous enough for ESPN's typical 200-2000ms response time while preventing indefinite hangs.
+
+### Files modified (fetches that received timeouts):
+- `schedule/route.ts` — 1 fetch (ESPN schedule/scoreboard)
+- `standings/route.ts` — 2 fetches (fallback scoreboard; primary already had timeout)
+- `odds/route.ts` — 2 fetches (ESPN schedule + scoreboard)
+- `news-search/route.ts` — 2 fetches (Google News RSS + ESPN RSS)
+- `roster/route.ts` — 1 fetch (ESPN roster)
+- `box-score/route.ts` — 1 fetch (ESPN summary)
+
+### Benefits
+- **Reliability**: Prevents serverless function hangs on slow/unresponsive API responses
+- **User experience**: Failed fetches return quickly rather than timing out after 30+ seconds
+- **Resource management**: Frees up connection pool slots promptly
+
+### Verification
+- `npm run build` — passed (TypeScript + production build)
+- Uses `AbortSignal.timeout()` which is available in Node 18+ (Next.js 16 runtime)
+
+### Tradeoffs
+- If ESPN API legitimately takes longer than 15 seconds (very rare), the fetch will abort and the route will return no data. This is an acceptable tradeoff.
+- Consider tuning the timeout per endpoint if monitoring shows premature timeouts.
+
 

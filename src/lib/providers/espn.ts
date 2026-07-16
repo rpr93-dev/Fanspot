@@ -1,4 +1,5 @@
 import type { EspnEvent, EspnArticle } from '@/lib/sports-api'
+import { deduplicateById } from '@/lib/schedule-types'
 
 export const espnSportMap: Record<string, string> = {
   NFL: 'football/nfl',
@@ -162,12 +163,7 @@ export async function fetchTeamSchedule(
       }
     }
 
-    const seen = new Set<string>()
-    const unique = allEvents.filter((e) => {
-      if (seen.has(e.id)) return false
-      seen.add(e.id)
-      return true
-    })
+    const unique = deduplicateById(allEvents)
 
     return { events: unique, problems }
   } catch (err) {

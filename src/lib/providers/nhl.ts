@@ -4,6 +4,8 @@ const gameStateMap: Record<string, boolean> = {
   TRUE: true,
 }
 
+import { deduplicateById } from '@/lib/schedule-types'
+
 function toEspnEvent(g: any, teamAbbr: string): any {
   const isHome = g.homeTeam?.abbrev?.toUpperCase() === teamAbbr.toUpperCase()
   const ourTeam = isHome ? g.homeTeam : g.awayTeam
@@ -118,13 +120,7 @@ export async function fetchTeamSchedule(
   }
 
   const events = allGames.map((g) => toEspnEvent(g, abbr))
-
-  const seen = new Set<string>()
-  const unique = events.filter((e) => {
-    if (seen.has(e.id)) return false
-    seen.add(e.id)
-    return true
-  })
+  const unique = deduplicateById(events)
 
   return { events: unique, problems }
 }

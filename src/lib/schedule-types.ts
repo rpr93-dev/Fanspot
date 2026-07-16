@@ -51,3 +51,15 @@ export function validateSchedule(events: any[], sport: string, teamAbbr: string)
 
   return { valid: errors.length === 0, errors }
 }
+
+export function deduplicateById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>()
+  const result: T[] = []
+  for (const item of items) {
+    if (!seen.has(item.id)) {
+      seen.add(item.id)
+      result.push(item)
+    }
+  }
+  return result
+}
