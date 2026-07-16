@@ -304,8 +304,8 @@ export default function TeamDashboard() {
         <div className="mb-5">
           <div className="rounded-xl p-5" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
             <div className="flex items-center justify-between mb-3">
-              <h2 className="text-xs font-medium tracking-wider uppercase" style={{ color: `${team.colors.primary}cc` }}>Last 5 Games</h2>
-              {data?.teamStanding && <span className="text-xs" style={{ color: `${team.colors.primary}99` }}>{data.teamStanding}</span>}
+              <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">Last 5 Games</h2>
+              {data?.teamStanding && <span className="text-xs text-gray-500">{data.teamStanding}</span>}
             </div>
             {loading ? (
               <div className="grid grid-cols-5 gap-3">
@@ -328,7 +328,7 @@ export default function TeamDashboard() {
                       <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain mb-1" />
                     )}
                     <span className="text-xs text-white/80 truncate max-w-full">{game.opponent}</span>
-                    <span className="text-xs mt-0.5" style={{ color: `${team.colors.primary}bb` }}>{game.score}</span>
+                    <span className="text-xs mt-0.5 text-gray-400">{game.score}</span>
                     <div className="flex items-center gap-1 mt-0.5">
                       <span className="text-[10px] text-gray-500">{game.date}</span>
                       {game.isPreseason && <span className="text-[10px] text-amber-400/70">Pre</span>}
@@ -345,15 +345,14 @@ export default function TeamDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
             <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xs font-medium tracking-wider uppercase" style={{ color: `${team.colors.primary}cc` }}>
+              <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">
                 Standings
               </h2>
               {data?.standings.some((c) => c.name !== team?.conference) && (
                 <button onClick={() => setShowAllStandings((v) => !v)}
-                  className="text-xs px-2.5 py-1 rounded-full transition-colors"
+                  className="text-xs px-2.5 py-1 rounded-full transition-colors text-gray-400"
                   style={{
                     backgroundColor: showAllStandings ? `${team?.colors.primary}25` : `${team.colors.primary}10`,
-                    color: showAllStandings ? `${team.colors.primary}dd` : `${team.colors.primary}99`,
                     border: `1px solid ${team.colors.primary}20`,
                   }}>
                   {showAllStandings ? `Show ${team?.conference} Only` : 'All Conferences'}
@@ -372,10 +371,10 @@ export default function TeamDashboard() {
               <div className="space-y-4">
                 {(showAllStandings ? data.standings : data.standings.filter((c) => c.name === team?.conference)).map((conf) => (
                   <div key={conf.name}>
-                    <p className="text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: `${team.colors.primary}aa` }}>{conf.name}</p>
+                    <p className="text-xs font-medium mb-2 uppercase tracking-wider text-gray-400">{conf.name}</p>
                     {conf.divisions.map((div) => (
                       <div key={div.name} className="mb-3">
-                        <p className="text-xs mb-1 ml-1" style={{ color: `${team.colors.primary}77` }}>{div.name}</p>
+                        <p className="text-xs mb-1 ml-1 text-gray-500">{div.name}</p>
                         <div className="space-y-0.5">
                           {div.teams.map((entry, i) => {
                             const isMyTeam = entry.abbr === getEspnAbbr(team.id, team.abbreviation)
@@ -383,10 +382,10 @@ export default function TeamDashboard() {
                               <div key={entry.abbr} className="flex items-center gap-2 rounded-lg px-2.5 py-1" style={{
                                 backgroundColor: isMyTeam ? `${team.colors.primary}18` : 'transparent',
                               }}>
-                                <span className="text-xs w-4 text-right" style={{ color: `${team.colors.primary}66` }}>{i + 1}</span>
+                                <span className="text-xs w-4 text-right text-gray-600">{i + 1}</span>
                                 <img src={entry.logo} alt="" className="w-4 h-4 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                                 <span className={`text-xs flex-1 truncate ${isMyTeam ? 'text-white/90' : 'text-white/60'}`}>{entry.name.replace(/^(Los Angeles|Las Vegas|New York|New England|San Francisco|San Diego|Tampa Bay|Green Bay|Kansas City|Oklahoma City|Golden State|New Orleans|Salt Lake City|St\. Louis|Portland|Oklahoma )/, '')}</span>
-                                {entry.record && <span className="text-xs font-mono" style={{ color: `${team.colors.primary}99` }}>{entry.record}</span>}
+                                {entry.record && <span className="text-xs font-mono text-gray-400">{entry.record}</span>}
                               </div>
                             )
                           })}
@@ -402,7 +401,7 @@ export default function TeamDashboard() {
           </div>
 
           <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
-            <h2 className="text-xs font-medium tracking-wider uppercase mb-4" style={{ color: `${team.colors.primary}cc` }}>Latest News</h2>
+            <h2 className="text-xs font-medium tracking-wider uppercase mb-4 text-gray-400">Latest News</h2>
             {loading ? (
               <div className="animate-pulse space-y-4">
                 {[...Array(4)].map((_, i) => (
@@ -420,11 +419,11 @@ export default function TeamDashboard() {
                      onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18`; e.currentTarget.style.borderColor = `${team.colors.primary}30` }}
                      onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a`; e.currentTarget.style.borderColor = `${team.colors.primary}08` }}>
                     <h3 className="text-sm font-medium text-white/80 leading-snug mb-1.5 line-clamp-2">{item.title}</h3>
-                    <p className="text-xs mb-2 line-clamp-2" style={{ color: `${team.colors.primary}aa` }}>{item.snippet}</p>
-                    <div className="flex items-center gap-2 text-xs">
-                      <span style={{ color: `${team.colors.primary}88` }}>{item.source}</span>
-                      <span style={{ color: `${team.colors.primary}55` }}>&middot;</span>
-                      <span style={{ color: `${team.colors.primary}77` }}>{item.date}</span>
+                    <p className="text-xs mb-2 line-clamp-2 text-gray-400">{item.snippet}</p>
+                    <div className="flex items-center gap-2 text-xs text-gray-500">
+                      <span>{item.source}</span>
+                      <span className="text-gray-600">&middot;</span>
+                      <span>{item.date}</span>
                     </div>
                   </a>
                 ))}
