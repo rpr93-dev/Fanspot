@@ -16,32 +16,33 @@ function extractStats(a: any, categoryName?: string): Record<string, string> {
     }
   }
 
-  // Sources to check
-  const sources = [a?.stats, a?.statistics, a?.values]
+  // Sources to check (a.values handled by category-level pairing, not here)
+  const sources = [a?.stats, a?.statistics]
 
   for (const source of sources) {
     if (source == null) continue
 
     // Array source: [{ name, displayValue }, ...]
     if (Array.isArray(source)) {
-      for (const entry of source) {
-        if (!entry || typeof entry !== 'object') continue
-        const key = statIdKeys.reduce((found, k) => found || entry?.[k], '')
-        if (key) {
-          const val = statValKeys.reduce((found, k) => found ?? entry?.[k], undefined)
-          addEntry(key, val)
-        } else {
-          // No identifier key — try positional mapping from displayNames
-          addEntry(categoryName ?? 'stat', entry)
+      for (let i = 0; i < source.length; i++) {
+        const entry = source[i]
+        if (entry && typeof entry === 'object') {
+          const key = statIdKeys.reduce((found, k) => found || (entry as any)?.[k], '')
+          if (key) {
+            const val = statValKeys.reduce((found, k) => found ?? (entry as any)?.[k], undefined)
+            addEntry(key, val)
+          } else {
+            addEntry(categoryName ?? `__c${i}`, entry)
+          }
         }
       }
       if (Object.keys(stats).length > 0) return stats
     }
 
     // Object source: { statName: { displayValue, value } }
-    if (typeof source === 'object') {
+    if (typeof source === 'object' && !Array.isArray(source)) {
       for (const key of Object.keys(source)) {
-        addEntry(key, source[key])
+        addEntry(key, (source as any)[key])
       }
       if (Object.keys(stats).length > 0) return stats
     }
