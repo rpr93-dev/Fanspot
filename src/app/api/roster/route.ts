@@ -18,7 +18,7 @@ export async function GET(request: Request) {
   try {
     const res = await fetch(
       `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${team.toUpperCase()}/roster`,
-      { next: { revalidate: 300 } }
+      { signal: AbortSignal.timeout(15000), next: { revalidate: 300 } }
     )
     if (!res.ok) {
       return NextResponse.json({ error: `ESPN API error ${res.status}` }, { status: res.status })

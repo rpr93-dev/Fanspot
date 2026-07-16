@@ -31,7 +31,7 @@ export async function GET(request: Request) {
   }
 
   try {
-    const res = await fetch(url, { next: { revalidate: 300 } })
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000), next: { revalidate: 300 } })
     if (!res.ok) {
       return NextResponse.json({ error: `ESPN API error ${res.status}` }, { status: res.status })
     }

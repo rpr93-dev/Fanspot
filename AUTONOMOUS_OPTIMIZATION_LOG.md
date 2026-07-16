@@ -67,3 +67,41 @@ The `BoxScorePanel` component created new object/array/function references on ev
 ### Tradeoffs
 - None. These values are truly static and belong at module scope.
 
+## Commit 3 — Extract shared espnSportMap constant
+
+**Commit hash**: `d1d490d`
+**Date**: 2026-07-16
+
+### Problem
+The identical `espnSportMap` (`{ NFL: 'football/nfl', NBA: 'basketball/nba', ... }`) was defined as a local `const` in 5 API route files:
+- `schedule/route.ts`
+- `standings/route.ts`
+- `odds/route.ts`
+- `roster/route.ts`
+- `box-score/route.ts`
+
+Any change to an ESPN API path (e.g., adding a new sport) required updating all 5 files. This is a maintenance risk.
+
+### Solution
+- Exported `espnSportMap` from `src/lib/providers/espn.ts` (which already contains ESPN-specific path logic like `getEspnAbbr`)
+- Replaced all 5 local definitions with `import { espnSportMap } from '@/lib/providers/espn'`
+
+### Benefits
+- **Maintainability**: Single source of truth for ESPN API path mapping
+- **Consistency**: Eliminates risk of drift between route files
+
+### Verification
+- `npm run build` — passed (TypeScript + production build)
+
+### Files modified
+- `src/lib/providers/espn.ts` (added export)
+- `src/app/api/schedule/route.ts` (removed local, added import)
+- `src/app/api/standings/route.ts` (removed local, added to existing import)
+- `src/app/api/odds/route.ts` (removed local, added import)
+- `src/app/api/roster/route.ts` (removed local, added import)
+- `src/app/api/box-score/route.ts` (removed local, added import)
+
+### Tradeoffs
+- Adds a dependency from API route files to `@/lib/providers/espn.ts`. However, `standings/route.ts` already had this dependency, so it's not a new coupling pattern.
+
+

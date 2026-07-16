@@ -144,7 +144,8 @@ export async function GET(request: Request) {
         const startMonth = sport.toUpperCase() === 'NFL' ? '08' : '10'
 
         const res = await fetch(
-          `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${seasonYear}${startMonth}01-${year}${endMonth}28&limit=300`
+          `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${seasonYear}${startMonth}01-${year}${endMonth}28&limit=300`,
+          { signal: AbortSignal.timeout(15000) }
         )
         if (res.ok) {
           const data = await res.json()
@@ -177,7 +178,8 @@ export async function GET(request: Request) {
         const nextYear = sport.toUpperCase() === 'NFL' ? year + 1 : year
 
         const res = await fetch(
-          `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${year}${startMonth}01-${nextYear}${endDate}&limit=300`
+          `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${year}${startMonth}01-${nextYear}${endDate}&limit=300`,
+          { signal: AbortSignal.timeout(15000) }
         )
         if (res.ok) {
           const data = await res.json()

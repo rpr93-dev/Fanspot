@@ -100,7 +100,7 @@ export async function GET(request: Request) {
       const schedUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${team.toUpperCase()}/schedule`
       log(`Fetching schedule: ${schedUrl}`)
 
-      const schedRes = await fetch(schedUrl, { next: { revalidate: 60 } })
+      const schedRes = await fetch(schedUrl, { signal: AbortSignal.timeout(15000), next: { revalidate: 60 } })
       if (!schedRes.ok) {
         log(`Schedule fetch failed: ${schedRes.status} ${schedRes.statusText}`)
         return NextResponse.json({ odds: null, source: 'espn' })
@@ -137,7 +137,7 @@ export async function GET(request: Request) {
     const sbUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${gameDate}&limit=100`
     log(`Fetching scoreboard: ${sbUrl}`)
 
-    const sbRes = await fetch(sbUrl, { next: { revalidate: 60 } })
+    const sbRes = await fetch(sbUrl, { signal: AbortSignal.timeout(15000), next: { revalidate: 60 } })
     if (!sbRes.ok) {
       log(`Scoreboard fetch failed: ${sbRes.status} ${sbRes.statusText}`)
       return NextResponse.json({ odds: null, source: 'espn' })
