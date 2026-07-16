@@ -54,7 +54,7 @@ interface OddsInfo {
 
 interface TeamDashboardData {
   upcoming: { date: string; opponent: string; opponentLogo: string; location: 'home' | 'away'; venue?: string; isPreseason?: boolean } | null
-  lastFive: { date: string; opponent: string; opponentLogo: string; result: 'W' | 'L'; score: string; isPreseason?: boolean }[]
+  lastFive: { date: string; opponent: string; opponentLogo: string; result: 'W' | 'L'; score: string; eventId: string; isPreseason?: boolean }[]
   oddsInfo: OddsInfo | null
   news: { title: string; source: string; date: string; snippet: string; url: string }[]
   standings: ConferenceGroup[]
@@ -109,6 +109,9 @@ export default function TeamDashboard() {
   const [showRoster, setShowRoster] = useState(false)
   const [rosterData, setRosterData] = useState<any[] | null>(null)
   const [rosterLoading, setRosterLoading] = useState(false)
+  const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
+  const [boxScoreData, setBoxScoreData] = useState<any>(null)
+  const [boxScoreLoading, setBoxScoreLoading] = useState(false)
   const upcomingGameRef = useRef<{ id: string; date: string } | null>(null)
 
   const team = teams.find((t) => t.id === teamId && t.sport === sport.toUpperCase())
@@ -184,7 +187,7 @@ export default function TeamDashboard() {
 
     load()
     return () => { cancelled = true }
-  }, [team])
+  }, [team?.id])
 
   useEffect(() => {
     if (!showRoster || rosterData || rosterLoading || !team) return
@@ -197,7 +200,7 @@ export default function TeamDashboard() {
         setRosterLoading(false)
       })
       .catch(() => setRosterLoading(false))
-  }, [showRoster])
+  }, [showRoster, team?.id])
 
   // Odds poll every 30s
   useEffect(() => {
@@ -275,6 +278,21 @@ export default function TeamDashboard() {
     }, 300000)
     return () => clearInterval(id)
   }, [team?.id])
+
+  // Box score fetch on game click
+  useEffect(() => {
+    if (!selectedGameId || !team) return
+    setBoxScoreLoading(true)
+    setBoxScoreData(null)
+    const abbr = getEspnAbbr(team.id, team.abbreviation)
+    fetch(`/api/box-score?sport=${team.sport}&eventId=${selectedGameId}`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((res) => {
+        setBoxScoreData(res?.boxScore ?? null)
+        setBoxScoreLoading(false)
+      })
+      .catch(() => setBoxScoreLoading(false))
+  }, [selectedGameId, team?.id])
 
   if (!team || !config) {
     return (
@@ -387,6 +405,49 @@ export default function TeamDashboard() {
             loading={rosterLoading}
             onBack={() => setShowRoster(false)}
           />
+        ) : selectedGameId ? (
+          <>
+            <div className="mb-5">
+              <div className="rounded-xl p-4" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
+                <div className="flex items-center justify-between mb-3">
+                  <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">Last 5 Games</h2>
+                  {data?.teamStanding && <span className="text-xs text-gray-500">{data.teamStanding}</span>}
+                </div>
+                {data?.lastFive.length ? (
+                  <div className="grid grid-cols-5 gap-2">
+                    {data.lastFive.map((game, i) => (
+                      <div key={i} className="rounded-lg p-2 flex flex-col items-center text-center transition-all cursor-pointer" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : 'transparent'}` }}
+                        onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18` }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a` }}>
+                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-medium mb-0.5 ${
+                          game.result === 'W' ? 'text-green-400' : 'text-red-400'
+                        }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)' }}>
+                          {game.result}
+                        </span>
+                        {game.opponentLogo && (
+                          <img src={game.opponentLogo} alt="" className="w-5 h-5 object-contain mb-0.5" />
+                        )}
+                        <span className="text-[11px] text-white/80 truncate max-w-full">{game.opponent}</span>
+                        <span className="text-[11px] text-gray-400">{game.score}</span>
+                        {game.isPreseason && <span className="text-[9px] text-amber-400/70">Pre</span>}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-gray-500">No recent games</p>
+                )}
+              </div>
+            </div>
+            <BoxScorePanel
+              data={boxScoreData}
+              loading={boxScoreLoading}
+              teamAbbr={getEspnAbbr(team.id, team.abbreviation)}
+              teamColor={team.colors.primary}
+              sport={team.sport}
+              onBack={() => { setSelectedGameId(null); setBoxScoreData(null) }}
+            />
+          </>
         ) : (
           <>
             <div className="mb-5">
@@ -404,7 +465,8 @@ export default function TeamDashboard() {
                 ) : data?.lastFive.length ? (
                   <div className="grid grid-cols-5 gap-3 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
                     {data.lastFive.map((game, i) => (
-                      <div key={i} className="rounded-lg p-3 flex flex-col items-center text-center transition-colors" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${team.colors.primary}10` }}
+                      <div key={i} className="rounded-lg p-3 flex flex-col items-center text-center transition-all cursor-pointer" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : team.colors.primary}10` }}
+                        onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}
                         onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18` }}
                         onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a` }}>
                         <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium mb-1 ${
@@ -528,6 +590,184 @@ export default function TeamDashboard() {
   )
 }
 
+function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { data: any; loading: boolean; teamAbbr: string; teamColor: string; sport: string; onBack: () => void }) {
+  const [showTeamStats, setShowTeamStats] = useState(false)
+  const periodLabels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+
+  const ourIdx = data?.teams?.findIndex((t: any) => t.abbreviation === teamAbbr) ?? -1
+  const oppIdx = ourIdx === 0 ? 1 : 0
+  const ourTeam = ourIdx >= 0 ? data?.teams?.[ourIdx] : null
+  const oppTeam = oppIdx >= 0 ? data?.teams?.[oppIdx] : null
+  const maxPeriods = Math.max(ourTeam?.linescores?.length ?? 0, oppTeam?.linescores?.length ?? 0)
+
+  const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0)
+
+  const sortedPlayerStats = [...(data?.playerStats ?? [])].sort((a, b) => {
+    if (a.teamAbbr === teamAbbr) return -1
+    if (b.teamAbbr === teamAbbr) return 1
+    return 0
+  })
+
+  const teamStatKeys: Record<string, string[]> = {
+    NFL: ['totalFirstDowns', 'totalYards', 'passingYards', 'rushingYards', 'turnovers'],
+    NBA: ['fieldGoalPct', 'threePointPct', 'freeThrowPct', 'totalRebounds', 'assists', 'steals', 'blocks', 'turnovers'],
+    NHL: ['shotsOnGoal', 'faceoffWinPct', 'powerPlayPct', 'penaltyMinutes', 'blockedShots', 'hits'],
+    MLB: ['runs', 'hits', 'errors', 'homeRuns', 'walks', 'strikeouts'],
+  }
+
+  const teamStatLabels: Record<string, string> = {
+    totalFirstDowns: '1st Downs', totalYards: 'Total Yards', passingYards: 'Pass', rushingYards: 'Rush',
+    turnovers: 'TO', fieldGoalPct: 'FG%', threePointPct: '3P%', freeThrowPct: 'FT%',
+    totalRebounds: 'REB', assists: 'AST', steals: 'STL', blocks: 'BLK',
+    shotsOnGoal: 'SOG', faceoffWinPct: 'FO%', powerPlayPct: 'PP%', penaltyMinutes: 'PIM',
+    blockedShots: 'Blk', hits: 'Hits', runs: 'R', errors: 'E', homeRuns: 'HR', walks: 'BB',
+    strikeouts: 'K',
+  }
+
+  const hasAnyPlayerStats = sortedPlayerStats.some((t: any) => t.athletes?.length > 0)
+
+  return (
+    <div className="animate-fade-in-up mt-5 pt-4" style={{ borderTop: `1px solid ${teamColor}15` }}>
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="text-xs font-medium tracking-wider uppercase text-gray-400">Box Score</h3>
+        <div className="flex items-center gap-2">
+          {hasAnyPlayerStats && (
+            <button onClick={() => setShowTeamStats((v) => !v)}
+              className="text-xs px-2.5 py-1 rounded-full transition-colors text-gray-400 hover:text-white"
+              style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
+              {showTeamStats ? 'Player Stats' : 'Team Stats'}
+            </button>
+          )}
+          <button onClick={onBack}
+            className="text-xs px-2.5 py-1 rounded-full transition-colors text-gray-400 hover:text-white"
+            style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
+            &larr; Back
+          </button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="animate-pulse space-y-3">
+          <div className="h-24 rounded-lg" style={{ backgroundColor: `${teamColor}10` }} />
+        </div>
+      ) : !data?.teams?.length ? (
+        <p className="text-sm text-gray-500">Box score unavailable</p>
+      ) : (
+        <div className="space-y-4">
+          {/* Period scores table */}
+          {maxPeriods > 0 && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-500">
+                    <th className="text-left pr-3 pb-1 font-medium" />
+                    {Array.from({ length: maxPeriods }, (_, i) => (
+                      <th key={i} className="text-center px-2 pb-1 font-medium">{periodLabels[i]}</th>
+                    ))}
+                    <th className="text-center pl-3 pb-1 font-medium text-white/60">T</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="text-white/80">
+                    <td className="pr-3 py-1 font-medium truncate max-w-24">{ourTeam?.displayName ?? 'Home'}</td>
+                    {Array.from({ length: maxPeriods }, (_, i) => (
+                      <td key={i} className="text-center px-2 py-1 font-mono">{ourTeam?.linescores?.[i] ?? '-'}</td>
+                    ))}
+                    <td className="text-center pl-3 py-1 font-mono text-white font-medium">{ourTeam ? sum(ourTeam.linescores) : '-'}</td>
+                  </tr>
+                  <tr className="text-white/80">
+                    <td className="pr-3 py-1 font-medium truncate max-w-24">{oppTeam?.displayName ?? 'Away'}</td>
+                    {Array.from({ length: maxPeriods }, (_, i) => (
+                      <td key={i} className="text-center px-2 py-1 font-mono">{oppTeam?.linescores?.[i] ?? '-'}</td>
+                    ))}
+                    <td className="text-center pl-3 py-1 font-mono text-white font-medium">{oppTeam ? sum(oppTeam.linescores) : '-'}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* Player stats (default view) */}
+          {!showTeamStats && hasAnyPlayerStats && (
+            <div className="space-y-5">
+              {sortedPlayerStats.map((team: any, ti: number) => {
+                const isOurTeam = team.teamAbbr === teamAbbr
+                const names = team.statNames ?? []
+                return (
+                  <div key={team.teamAbbr || ti}>
+                    <p className="text-xs font-medium mb-2 text-white/70">{isOurTeam ? team.teamAbbr : `${team.teamAbbr} (Opp)`}</p>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="text-gray-600">
+                            <th className="text-left pr-2 py-0.5 font-medium">#</th>
+                            <th className="text-left pr-3 py-0.5 font-medium">Player</th>
+                            {names.map((n: string, ni: number) => (
+                              <th key={`${n}-${ni}`} className="text-center px-1.5 py-0.5 font-medium text-gray-500">{n.replace(/([A-Z])/g, ' $1').trim().toUpperCase()}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {team.athletes.map((a: any, ai: number) => (
+                            <tr key={a.id || ai} className="text-white/70">
+                              <td className="pr-2 py-0.5 font-mono text-gray-500 text-right">{a.jersey ?? ''}</td>
+                              <td className="pr-3 py-0.5 truncate max-w-28">{a.displayName}{a.position ? ` (${a.position})` : ''}</td>
+                              {names.map((n: string, ni: number) => (
+                                <td key={`${n}-${ni}`} className="text-center px-1.5 py-0.5 font-mono">{a.stats?.[n] ?? '-'}</td>
+                              ))}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Team stats (toggle view) */}
+          {showTeamStats && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-500">
+                    <th className="text-left pr-3 pb-1 font-medium">Stat</th>
+                    <th className="text-center px-2 pb-1 font-medium">{ourTeam?.abbreviation ?? 'Home'}</th>
+                    <th className="text-center pl-3 pb-1 font-medium">{oppTeam?.abbreviation ?? 'Away'}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(ourTeam?.statistics ?? []).filter(
+                    (s: any) => Object.keys(teamStatKeys).some((k) => teamStatKeys[k].includes(s.name))
+                  ).map((stat: any, i: number) => {
+                    const oppStat = oppTeam?.statistics?.find((s: any) => s.name === stat.name)
+                    return (
+                      <tr key={stat.name ?? i} className="text-white/70">
+                        <td className="pr-3 py-1 text-gray-400">{teamStatLabels[stat.name] ?? stat.name}</td>
+                        <td className="text-center px-2 py-1 font-mono">{stat.displayValue ?? '-'}</td>
+                        <td className="text-center pl-3 py-1 font-mono">{oppStat?.displayValue ?? '-'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {!hasAnyPlayerStats && !showTeamStats && (
+            <p className="text-sm text-gray-500">Player stats not yet available</p>
+          )}
+
+          {data?.status && (
+            <p className="text-[10px] text-gray-600">{data.status.shortDetail ?? data.status.description}</p>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFive: EspnEvent[] }, espnAbbr: string, sport: string) {
   const lastFive = schedule.lastFive.map((e) => {
     const opp = getOpponent(e, espnAbbr, sport)
@@ -537,6 +777,7 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
       opponentLogo: opp.logo,
       result: getResult(e, espnAbbr),
       score: getScore(e, espnAbbr),
+      eventId: e.id,
       isPreseason: e.seasonType?.type === 1 || e.season?.type === 1,
     }
   })
