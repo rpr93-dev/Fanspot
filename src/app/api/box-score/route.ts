@@ -1,6 +1,71 @@
 import { NextResponse } from 'next/server'
 import { espnSportMap } from '@/lib/providers/espn'
 
+const reservedKeys = new Set(['athlete', 'stats', 'statistics', 'displayValue', 'value', 'team', 'id', 'uid', 'guid', 'type', 'slug', 'sequence'])
+
+const statIdKeys = ['name', 'label', 'abbreviation', 'displayName', 'key', 'id']
+const statValKeys = ['displayValue', 'value', 'stat', 'number']
+
+function extractStats(a: any, categoryName?: string): Record<string, string> {
+  const stats: Record<string, string> = {}
+
+  const addEntry = (key: string, val: any) => {
+    const v = val?.displayValue ?? val?.value ?? val
+    if (key && v !== undefined && v !== null && v !== '') {
+      stats[String(key)] = String(v)
+    }
+  }
+
+  // Sources to check
+  const sources = [a?.stats, a?.statistics, a?.values]
+
+  for (const source of sources) {
+    if (source == null) continue
+
+    // Array source: [{ name, displayValue }, ...]
+    if (Array.isArray(source)) {
+      for (const entry of source) {
+        if (!entry || typeof entry !== 'object') continue
+        const key = statIdKeys.reduce((found, k) => found || entry?.[k], '')
+        if (key) {
+          const val = statValKeys.reduce((found, k) => found ?? entry?.[k], undefined)
+          addEntry(key, val)
+        } else {
+          // No identifier key — try positional mapping from displayNames
+          addEntry(categoryName ?? 'stat', entry)
+        }
+      }
+      if (Object.keys(stats).length > 0) return stats
+    }
+
+    // Object source: { statName: { displayValue, value } }
+    if (typeof source === 'object') {
+      for (const key of Object.keys(source)) {
+        addEntry(key, source[key])
+      }
+      if (Object.keys(stats).length > 0) return stats
+    }
+  }
+
+  // Category-level stat: a.displayValue / a.value
+  const dv = a?.displayValue ?? a?.value
+  if (dv !== undefined && dv !== null && categoryName) {
+    stats[categoryName] = String(dv)
+    return stats
+  }
+
+  // Direct properties on a (catches flattened stats like a.completions = "21")
+  for (const key of Object.keys(a ?? {})) {
+    if (reservedKeys.has(key)) continue
+    const val = a[key]
+    if (val != null && (typeof val === 'string' || typeof val === 'number' || typeof val === 'boolean')) {
+      stats[key] = String(val)
+    }
+  }
+
+  return stats
+}
+
 function extractLinescores(teamData: any): number[] {
   const raw = teamData?.linescores
   if (!raw || !Array.isArray(raw)) return []
@@ -28,45 +93,6 @@ function extractHeaderLinescores(competitor: any): number[] {
     }
     return 0
   })
-}
-
-function extractStats(a: any): Record<string, string> {
-  const stats: Record<string, string> = {}
-
-  // Format 1: a.stats = [{ name, displayValue }, ...]
-  if (Array.isArray(a.stats)) {
-    for (const s of a.stats) {
-      if (s?.name) stats[s.name] = s.displayValue ?? String(s.value ?? '')
-    }
-  }
-
-  // Format 2: a.stats = { statName: { displayValue, value }, ... }
-  if (a.stats && typeof a.stats === 'object' && !Array.isArray(a.stats)) {
-    for (const key of Object.keys(a.stats)) {
-      const val = a.stats[key]
-      if (val && typeof val === 'object') {
-        stats[key] = val.displayValue ?? String(val.value ?? '')
-      }
-    }
-  }
-
-  // Format 3: a.statistics = [{ name, displayValue }, ...]
-  if (Array.isArray(a.statistics)) {
-    for (const s of a.statistics) {
-      if (s?.name) stats[s.name] = s.displayValue ?? String(s.value ?? '')
-    }
-  }
-
-  // Format 4: Direct string/number properties on a
-  for (const key of Object.keys(a)) {
-    if (['athlete', 'stats', 'statistics', 'displayValue', 'value'].includes(key)) continue
-    const val = a[key]
-    if (val && (typeof val === 'string' || typeof val === 'number')) {
-      stats[key] = String(val)
-    }
-  }
-
-  return stats
 }
 
 export async function GET(request: Request) {
@@ -138,10 +164,16 @@ export async function GET(request: Request) {
           for (const a of (cat.athletes ?? [])) {
             const id = a.athlete?.id
             if (!id) continue
-            const stats = extractStats(a)
+            const stats = extractStats(a, raw)
+            // Positional pairing: cat.labels / cat.displayNames + a.values
             if (Object.keys(stats).length === 0) {
-              const dv = a.displayValue ?? a.value
-              if (dv !== undefined && dv !== null) stats[raw] = String(dv)
+              const labels = cat.labels ?? cat.displayNames?.map((d: any) => d.displayName ?? d.name ?? '') ?? []
+              const values = a.values ?? []
+              if (labels.length > 0 && values.length > 0) {
+                for (let i = 0; i < Math.min(labels.length, values.length); i++) {
+                  if (labels[i]) stats[labels[i]] = String(values[i])
+                }
+              }
             }
             for (const key of Object.keys(stats)) statNames.add(key)
             athletes.push({
@@ -168,6 +200,23 @@ export async function GET(request: Request) {
 
     const status = data?.header?.competitions?.[0]?.status?.type
 
+    // Debug: raw athlete structure for first category of first team
+    let debug: any = null
+    try {
+      const firstPlayer = boxscore.players?.[0]
+      const firstCat = firstPlayer?.statistics?.[0]
+      const firstAth = firstCat?.athletes?.[0]
+      if (firstAth) {
+        debug = {
+          categoryName: firstCat?.name,
+          athleteKeys: Object.keys(firstAth),
+          rawAthlete: JSON.parse(JSON.stringify(firstAth)),
+          rawAthleteStats: firstAth?.stats,
+          extractedStats: extractStats(firstAth, firstCat?.name ?? ''),
+        }
+      }
+    } catch { /* non-fatal */ }
+
     return NextResponse.json({
       boxScore: {
         teams,
@@ -181,6 +230,7 @@ export async function GET(request: Request) {
               shortDetail: status.shortDetail,
             }
           : null,
+        _debug: debug,
       },
     }, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
   } catch (err) {
