@@ -1,5 +1,12 @@
 import type { EspnEvent, EspnArticle } from '@/lib/sports-api'
 
+export const espnSportMap: Record<string, string> = {
+  NFL: 'football/nfl',
+  NBA: 'basketball/nba',
+  NHL: 'hockey/nhl',
+  MLB: 'baseball/mlb',
+}
+
 const espnTeamAbbr: Record<string, string> = {
   was: 'WSH', la_: 'LA', phi_76: 'PHI', dal_nba: 'DAL', lac_nba: 'LAC',
   no_nba: 'NO', sas: 'SA', uth: 'UTAH', tor_nhl: 'TOR', tb_nhl: 'TB',

@@ -33,3 +33,37 @@ Three `useEffect` hooks in `page.tsx` had incorrect or incomplete dependency arr
 
 ### Follow-up
 - Future: Add AbortController to all fetch effects to prevent stale response handling
+
+## Commit 2 — Reduce unnecessary re-renders in BoxScorePanel
+
+**Commit hash**: `470453e`
+**Date**: 2026-07-16
+
+### Problem
+The `BoxScorePanel` component created new object/array/function references on every render:
+
+1. **`periodLabels`** — new array `['1', '2', ..., '12']` created every render
+2. **`sum`** — new arrow function created every render
+3. **`teamStatKeys`** — 4 arrays and 1 record object created every render
+4. **`teamStatLabels`** — Record with 24 entries created every render
+5. **`sortedPlayerStats`** — Array spread + sort executed on every render, even when `data.playerStats` and `teamAbbr` haven't changed
+
+### Solution
+- Hoisted `periodLabels`, `sum`, `teamStatKeys`, `teamStatLabels` to module scope (created once at module load)
+- Wrapped `sortedPlayerStats` in `useMemo` with `[data?.playerStats, teamAbbr]` dependencies
+- All changes are purely additive optimizations — no behavior change
+
+### Benefits
+- **Performance**: ~100+ fewer object allocations per render of BoxScorePanel
+- **Performance**: `sortedPlayerStats` sort (O(n log n) for up to ~100 athletes) skips when dependencies haven't changed
+- **Readability**: Constants are clearly static at the module level
+
+### Verification
+- `npm run build` — passed (TypeScript + production build)
+
+### Files modified
+- `src/app/[sport]/[team]/page.tsx`
+
+### Tradeoffs
+- None. These values are truly static and belong at module scope.
+

@@ -1,11 +1,5 @@
 import { NextResponse } from 'next/server'
-
-const espnSportMap: Record<string, string> = {
-  NFL: 'football/nfl',
-  NBA: 'basketball/nba',
-  NHL: 'hockey/nhl',
-  MLB: 'baseball/mlb',
-}
+import { espnSportMap } from '@/lib/providers/espn'
 
 const log = (msg: string) => console.log(`[odds] ${msg}`)
 

@@ -1,11 +1,5 @@
 import { NextResponse } from 'next/server'
-
-const espnSportMap: Record<string, string> = {
-  NFL: 'football/nfl',
-  NBA: 'basketball/nba',
-  NHL: 'hockey/nhl',
-  MLB: 'baseball/mlb',
-}
+import { espnSportMap } from '@/lib/providers/espn'
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)

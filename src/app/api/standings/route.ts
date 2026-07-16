@@ -1,13 +1,6 @@
 import { NextResponse } from 'next/server'
 import { teams } from '@/data/teams'
-import { getEspnAbbr } from '@/lib/providers/espn'
-
-const espnSportMap: Record<string, string> = {
-  NFL: 'football/nfl',
-  NBA: 'basketball/nba',
-  NHL: 'hockey/nhl',
-  MLB: 'baseball/mlb',
-}
+import { getEspnAbbr, espnSportMap } from '@/lib/providers/espn'
 
 interface StandingRow {
   abbr: string
