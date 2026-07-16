@@ -59,7 +59,7 @@ function extractStats(a: any): Record<string, string> {
 
   // Format 4: Direct string/number properties on a
   for (const key of Object.keys(a)) {
-    if (['athlete', 'stats', 'statistics'].includes(key)) continue
+    if (['athlete', 'stats', 'statistics', 'displayValue', 'value'].includes(key)) continue
     const val = a[key]
     if (val && (typeof val === 'string' || typeof val === 'number')) {
       stats[key] = String(val)
@@ -139,6 +139,10 @@ export async function GET(request: Request) {
             const id = a.athlete?.id
             if (!id) continue
             const stats = extractStats(a)
+            if (Object.keys(stats).length === 0) {
+              const dv = a.displayValue ?? a.value
+              if (dv !== undefined && dv !== null) stats[raw] = String(dv)
+            }
             for (const key of Object.keys(stats)) statNames.add(key)
             athletes.push({
               id,

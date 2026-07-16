@@ -670,13 +670,11 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-medium tracking-wider uppercase text-gray-400">Box Score</h3>
         <div className="flex items-center gap-2">
-          {hasAnyPlayerStats && (
-            <button onClick={() => setShowPlayerStats((v) => !v)}
-              className="text-xs px-2 py-1 rounded transition-colors text-gray-400 hover:text-white"
-              style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
-              {showPlayerStats ? 'Team Stats' : 'Player Stats'}
-            </button>
-          )}
+          <button onClick={() => setShowPlayerStats((v) => !v)}
+            className="text-xs px-2 py-1 rounded transition-colors text-gray-400 hover:text-white"
+            style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
+            {showPlayerStats ? 'Team Stats' : 'Player Stats'}
+          </button>
           <button onClick={onBack}
             className="text-xs px-2 py-1 rounded transition-colors text-gray-400 hover:text-white"
             style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
@@ -754,15 +752,15 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
             </>
           )}
 
-          {/* Player stats (toggle view) */}
+          {/* Player stats (toggle view) — side by side */}
           {showPlayerStats && (
             <>
               {hasAnyPlayerStats ? (
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {sortedPlayerStats.map((team: any, ti: number) => (
                     <div key={team.teamAbbr || ti}>
                       <p className="text-xs font-medium mb-2 text-white/70">
-                        {team.teamAbbr === teamAbbr ? team.teamAbbr : `${team.teamAbbr} (Opp)`}
+                        {team.teamAbbr === teamAbbr ? team.teamAbbr : `${team.teamAbbr}`}
                       </p>
                       {team.categories.map((cat: any, ci: number) => (
                         <div key={cat.label || `cat-${ci}`} className="mb-3">
