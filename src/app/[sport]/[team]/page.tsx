@@ -618,45 +618,6 @@ const teamStatLabels: Record<string, string> = {
   pitchesThrown: 'Pitches', strikesThrown: 'Strikes',
 }
 
-const statCategoryGroup: Record<string, { label: string; pattern: RegExp }[]> = {
-  NFL: [
-    { label: 'First Downs', pattern: /firstDown/i },
-    { label: 'Offense', pattern: /(Yards|Pass|Rush|Net|Gross)/i },
-    { label: 'Efficiency', pattern: /(Efficiency|Pct|ThirdDown|FourthDown|RedZone)/i },
-    { label: 'Defense', pattern: /(Tackle|Sack|Int|Fumble|Safet|Def)/i },
-    { label: 'Turnovers', pattern: /(Turnover|TO|Lost)/i },
-    { label: 'Penalties', pattern: /Penalt/i },
-    { label: 'Kicking', pattern: /(Kick|Punt|FG|XPA|KO)/i },
-    { label: 'Returns', pattern: /Return/i },
-    { label: 'Other', pattern: /(Possession|Time)/i },
-  ],
-  NBA: [
-    { label: 'Field Goals', pattern: /(FieldGoal|FG)/i },
-    { label: 'Three Pointers', pattern: /(ThreePoint|ThreePt|3P)/i },
-    { label: 'Free Throws', pattern: /(FreeThrow|FT)/i },
-    { label: 'Rebounds', pattern: /(Rebound|Reb)/i },
-    { label: 'Scoring', pattern: /(Points|Pts|Score)/i },
-    { label: 'Playmaking', pattern: /(Assist|Ast)/i },
-    { label: 'Defense', pattern: /(Steal|Stl|Block|Blk)/i },
-    { label: 'Other', pattern: /(Turnover|TO|Foul)/i },
-  ],
-  NHL: [
-    { label: 'Shots', pattern: /(Shot|SOG)/i },
-    { label: 'Faceoffs', pattern: /Faceoff/i },
-    { label: 'Special Teams', pattern: /(PowerPlay|PP|PenaltyKill|PK|ShortHande|SH)/i },
-    { label: 'Penalties', pattern: /(Penalt|PIM)/i },
-    { label: 'Defense', pattern: /(BlockedShot|Blk|Hit)/i },
-    { label: 'Other', pattern: /(Giveaway|Takeaway)/i },
-  ],
-  MLB: [
-    { label: 'Batting', pattern: /(AtBat|Hits|Runs|Avg|OBP|Slg|OPS|RBI|HomeRun|HR|Hit)/i },
-    { label: 'Pitching', pattern: /(Pitch|ERA|WHIP|Inning|EarnedRun)/i },
-    { label: 'Walks & Ks', pattern: /(Walk|BB|Strikeout|K)/i },
-    { label: 'Fielding', pattern: /(Error|Field|PutOut|Assist|DP|FLD)/i },
-    { label: 'Baserunning', pattern: /(Stolen|SB|CS)/i },
-  ],
-}
-
 function prettifyName(name: string): string {
   return name
     .replace(/([A-Z])/g, ' $1')
@@ -682,45 +643,42 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
     [data?.playerStats, teamAbbr],
   )
 
-  const hasAnyPlayerStats = sortedPlayerStats.some((t: any) => t.athletes?.length > 0)
+  const hasAnyPlayerStats = sortedPlayerStats.some((t: any) => t.categories?.some((c: any) => c.athletes?.length > 0))
 
-  const teamStatGroups = useMemo(() => {
-    if (!ourTeam?.statistics || !oppTeam?.statistics) return []
-    const categories = statCategoryGroup[sport] ?? [{ label: 'Stats', pattern: /.*/ }]
-    const groups: { label: string; stats: { name: string; our: string; opp: string }[] }[] =
-      categories.map((c) => ({ label: c.label, stats: [] }))
-    const seen = new Set<string>()
-    for (const s of [...(ourTeam.statistics ?? []), ...(oppTeam.statistics ?? [])]) {
-      if (seen.has(s.name)) continue
-      seen.add(s.name)
-      const ourStat = ourTeam.statistics.find((x: any) => x.name === s.name)
-      const oppStat = oppTeam.statistics.find((x: any) => x.name === s.name)
-      const idx = categories.findIndex((c) => c.pattern.test(s.name))
-      if (idx >= 0) {
-        groups[idx].stats.push({
-          name: s.name,
-          our: ourStat?.displayValue ?? '-',
-          opp: oppStat?.displayValue ?? '-',
-        })
+  const allStats = useMemo(() => {
+    if (!ourTeam?.statistics?.length && !oppTeam?.statistics?.length) return []
+    const names = new Set<string>()
+    const rows: { name: string; our: string; opp: string }[] = []
+    for (const s of ourTeam?.statistics ?? []) {
+      if (!names.has(s.name)) {
+        names.add(s.name)
+        const opp = oppTeam?.statistics?.find((x: any) => x.name === s.name)
+        rows.push({ name: s.name, our: s.displayValue ?? '-', opp: opp?.displayValue ?? '-' })
       }
     }
-    return groups.filter((g) => g.stats.length > 0)
-  }, [ourTeam, oppTeam, sport])
+    for (const s of oppTeam?.statistics ?? []) {
+      if (!names.has(s.name)) {
+        names.add(s.name)
+        rows.push({ name: s.name, our: '-', opp: s.displayValue ?? '-' })
+      }
+    }
+    return rows
+  }, [ourTeam, oppTeam])
 
   return (
-    <div className="animate-fade-in-up mt-5 pt-4" style={{ borderTop: `1px solid ${teamColor}15` }}>
-      <div className="flex items-center justify-between mb-3">
+    <div className="animate-fade-in-up mt-4 pt-3" style={{ borderTop: `1px solid ${teamColor}15` }}>
+      <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-medium tracking-wider uppercase text-gray-400">Box Score</h3>
         <div className="flex items-center gap-2">
           {hasAnyPlayerStats && (
             <button onClick={() => setShowPlayerStats((v) => !v)}
-              className="text-xs px-2.5 py-1 rounded-full transition-colors text-gray-400 hover:text-white"
+              className="text-xs px-2 py-1 rounded transition-colors text-gray-400 hover:text-white"
               style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
               {showPlayerStats ? 'Team Stats' : 'Player Stats'}
             </button>
           )}
           <button onClick={onBack}
-            className="text-xs px-2.5 py-1 rounded-full transition-colors text-gray-400 hover:text-white"
+            className="text-xs px-2 py-1 rounded transition-colors text-gray-400 hover:text-white"
             style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
             &larr; Back
           </button>
@@ -728,120 +686,129 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
       </div>
 
       {loading ? (
-        <div className="animate-pulse space-y-3">
-          <div className="h-24 rounded-lg" style={{ backgroundColor: `${teamColor}10` }} />
-        </div>
+        <div className="animate-pulse"><div className="h-20 rounded-lg" style={{ backgroundColor: `${teamColor}10` }} /></div>
       ) : !data?.teams?.length ? (
         <p className="text-sm text-gray-500">Box score unavailable</p>
-      ) : showPlayerStats ? (
-        <div className="space-y-5">
-          {sortedPlayerStats.map((team: any, ti: number) => {
-            const isOurTeam = team.teamAbbr === teamAbbr
-            const names = team.statNames ?? []
-            return (
-              <div key={team.teamAbbr || ti}>
-                <p className="text-xs font-medium mb-2 text-white/70">{isOurTeam ? team.teamAbbr : `${team.teamAbbr} (Opp)`}</p>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-gray-600">
-                        <th className="text-left pr-2 py-0.5 font-medium">#</th>
-                        <th className="text-left pr-3 py-0.5 font-medium">Player</th>
-                        {names.map((n: string, ni: number) => (
-                          <th key={`${n}-${ni}`} className="text-center px-1.5 py-0.5 font-medium text-gray-500">{prettifyName(n)}</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {team.athletes.map((a: any, ai: number) => (
-                        <tr key={a.id || ai} className="text-white/70">
-                          <td className="pr-2 py-0.5 font-mono text-gray-500 text-right">{a.jersey ?? ''}</td>
-                          <td className="pr-3 py-0.5 truncate max-w-28">{a.displayName}{a.position ? ` (${a.position})` : ''}</td>
-                          {names.map((n: string, ni: number) => (
-                            <td key={`${n}-${ni}`} className="text-center px-1.5 py-0.5 font-mono">{a.stats?.[n] ?? '-'}</td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )
-          })}
-          {!hasAnyPlayerStats && <p className="text-sm text-gray-500">Player stats not yet available</p>}
-        </div>
       ) : (
-        <div className="space-y-4">
+        <>
+          {/* Period scores — always visible */}
           {maxPeriods > 0 && (
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto mb-2">
               <table className="w-full text-xs">
                 <thead>
-                  <tr className="text-gray-500">
-                    <th className="text-left pr-3 pb-1 font-medium" />
+                  <tr className="text-gray-600">
+                    <th className="text-left pr-2 pb-0.5 font-medium" />
                     {Array.from({ length: maxPeriods }, (_, i) => (
-                      <th key={i} className="text-center px-2 pb-1 font-medium">{periodLabels[i]}</th>
+                      <th key={i} className="text-center px-1 pb-0.5 font-medium">{periodLabels[i]}</th>
                     ))}
-                    <th className="text-center pl-3 pb-1 font-medium text-white/60">T</th>
+                    <th className="text-center pl-2 pb-0.5 font-medium text-white/60">T</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr className="text-white/80">
-                    <td className="pr-3 py-1 font-medium truncate max-w-24">{ourTeam?.displayName ?? 'Home'}</td>
+                    <td className="pr-2 py-0.5 font-medium truncate max-w-16 text-xs">{ourTeam?.displayName ?? 'Home'}</td>
                     {Array.from({ length: maxPeriods }, (_, i) => (
-                      <td key={i} className="text-center px-2 py-1 font-mono">{ourTeam?.linescores?.[i] ?? '-'}</td>
+                      <td key={i} className="text-center px-1 py-0.5 font-mono">{ourTeam?.linescores?.[i] ?? '-'}</td>
                     ))}
-                    <td className="text-center pl-3 py-1 font-mono text-white font-medium">{ourTeam ? sum(ourTeam.linescores) : '-'}</td>
+                    <td className="text-center pl-2 py-0.5 font-mono text-white font-medium">{ourTeam ? sum(ourTeam.linescores) : '-'}</td>
                   </tr>
                   <tr className="text-white/80">
-                    <td className="pr-3 py-1 font-medium truncate max-w-24">{oppTeam?.displayName ?? 'Away'}</td>
+                    <td className="pr-2 py-0.5 font-medium truncate max-w-16 text-xs">{oppTeam?.displayName ?? 'Away'}</td>
                     {Array.from({ length: maxPeriods }, (_, i) => (
-                      <td key={i} className="text-center px-2 py-1 font-mono">{oppTeam?.linescores?.[i] ?? '-'}</td>
+                      <td key={i} className="text-center px-1 py-0.5 font-mono">{oppTeam?.linescores?.[i] ?? '-'}</td>
                     ))}
-                    <td className="text-center pl-3 py-1 font-mono text-white font-medium">{oppTeam ? sum(oppTeam.linescores) : '-'}</td>
+                    <td className="text-center pl-2 py-0.5 font-mono text-white font-medium">{oppTeam ? sum(oppTeam.linescores) : '-'}</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           )}
 
-          {teamStatGroups.length > 0 && (
-            <div className="space-y-3">
-              {teamStatGroups.map((group) => (
-                <div key={group.label}>
-                  <h4 className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">{group.label}</h4>
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="text-gray-600">
-                          <th className="text-left pr-3 pb-0.5 font-medium" />
-                          <th className="text-center px-1.5 pb-0.5 font-medium text-gray-500">{ourTeam?.abbreviation ?? 'Home'}</th>
-                          <th className="text-center pl-1.5 pr-3 pb-0.5 font-medium text-gray-500">{oppTeam?.abbreviation ?? 'Away'}</th>
+          {/* Team stats (default view) */}
+          {!showPlayerStats && (
+            <>
+              {allStats.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-600">
+                        <th className="text-left pr-2 pb-0.5 font-medium" />
+                        <th className="text-center px-1 pb-0.5 font-medium text-gray-500">{ourTeam?.abbreviation ?? 'Home'}</th>
+                        <th className="text-center pl-1 pr-2 pb-0.5 font-medium text-gray-500">{oppTeam?.abbreviation ?? 'Away'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allStats.map((s) => (
+                        <tr key={s.name} className="text-white/70">
+                          <td className="pr-2 py-0.5 text-gray-400 text-xs">{teamStatLabels[s.name] ?? prettifyName(s.name)}</td>
+                          <td className="text-center px-1 py-0.5 font-mono">{s.our}</td>
+                          <td className="text-center pl-1 pr-2 py-0.5 font-mono">{s.opp}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {group.stats.map((stat) => (
-                          <tr key={stat.name} className="text-white/70">
-                            <td className="pr-3 py-0.5 text-gray-400">{teamStatLabels[stat.name] ?? prettifyName(stat.name)}</td>
-                            <td className="text-center px-1.5 py-0.5 font-mono">{stat.our}</td>
-                            <td className="text-center pl-1.5 pr-3 py-0.5 font-mono">{stat.opp}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              ))}
-            </div>
+              ) : (
+                <p className="text-sm text-gray-500">Team stats not yet available</p>
+              )}
+            </>
           )}
 
-          {teamStatGroups.length === 0 && (
-            <p className="text-sm text-gray-500">Team stats not yet available</p>
+          {/* Player stats (toggle view) */}
+          {showPlayerStats && (
+            <>
+              {hasAnyPlayerStats ? (
+                <div className="space-y-4">
+                  {sortedPlayerStats.map((team: any, ti: number) => (
+                    <div key={team.teamAbbr || ti}>
+                      <p className="text-xs font-medium mb-2 text-white/70">
+                        {team.teamAbbr === teamAbbr ? team.teamAbbr : `${team.teamAbbr} (Opp)`}
+                      </p>
+                      {team.categories.map((cat: any, ci: number) => (
+                        <div key={cat.label || `cat-${ci}`} className="mb-3">
+                          <h5 className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">{cat.label}</h5>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-gray-600">
+                                  <th className="text-left pr-2 py-0.5 font-medium">#</th>
+                                  <th className="text-left pr-2 py-0.5 font-medium">Player</th>
+                                  {cat.statNames.map((n: string, ni: number) => (
+                                    <th key={`${n}-${ni}`} className="text-center px-1 py-0.5 font-medium text-gray-500">{prettifyName(n)}</th>
+                                  ))}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {cat.athletes.map((a: any, ai: number) => (
+                                  <tr key={a.id || ai} className="text-white/70">
+                                    <td className="pr-2 py-0.5 font-mono text-gray-500 text-right">{a.jersey ?? ''}</td>
+                                    <td className="pr-2 py-0.5 truncate max-w-24">
+                                      {a.displayName}
+                                      {a.position ? <span className="text-gray-500 ml-0.5">({a.position})</span> : ''}
+                                    </td>
+                                    {cat.statNames.map((n: string, ni: number) => (
+                                      <td key={`${n}-${ni}`} className="text-center px-1 py-0.5 font-mono">{a.stats?.[n] ?? '-'}</td>
+                                    ))}
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">Player stats not yet available</p>
+              )}
+            </>
           )}
 
           {data?.status && (
-            <p className="text-[10px] text-gray-600">{data.status.shortDetail ?? data.status.description}</p>
+            <p className="text-[10px] text-gray-600 mt-1">{data.status.shortDetail ?? data.status.description}</p>
           )}
-        </div>
+        </>
       )}
     </div>
   )

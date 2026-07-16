@@ -30,6 +30,45 @@ function extractHeaderLinescores(competitor: any): number[] {
   })
 }
 
+function extractStats(a: any): Record<string, string> {
+  const stats: Record<string, string> = {}
+
+  // Format 1: a.stats = [{ name, displayValue }, ...]
+  if (Array.isArray(a.stats)) {
+    for (const s of a.stats) {
+      if (s?.name) stats[s.name] = s.displayValue ?? String(s.value ?? '')
+    }
+  }
+
+  // Format 2: a.stats = { statName: { displayValue, value }, ... }
+  if (a.stats && typeof a.stats === 'object' && !Array.isArray(a.stats)) {
+    for (const key of Object.keys(a.stats)) {
+      const val = a.stats[key]
+      if (val && typeof val === 'object') {
+        stats[key] = val.displayValue ?? String(val.value ?? '')
+      }
+    }
+  }
+
+  // Format 3: a.statistics = [{ name, displayValue }, ...]
+  if (Array.isArray(a.statistics)) {
+    for (const s of a.statistics) {
+      if (s?.name) stats[s.name] = s.displayValue ?? String(s.value ?? '')
+    }
+  }
+
+  // Format 4: Direct string/number properties on a
+  for (const key of Object.keys(a)) {
+    if (['athlete', 'stats', 'statistics'].includes(key)) continue
+    const val = a[key]
+    if (val && (typeof val === 'string' || typeof val === 'number')) {
+      stats[key] = String(val)
+    }
+  }
+
+  return stats
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const sport = searchParams.get('sport')
@@ -88,37 +127,36 @@ export async function GET(request: Request) {
 
       playerStats = (boxscore.players ?? []).map((p: any) => {
         const teamAbbr = p.team?.abbreviation ?? teams.find((tt: any) => tt.abbreviation.toUpperCase() === (p.team?.abbreviation ?? '').toUpperCase())?.abbreviation ?? ''
-        const athletesMap = new Map<string, any>()
-        const allStatNames = new Set<string>()
+        const categories: any[] = []
 
         for (const cat of (p.statistics ?? [])) {
+          const raw = cat.name ?? cat.label ?? ''
+          if (!raw) continue
+          const statNames = new Set<string>()
+          const athletes: any[] = []
+
           for (const a of (cat.athletes ?? [])) {
             const id = a.athlete?.id
             if (!id) continue
-            if (!athletesMap.has(id)) {
-              athletesMap.set(id, {
-                id,
-                displayName: a.athlete?.displayName ?? '',
-                jersey: a.athlete?.jersey ?? '',
-                position: a.athlete?.position?.abbreviation ?? '',
-                stats: {} as Record<string, string>,
-              })
-            }
-            const entry = athletesMap.get(id)
-            for (const s of (a.stats ?? [])) {
-              if (s.name) {
-                allStatNames.add(s.name)
-                entry.stats[s.name] = s.displayValue ?? ''
-              }
-            }
+            const stats = extractStats(a)
+            for (const key of Object.keys(stats)) statNames.add(key)
+            athletes.push({
+              id,
+              displayName: a.athlete?.displayName ?? '',
+              jersey: a.athlete?.jersey ?? '',
+              position: a.athlete?.position?.abbreviation ?? '',
+              stats,
+            })
+          }
+
+          if (athletes.length > 0) {
+            let label = raw.charAt(0).toUpperCase() + raw.slice(1)
+            if (raw === 'defensive') label = 'Defense'
+            categories.push({ label, statNames: Array.from(statNames), athletes })
           }
         }
 
-        return {
-          teamAbbr,
-          statNames: Array.from(allStatNames),
-          athletes: Array.from(athletesMap.values()),
-        }
+        return { teamAbbr, categories }
       })
     } catch (e) {
       // Partial data still usable
