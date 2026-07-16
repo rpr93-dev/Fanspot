@@ -594,24 +594,78 @@ const periodLabels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '
 
 const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0)
 
-const teamStatKeys: Record<string, string[]> = {
-  NFL: ['totalFirstDowns', 'totalYards', 'passingYards', 'rushingYards', 'turnovers'],
-  NBA: ['fieldGoalPct', 'threePointPct', 'freeThrowPct', 'totalRebounds', 'assists', 'steals', 'blocks', 'turnovers'],
-  NHL: ['shotsOnGoal', 'faceoffWinPct', 'powerPlayPct', 'penaltyMinutes', 'blockedShots', 'hits'],
-  MLB: ['runs', 'hits', 'errors', 'homeRuns', 'walks', 'strikeouts'],
+const teamStatLabels: Record<string, string> = {
+  totalFirstDowns: '1st Downs', firstDownRushing: 'Rush 1st', firstDownPassing: 'Pass 1st', firstDownPenalty: 'Penalty 1st',
+  totalYards: 'Total Yards', passingYards: 'Pass Yds', rushingYards: 'Rush Yds', netPassingYards: 'Net Pass', grossPassingYards: 'Gross Pass',
+  turnovers: 'TO', interceptionsThrown: 'INT', lostFumbles: 'Fum Lost', forcedFumbles: 'FF', fumblesRecovered: 'Fum Rec',
+  tackles: 'Tackles', sacks: 'Sacks', interceptions: 'INT', safeties: 'Safeties',
+  thirdDownEfficiency: '3rd Down', fourthDownEfficiency: '4th Down', redZoneEfficiency: 'Red Zone',
+  penalties: 'Penalties', penaltyYards: 'Pen Yds', possessionTime: 'Possession',
+  fieldGoalPct: 'FG%', threePointPct: '3P%', freeThrowPct: 'FT%',
+  totalRebounds: 'REB', offensiveRebounds: 'OREB', defensiveRebounds: 'DREB',
+  assists: 'AST', assistTurnoverRatio: 'A/TO', steals: 'STL', blocks: 'BLK', personalFouls: 'PF',
+  points: 'PTS', fastBreakPoints: 'FB Pts', pointsInPaint: 'Paint Pts', secondChancePoints: '2nd Chance',
+  fieldGoalsMade: 'FGM', fieldGoalsAttempted: 'FGA', threePointFieldGoalsMade: '3PM', threePointFieldGoalsAttempted: '3PA',
+  freeThrowsMade: 'FTM', freeThrowsAttempted: 'FTA',
+  shotsOnGoal: 'SOG', faceoffWinPct: 'FO%', powerPlayPct: 'PP%', penaltyMinutes: 'PIM',
+  blockedShots: 'Blk', hits: 'Hits', giveaways: 'GA', takeaways: 'TK',
+  powerPlayGoals: 'PPG', powerPlayOpportunities: 'PPO', shortHandedGoals: 'SHG',
+  penaltyKillPct: 'PK%', shots: 'Shots',
+  atBats: 'AB', runs: 'R', runsBattedIn: 'RBI', homeRuns: 'HR',
+  walks: 'BB', strikeouts: 'K', battingAvg: 'AVG', onBasePct: 'OBP', sluggingPct: 'SLG', ops: 'OPS',
+  stolenBases: 'SB', caughtStealing: 'CS', errors: 'E', putOuts: 'PO', doublePlays: 'DP',
+  fieldingPct: 'FLD%', inningsPitched: 'IP', earnedRuns: 'ER', era: 'ERA', whip: 'WHIP',
+  pitchesThrown: 'Pitches', strikesThrown: 'Strikes',
 }
 
-const teamStatLabels: Record<string, string> = {
-  totalFirstDowns: '1st Downs', totalYards: 'Total Yards', passingYards: 'Pass', rushingYards: 'Rush',
-  turnovers: 'TO', fieldGoalPct: 'FG%', threePointPct: '3P%', freeThrowPct: 'FT%',
-  totalRebounds: 'REB', assists: 'AST', steals: 'STL', blocks: 'BLK',
-  shotsOnGoal: 'SOG', faceoffWinPct: 'FO%', powerPlayPct: 'PP%', penaltyMinutes: 'PIM',
-  blockedShots: 'Blk', hits: 'Hits', runs: 'R', errors: 'E', homeRuns: 'HR', walks: 'BB',
-  strikeouts: 'K',
+const statCategoryGroup: Record<string, { label: string; pattern: RegExp }[]> = {
+  NFL: [
+    { label: 'First Downs', pattern: /firstDown/i },
+    { label: 'Offense', pattern: /(Yards|Pass|Rush|Net|Gross)/i },
+    { label: 'Efficiency', pattern: /(Efficiency|Pct|ThirdDown|FourthDown|RedZone)/i },
+    { label: 'Defense', pattern: /(Tackle|Sack|Int|Fumble|Safet|Def)/i },
+    { label: 'Turnovers', pattern: /(Turnover|TO|Lost)/i },
+    { label: 'Penalties', pattern: /Penalt/i },
+    { label: 'Kicking', pattern: /(Kick|Punt|FG|XPA|KO)/i },
+    { label: 'Returns', pattern: /Return/i },
+    { label: 'Other', pattern: /(Possession|Time)/i },
+  ],
+  NBA: [
+    { label: 'Field Goals', pattern: /(FieldGoal|FG)/i },
+    { label: 'Three Pointers', pattern: /(ThreePoint|ThreePt|3P)/i },
+    { label: 'Free Throws', pattern: /(FreeThrow|FT)/i },
+    { label: 'Rebounds', pattern: /(Rebound|Reb)/i },
+    { label: 'Scoring', pattern: /(Points|Pts|Score)/i },
+    { label: 'Playmaking', pattern: /(Assist|Ast)/i },
+    { label: 'Defense', pattern: /(Steal|Stl|Block|Blk)/i },
+    { label: 'Other', pattern: /(Turnover|TO|Foul)/i },
+  ],
+  NHL: [
+    { label: 'Shots', pattern: /(Shot|SOG)/i },
+    { label: 'Faceoffs', pattern: /Faceoff/i },
+    { label: 'Special Teams', pattern: /(PowerPlay|PP|PenaltyKill|PK|ShortHande|SH)/i },
+    { label: 'Penalties', pattern: /(Penalt|PIM)/i },
+    { label: 'Defense', pattern: /(BlockedShot|Blk|Hit)/i },
+    { label: 'Other', pattern: /(Giveaway|Takeaway)/i },
+  ],
+  MLB: [
+    { label: 'Batting', pattern: /(AtBat|Hits|Runs|Avg|OBP|Slg|OPS|RBI|HomeRun|HR|Hit)/i },
+    { label: 'Pitching', pattern: /(Pitch|ERA|WHIP|Inning|EarnedRun)/i },
+    { label: 'Walks & Ks', pattern: /(Walk|BB|Strikeout|K)/i },
+    { label: 'Fielding', pattern: /(Error|Field|PutOut|Assist|DP|FLD)/i },
+    { label: 'Baserunning', pattern: /(Stolen|SB|CS)/i },
+  ],
+}
+
+function prettifyName(name: string): string {
+  return name
+    .replace(/([A-Z])/g, ' $1')
+    .replace(/^./, (s) => s.toUpperCase())
+    .trim()
 }
 
 function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { data: any; loading: boolean; teamAbbr: string; teamColor: string; sport: string; onBack: () => void }) {
-  const [showTeamStats, setShowTeamStats] = useState(false)
+  const [showPlayerStats, setShowPlayerStats] = useState(false)
 
   const ourIdx = data?.teams?.findIndex((t: any) => t.abbreviation === teamAbbr) ?? -1
   const oppIdx = ourIdx === 0 ? 1 : 0
@@ -630,16 +684,39 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
 
   const hasAnyPlayerStats = sortedPlayerStats.some((t: any) => t.athletes?.length > 0)
 
+  const teamStatGroups = useMemo(() => {
+    if (!ourTeam?.statistics || !oppTeam?.statistics) return []
+    const categories = statCategoryGroup[sport] ?? [{ label: 'Stats', pattern: /.*/ }]
+    const groups: { label: string; stats: { name: string; our: string; opp: string }[] }[] =
+      categories.map((c) => ({ label: c.label, stats: [] }))
+    const seen = new Set<string>()
+    for (const s of [...(ourTeam.statistics ?? []), ...(oppTeam.statistics ?? [])]) {
+      if (seen.has(s.name)) continue
+      seen.add(s.name)
+      const ourStat = ourTeam.statistics.find((x: any) => x.name === s.name)
+      const oppStat = oppTeam.statistics.find((x: any) => x.name === s.name)
+      const idx = categories.findIndex((c) => c.pattern.test(s.name))
+      if (idx >= 0) {
+        groups[idx].stats.push({
+          name: s.name,
+          our: ourStat?.displayValue ?? '-',
+          opp: oppStat?.displayValue ?? '-',
+        })
+      }
+    }
+    return groups.filter((g) => g.stats.length > 0)
+  }, [ourTeam, oppTeam, sport])
+
   return (
     <div className="animate-fade-in-up mt-5 pt-4" style={{ borderTop: `1px solid ${teamColor}15` }}>
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-medium tracking-wider uppercase text-gray-400">Box Score</h3>
         <div className="flex items-center gap-2">
           {hasAnyPlayerStats && (
-            <button onClick={() => setShowTeamStats((v) => !v)}
+            <button onClick={() => setShowPlayerStats((v) => !v)}
               className="text-xs px-2.5 py-1 rounded-full transition-colors text-gray-400 hover:text-white"
               style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
-              {showTeamStats ? 'Player Stats' : 'Team Stats'}
+              {showPlayerStats ? 'Team Stats' : 'Player Stats'}
             </button>
           )}
           <button onClick={onBack}
@@ -656,9 +733,45 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
         </div>
       ) : !data?.teams?.length ? (
         <p className="text-sm text-gray-500">Box score unavailable</p>
+      ) : showPlayerStats ? (
+        <div className="space-y-5">
+          {sortedPlayerStats.map((team: any, ti: number) => {
+            const isOurTeam = team.teamAbbr === teamAbbr
+            const names = team.statNames ?? []
+            return (
+              <div key={team.teamAbbr || ti}>
+                <p className="text-xs font-medium mb-2 text-white/70">{isOurTeam ? team.teamAbbr : `${team.teamAbbr} (Opp)`}</p>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="text-gray-600">
+                        <th className="text-left pr-2 py-0.5 font-medium">#</th>
+                        <th className="text-left pr-3 py-0.5 font-medium">Player</th>
+                        {names.map((n: string, ni: number) => (
+                          <th key={`${n}-${ni}`} className="text-center px-1.5 py-0.5 font-medium text-gray-500">{prettifyName(n)}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {team.athletes.map((a: any, ai: number) => (
+                        <tr key={a.id || ai} className="text-white/70">
+                          <td className="pr-2 py-0.5 font-mono text-gray-500 text-right">{a.jersey ?? ''}</td>
+                          <td className="pr-3 py-0.5 truncate max-w-28">{a.displayName}{a.position ? ` (${a.position})` : ''}</td>
+                          {names.map((n: string, ni: number) => (
+                            <td key={`${n}-${ni}`} className="text-center px-1.5 py-0.5 font-mono">{a.stats?.[n] ?? '-'}</td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
+          {!hasAnyPlayerStats && <p className="text-sm text-gray-500">Player stats not yet available</p>}
+        </div>
       ) : (
         <div className="space-y-4">
-          {/* Period scores table */}
           {maxPeriods > 0 && (
             <div className="overflow-x-auto">
               <table className="w-full text-xs">
@@ -691,76 +804,38 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
             </div>
           )}
 
-          {/* Player stats (default view) */}
-          {!showTeamStats && hasAnyPlayerStats && (
-            <div className="space-y-5">
-              {sortedPlayerStats.map((team: any, ti: number) => {
-                const isOurTeam = team.teamAbbr === teamAbbr
-                const names = team.statNames ?? []
-                return (
-                  <div key={team.teamAbbr || ti}>
-                    <p className="text-xs font-medium mb-2 text-white/70">{isOurTeam ? team.teamAbbr : `${team.teamAbbr} (Opp)`}</p>
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="text-gray-600">
-                            <th className="text-left pr-2 py-0.5 font-medium">#</th>
-                            <th className="text-left pr-3 py-0.5 font-medium">Player</th>
-                            {names.map((n: string, ni: number) => (
-                              <th key={`${n}-${ni}`} className="text-center px-1.5 py-0.5 font-medium text-gray-500">{n.replace(/([A-Z])/g, ' $1').trim().toUpperCase()}</th>
-                            ))}
+          {teamStatGroups.length > 0 && (
+            <div className="space-y-3">
+              {teamStatGroups.map((group) => (
+                <div key={group.label}>
+                  <h4 className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">{group.label}</h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-gray-600">
+                          <th className="text-left pr-3 pb-0.5 font-medium" />
+                          <th className="text-center px-1.5 pb-0.5 font-medium text-gray-500">{ourTeam?.abbreviation ?? 'Home'}</th>
+                          <th className="text-center pl-1.5 pr-3 pb-0.5 font-medium text-gray-500">{oppTeam?.abbreviation ?? 'Away'}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {group.stats.map((stat) => (
+                          <tr key={stat.name} className="text-white/70">
+                            <td className="pr-3 py-0.5 text-gray-400">{teamStatLabels[stat.name] ?? prettifyName(stat.name)}</td>
+                            <td className="text-center px-1.5 py-0.5 font-mono">{stat.our}</td>
+                            <td className="text-center pl-1.5 pr-3 py-0.5 font-mono">{stat.opp}</td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {team.athletes.map((a: any, ai: number) => (
-                            <tr key={a.id || ai} className="text-white/70">
-                              <td className="pr-2 py-0.5 font-mono text-gray-500 text-right">{a.jersey ?? ''}</td>
-                              <td className="pr-3 py-0.5 truncate max-w-28">{a.displayName}{a.position ? ` (${a.position})` : ''}</td>
-                              {names.map((n: string, ni: number) => (
-                                <td key={`${n}-${ni}`} className="text-center px-1.5 py-0.5 font-mono">{a.stats?.[n] ?? '-'}</td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
-                )
-              })}
+                </div>
+              ))}
             </div>
           )}
 
-          {/* Team stats (toggle view) */}
-          {showTeamStats && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-gray-500">
-                    <th className="text-left pr-3 pb-1 font-medium">Stat</th>
-                    <th className="text-center px-2 pb-1 font-medium">{ourTeam?.abbreviation ?? 'Home'}</th>
-                    <th className="text-center pl-3 pb-1 font-medium">{oppTeam?.abbreviation ?? 'Away'}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(ourTeam?.statistics ?? []).filter(
-                    (s: any) => Object.keys(teamStatKeys).some((k) => teamStatKeys[k].includes(s.name))
-                  ).map((stat: any, i: number) => {
-                    const oppStat = oppTeam?.statistics?.find((s: any) => s.name === stat.name)
-                    return (
-                      <tr key={stat.name ?? i} className="text-white/70">
-                        <td className="pr-3 py-1 text-gray-400">{teamStatLabels[stat.name] ?? stat.name}</td>
-                        <td className="text-center px-2 py-1 font-mono">{stat.displayValue ?? '-'}</td>
-                        <td className="text-center pl-3 py-1 font-mono">{oppStat?.displayValue ?? '-'}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {!hasAnyPlayerStats && !showTeamStats && (
-            <p className="text-sm text-gray-500">Player stats not yet available</p>
+          {teamStatGroups.length === 0 && (
+            <p className="text-sm text-gray-500">Team stats not yet available</p>
           )}
 
           {data?.status && (

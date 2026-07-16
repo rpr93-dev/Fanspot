@@ -136,4 +136,22 @@ Added `signal: AbortSignal.timeout(15000)` to every `fetch` call in every API ro
 - If ESPN API legitimately takes longer than 15 seconds (very rare), the fetch will abort and the route will return no data. This is an acceptable tradeoff.
 - Consider tuning the timeout per endpoint if monitoring shows premature timeouts.
 
+## Commit 5 — Extract shared dedup utility, remove dead code
+
+**Commit hash**: `19c1a66`
+**Date**: 2026-07-16
+
+### Changes
+1. **Shared `deduplicateById` utility** — Added to `src/lib/schedule-types.ts`. Replaced 3 identical `new Set → filter` implementations in `espn.ts`, `nhl.ts`, `mlb.ts` with a single generic function.
+2. **Removed `sportNames`** — Unused constant in `src/app/[sport]/page.tsx`. The page uses `sportConfig` instead.
+3. **Removed `fetchEspnNews`** — Unused function in `src/app/api/news-search/route.ts`. ESPN RSS was never called — the route only uses Google News RSS.
+
+### Benefits
+- **Maintainability**: One dedup function to fix/test instead of three copies
+- **Code clarity**: `<T extends { id: string }>` generic works for any event-like object
+- **-52 lines**: net reduction
+
+### Verification
+- `npm run build` — passed
+
 
