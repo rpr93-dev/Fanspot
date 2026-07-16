@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import { teams, sportConfig } from '@/data/teams'
 import { useParams } from 'next/navigation'
@@ -590,9 +590,28 @@ export default function TeamDashboard() {
   )
 }
 
+const periodLabels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+
+const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0)
+
+const teamStatKeys: Record<string, string[]> = {
+  NFL: ['totalFirstDowns', 'totalYards', 'passingYards', 'rushingYards', 'turnovers'],
+  NBA: ['fieldGoalPct', 'threePointPct', 'freeThrowPct', 'totalRebounds', 'assists', 'steals', 'blocks', 'turnovers'],
+  NHL: ['shotsOnGoal', 'faceoffWinPct', 'powerPlayPct', 'penaltyMinutes', 'blockedShots', 'hits'],
+  MLB: ['runs', 'hits', 'errors', 'homeRuns', 'walks', 'strikeouts'],
+}
+
+const teamStatLabels: Record<string, string> = {
+  totalFirstDowns: '1st Downs', totalYards: 'Total Yards', passingYards: 'Pass', rushingYards: 'Rush',
+  turnovers: 'TO', fieldGoalPct: 'FG%', threePointPct: '3P%', freeThrowPct: 'FT%',
+  totalRebounds: 'REB', assists: 'AST', steals: 'STL', blocks: 'BLK',
+  shotsOnGoal: 'SOG', faceoffWinPct: 'FO%', powerPlayPct: 'PP%', penaltyMinutes: 'PIM',
+  blockedShots: 'Blk', hits: 'Hits', runs: 'R', errors: 'E', homeRuns: 'HR', walks: 'BB',
+  strikeouts: 'K',
+}
+
 function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { data: any; loading: boolean; teamAbbr: string; teamColor: string; sport: string; onBack: () => void }) {
   const [showTeamStats, setShowTeamStats] = useState(false)
-  const periodLabels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
 
   const ourIdx = data?.teams?.findIndex((t: any) => t.abbreviation === teamAbbr) ?? -1
   const oppIdx = ourIdx === 0 ? 1 : 0
@@ -600,29 +619,14 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
   const oppTeam = oppIdx >= 0 ? data?.teams?.[oppIdx] : null
   const maxPeriods = Math.max(ourTeam?.linescores?.length ?? 0, oppTeam?.linescores?.length ?? 0)
 
-  const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0)
-
-  const sortedPlayerStats = [...(data?.playerStats ?? [])].sort((a, b) => {
-    if (a.teamAbbr === teamAbbr) return -1
-    if (b.teamAbbr === teamAbbr) return 1
-    return 0
-  })
-
-  const teamStatKeys: Record<string, string[]> = {
-    NFL: ['totalFirstDowns', 'totalYards', 'passingYards', 'rushingYards', 'turnovers'],
-    NBA: ['fieldGoalPct', 'threePointPct', 'freeThrowPct', 'totalRebounds', 'assists', 'steals', 'blocks', 'turnovers'],
-    NHL: ['shotsOnGoal', 'faceoffWinPct', 'powerPlayPct', 'penaltyMinutes', 'blockedShots', 'hits'],
-    MLB: ['runs', 'hits', 'errors', 'homeRuns', 'walks', 'strikeouts'],
-  }
-
-  const teamStatLabels: Record<string, string> = {
-    totalFirstDowns: '1st Downs', totalYards: 'Total Yards', passingYards: 'Pass', rushingYards: 'Rush',
-    turnovers: 'TO', fieldGoalPct: 'FG%', threePointPct: '3P%', freeThrowPct: 'FT%',
-    totalRebounds: 'REB', assists: 'AST', steals: 'STL', blocks: 'BLK',
-    shotsOnGoal: 'SOG', faceoffWinPct: 'FO%', powerPlayPct: 'PP%', penaltyMinutes: 'PIM',
-    blockedShots: 'Blk', hits: 'Hits', runs: 'R', errors: 'E', homeRuns: 'HR', walks: 'BB',
-    strikeouts: 'K',
-  }
+  const sortedPlayerStats = useMemo(() =>
+    [...(data?.playerStats ?? [])].sort((a, b) => {
+      if (a.teamAbbr === teamAbbr) return -1
+      if (b.teamAbbr === teamAbbr) return 1
+      return 0
+    }),
+    [data?.playerStats, teamAbbr],
+  )
 
   const hasAnyPlayerStats = sortedPlayerStats.some((t: any) => t.athletes?.length > 0)
 
