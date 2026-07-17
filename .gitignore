@@ -3,3 +3,5 @@ node_modules/
 .env
 .env.local
 LEARNER_NOTES.md
+AGENTS.md
+AUTONOMOUS_OPTIMIZATION_LOG.md

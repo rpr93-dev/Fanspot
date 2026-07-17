@@ -288,7 +288,29 @@ export default function TeamDashboard() {
     fetch(`/api/box-score?sport=${team.sport}&eventId=${selectedGameId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((res) => {
+        if (res?.boxScore?._debug) {
+          console.log('[BoxScore] Debug info', res.boxScore._debug)
+        }
         if (res?.boxScore?.playerStats) {
+          // Log first category's stat names vs first athlete's stats keys for comparison
+          const firstTeam = res.boxScore.playerStats[0]
+          const firstCat = firstTeam?.categories?.[0]
+          if (firstCat) {
+            console.log('[BoxScore KEYCHECK] statNames:', JSON.stringify(firstCat.statNames))
+            const firstAth = firstCat.athletes?.[0]
+            if (firstAth) {
+              console.log('[BoxScore KEYCHECK] athlete stats keys:', JSON.stringify(Object.keys(firstAth.stats ?? {})))
+              console.log('[BoxScore KEYCHECK] athlete stats:', JSON.stringify(firstAth.stats))
+              // Check for key overlap
+              const statNameSet = new Set(firstCat.statNames ?? [])
+              const athleteKeys = Object.keys(firstAth.stats ?? {})
+              const overlap = athleteKeys.filter(k => statNameSet.has(k))
+              console.log('[BoxScore KEYCHECK] overlapping keys:', JSON.stringify(overlap))
+              if (overlap.length === 0 && athleteKeys.length > 0 && firstCat.statNames.length > 0) {
+                console.warn('[BoxScore KEYCHECK] ZERO KEY OVERLAP — stat names and stats keys are disjoint sets')
+              }
+            }
+          }
           for (const team of res.boxScore.playerStats) {
             for (const cat of (team.categories ?? [])) {
               if (cat.athletes?.length > 0 && cat.statNames?.length === 0) {
@@ -396,9 +418,11 @@ export default function TeamDashboard() {
               )}
             </div>
 
-            <div className="rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 hover:scale-[1.02]" style={{ backgroundColor: `${team.colors.primary}10`, border: `1px solid ${team.colors.primary}18` }}
-              onClick={() => setShowRoster((v) => !v)}>
-              <div className="w-28 h-28 flex items-center justify-center mb-4">
+            <div className="rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 hover:scale-[1.02] group" style={{ backgroundColor: `${team.colors.primary}10`, border: `1px solid ${team.colors.primary}18` }}
+              onClick={() => setShowRoster((v) => !v)}
+              onMouseEnter={(e) => { e.currentTarget.style.boxShadow = `0 0 24px -6px ${team.colors.primary}50`; e.currentTarget.style.borderColor = `${team.colors.primary}40` }}
+              onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = `${team.colors.primary}18` }}>
+              <div className="w-28 h-28 flex items-center justify-center mb-4 relative">
                 {logoFailed ? (
                   <div className="w-28 h-28 rounded-full flex items-center justify-center" style={{ backgroundColor: team.colors.primary }}>
                     <span className="text-3xl font-bold" style={{ color: team.colors.secondary }}>{team.abbreviation}</span>
@@ -406,6 +430,11 @@ export default function TeamDashboard() {
                 ) : (
                   <img src={logoUrl} alt={team.name} className="w-full h-full object-contain" onError={() => setLogoFailed(true)} />
                 )}
+                <div className="absolute -bottom-1 right-0 flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+                  <div className="w-1 h-1 rounded-full" style={{ backgroundColor: team.colors.primary }} />
+                  <div className="w-1 h-1 rounded-full" style={{ backgroundColor: team.colors.primary }} />
+                  <div className="w-1 h-1 rounded-full" style={{ backgroundColor: team.colors.primary }} />
+                </div>
               </div>
               <h1 className="text-2xl font-light text-white/90 text-center">{team.name}</h1>
               <p className="text-xs text-gray-500 mt-1">{team.conference} &middot; {team.division}</p>
@@ -430,10 +459,10 @@ export default function TeamDashboard() {
                 {data?.lastFive.length ? (
                   <div className="grid grid-cols-5 gap-2">
                     {data.lastFive.map((game, i) => (
-                      <div key={i} className="rounded-lg p-2 flex flex-col items-center text-center transition-all cursor-pointer" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : 'transparent'}` }}
+                      <div key={i} className="rounded-lg p-2 flex flex-col items-center text-center transition-all duration-200 cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : 'transparent'}` }}
                         onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}
-                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18` }}
-                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a` }}>
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18`; e.currentTarget.style.boxShadow = `0 4px 16px -6px ${team.colors.primary}40`; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a`; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}>
                         <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-medium mb-0.5 ${
                           game.result === 'W' ? 'text-green-400' : 'text-red-400'
                         }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)' }}>
@@ -479,10 +508,10 @@ export default function TeamDashboard() {
                 ) : data?.lastFive.length ? (
                   <div className="grid grid-cols-5 gap-3 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
                     {data.lastFive.map((game, i) => (
-                      <div key={i} className="rounded-lg p-3 flex flex-col items-center text-center transition-all cursor-pointer" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : team.colors.primary}10` }}
+                      <div key={i} className="rounded-lg p-3 flex flex-col items-center text-center transition-all duration-200 cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : team.colors.primary}10` }}
                         onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}
-                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18` }}
-                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a` }}>
+                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18`; e.currentTarget.style.boxShadow = `0 4px 16px -6px ${team.colors.primary}40`; e.currentTarget.style.transform = 'translateY(-2px)' }}
+                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a`; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}>
                         <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium mb-1 ${
                           game.result === 'W' ? 'text-green-400' : 'text-red-400'
                         }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)' }}>
@@ -632,9 +661,26 @@ const teamStatLabels: Record<string, string> = {
   pitchesThrown: 'Pitches', strikesThrown: 'Strikes',
 }
 
+const playerStatLabels: Record<string, string> = {
+  G: 'Goals', A: 'Assists', PTS: 'Points', P: 'Points',
+  SOG: 'SOG', S: 'Shots', TOI: 'TOI',
+  PPTOI: 'PP TOI', SHTOI: 'SH TOI', ESTOI: 'EV TOI', EVTOI: 'EV TOI',
+  BS: 'Blk Shots', BLK: 'Blocks', HT: 'Hits', HIT: 'Hits',
+  TK: 'Takeaways', GV: 'Giveaways',
+  FW: 'FOW', FL: 'FOL',
+  SHFT: 'Shifts', SM: 'Missed', PN: 'Penalties', PIM: 'PIM',
+  YTDG: 'GP',
+  GA: 'GA', SA: 'SA', SV: 'Saves',
+  SOS: 'SO Saves', SOSA: 'SO Att', ESSV: 'EV Saves', PPSV: 'PP Saves', SHSV: 'SH Saves',
+  'H-AB': 'H/AB',
+  MIN: 'Minutes', FG: 'FG', '3PT': '3PT', FT: 'FT',
+  REB: 'Rebounds', AST: 'Assists', TO: 'Turnovers', STL: 'Steals',
+  OREB: 'Off Reb', DREB: 'Def Reb', PF: 'Fouls',
+}
+
 function prettifyName(name: string): string {
   return name
-    .replace(/([A-Z])/g, ' $1')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/^./, (s) => s.toUpperCase())
     .trim()
 }
@@ -750,8 +796,8 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
                       </tr>
                     </thead>
                     <tbody>
-                      {allStats.map((s) => (
-                        <tr key={s.name} className="text-white/70">
+                      {allStats.map((s, si) => (
+                        <tr key={`${si}`} className="text-white/70">
                           <td className="pr-2 py-0.5 text-gray-400 text-xs">{teamStatLabels[s.name] ?? prettifyName(s.name)}</td>
                           <td className="text-center px-1 py-0.5 font-mono">{s.our}</td>
                           <td className="text-center pl-1 pr-2 py-0.5 font-mono">{s.opp}</td>
@@ -777,7 +823,7 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
                         {team.teamAbbr === teamAbbr ? team.teamAbbr : `${team.teamAbbr}`}
                       </p>
                       {team.categories.map((cat: any, ci: number) => (
-                        <div key={cat.label || `cat-${ci}`} className="mb-3">
+                        <div key={`${cat.label || 'cat'}-${ci}`} className="mb-3">
                           <h5 className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">{cat.label}</h5>
                           <div className="overflow-x-auto">
                             <table className="w-full text-xs">
@@ -786,7 +832,7 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
                                   <th className="text-left pr-2 py-0.5 font-medium">#</th>
                                   <th className="text-left pr-2 py-0.5 font-medium">Player</th>
                                   {cat.statNames.map((n: string, ni: number) => (
-                                    <th key={`${n}-${ni}`} className="text-center px-1 py-0.5 font-medium text-gray-500">{prettifyName(n)}</th>
+                                    <th key={`${n}-${ni}`} className="text-center px-1 py-0.5 font-medium text-gray-500">{playerStatLabels[n] ?? prettifyName(n)}</th>
                                   ))}
                                 </tr>
                               </thead>
@@ -878,10 +924,128 @@ const sportPositionOrder: Record<string, string[]> = {
   MLB: ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH', 'IF', 'OF'],
 }
 
+const nflStatKey: Record<string, string> = {
+  cmp: 'completions', att: 'passingAttempts', passYd: 'passingYards',
+  passTd: 'passingTouchdowns', int: 'interceptions', qbr: 'QBRating',
+  car: 'rushingAttempts', rushYd: 'rushingYards', rushTd: 'rushingTouchdowns',
+  rec: 'receptions', recYd: 'receivingYards', tgt: 'receivingTargets',
+  recTd: 'receivingTouchdowns', fgm: 'fieldGoalsMade', fga: 'fieldGoalsAttempted',
+  xpm: 'kickExtraPointsMade', xpa: 'kickExtraPointsAttempted',
+  solo: 'soloTackles', ast: 'assistTackles', sack: 'sacks',
+  tfl: 'tacklesForLoss', qbHit: 'QBHits', defInt: 'interceptions',
+  pd: 'passesDefensed', ff: 'forcedFumbles', fr: 'fumbleRecoveries',
+  punt: 'punts', puntYd: 'puntYards', puntAvg: 'grossAvgPuntYards',
+  puntIn20: 'puntsInside20',
+}
+
+const nflDefSchema = [
+  { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
+  { key: 'sack', label: 'SACK' }, { key: 'tfl', label: 'TFL' },
+]
+
+const nflStatSchema: Record<string, { key: string; label: string }[]> = {
+  QB: [
+    { key: 'cmp', label: 'CMP' }, { key: 'att', label: 'ATT' },
+    { key: 'passYd', label: 'YD' }, { key: 'passTd', label: 'TD' },
+    { key: 'int', label: 'INT' }, { key: 'qbr', label: 'QBR' },
+  ],
+  RB: [
+    { key: 'car', label: 'CAR' }, { key: 'rushYd', label: 'YD' },
+    { key: 'rushTd', label: 'TD' }, { key: 'rec', label: 'REC' },
+    { key: 'recYd', label: 'REC YD' },
+  ],
+  FB: [
+    { key: 'car', label: 'CAR' }, { key: 'rushYd', label: 'YD' },
+    { key: 'rushTd', label: 'TD' }, { key: 'rec', label: 'REC' },
+    { key: 'recYd', label: 'REC YD' },
+  ],
+  WR: [
+    { key: 'rec', label: 'REC' }, { key: 'recYd', label: 'YD' },
+    { key: 'tgt', label: 'TGT' }, { key: 'recTd', label: 'TD' },
+  ],
+  TE: [
+    { key: 'rec', label: 'REC' }, { key: 'recYd', label: 'YD' },
+    { key: 'tgt', label: 'TGT' }, { key: 'recTd', label: 'TD' },
+  ],
+  K: [
+    { key: 'fgm', label: 'FGM' }, { key: 'fga', label: 'FGA' },
+    { key: 'xpm', label: 'XPM' }, { key: 'xpa', label: 'XPA' },
+  ],
+  P: [
+    { key: 'punt', label: 'PUNT' }, { key: 'puntYd', label: 'YD' },
+    { key: 'puntAvg', label: 'AVG' }, { key: 'puntIn20', label: 'IN20' },
+  ],
+  DE: nflDefSchema, DT: nflDefSchema, NT: nflDefSchema,
+  PK: [
+    { key: 'fgm', label: 'FGM' }, { key: 'fga', label: 'FGA' },
+    { key: 'xpm', label: 'XPM' }, { key: 'xpa', label: 'XPA' },
+  ],
+  OLB: [...nflDefSchema, { key: 'qbHit', label: 'QBHIT' }, { key: 'pd', label: 'PD' }],
+  MLB: [...nflDefSchema, { key: 'qbHit', label: 'QBHIT' }, { key: 'pd', label: 'PD' }],
+  ILB: [...nflDefSchema, { key: 'qbHit', label: 'QBHIT' }, { key: 'pd', label: 'PD' }],
+  LB: [...nflDefSchema, { key: 'qbHit', label: 'QBHIT' }, { key: 'pd', label: 'PD' }],
+  CB: [
+    { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
+    { key: 'defInt', label: 'INT' }, { key: 'pd', label: 'PD' },
+    { key: 'ff', label: 'FF' },
+  ],
+  S: [
+    { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
+    { key: 'defInt', label: 'INT' }, { key: 'pd', label: 'PD' },
+    { key: 'ff', label: 'FF' },
+  ],
+  SS: [
+    { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
+    { key: 'defInt', label: 'INT' }, { key: 'pd', label: 'PD' },
+    { key: 'ff', label: 'FF' },
+  ],
+  FS: [
+    { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
+    { key: 'defInt', label: 'INT' }, { key: 'pd', label: 'PD' },
+    { key: 'ff', label: 'FF' },
+  ],
+  OT: [], OG: [], C: [], LS: [],
+}
+
+function renderNflStats(stats: Record<string, string> | null, pos: string): { schema: { key: string; label: string }[]; values: (string | null)[] } {
+  const schema = nflStatSchema[pos] ?? []
+  if (!stats) return { schema, values: schema.map(() => null) }
+  const values = schema.map(s => {
+    const espnKey = nflStatKey[s.key]
+    return espnKey && stats[espnKey] !== undefined ? stats[espnKey] : null
+  })
+  return { schema, values }
+}
+
+const relevantStats: Record<string, { label: string; key: string }[]> = {
+  NBA: [
+    { label: 'PTS', key: 'avgPoints' }, { label: 'AST', key: 'avgAssists' },
+    { label: 'REB', key: 'avgRebounds' }, { label: 'STL', key: 'avgSteals' },
+    { label: 'BLK', key: 'avgBlocks' }, { label: 'MIN', key: 'avgMinutes' },
+    { label: 'FG%', key: 'fieldGoalPct' }, { label: '3P%', key: 'threePointPct' },
+    { label: 'FT%', key: 'freeThrowPct' },
+  ],
+  NHL: [
+    { label: 'G', key: 'goals' }, { label: 'A', key: 'assists' },
+    { label: 'PTS', key: 'points' }, { label: '+/-', key: 'plusMinus' },
+    { label: 'PIM', key: 'penaltyMinutes' }, { label: 'SOG', key: 'shotsOnGoal' },
+    { label: 'TOI', key: 'timeOnIce' },
+  ],
+  MLB: [
+    { label: 'AVG', key: 'battingAvg' }, { label: 'HR', key: 'homeRuns' },
+    { label: 'RBI', key: 'runsBattedIn' }, { label: 'OBP', key: 'onBasePercentage' },
+    { label: 'SLG', key: 'sluggingPercentage' }, { label: 'SB', key: 'stolenBases' },
+    { label: 'ERA', key: 'era' }, { label: 'W', key: 'wins' },
+    { label: 'L', key: 'losses' }, { label: 'SO', key: 'strikeouts' },
+    { label: 'BB', key: 'walks' }, { label: 'SV', key: 'saves' },
+  ],
+}
+
 function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any[] | null; loading: boolean; onBack: () => void }) {
-  const order = sportPositionOrder[team.sport] ?? []
+  const posOrder: { key: string; name: string }[] = []
   const posRank: Record<string, number> = {}
-  order.forEach((p, i) => { posRank[p] = i })
+  const order = sportPositionOrder[team.sport] ?? []
+  order.forEach((p, i) => { posRank[p] = i; posOrder.push({ key: p, name: p }) })
 
   const groups: Record<string, any[]> = {}
   if (roster) {
@@ -891,11 +1055,7 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
       groups[abbr].push(a)
     }
     for (const key of Object.keys(groups)) {
-      groups[key].sort((a, b) => {
-        const aNum = parseInt(a.jersey) || 0
-        const bNum = parseInt(b.jersey) || 0
-        return aNum - bNum
-      })
+      groups[key].sort((a, b) => (b.primaryStat ?? -1) - (a.primaryStat ?? -1))
     }
   }
 
@@ -930,20 +1090,55 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
           <div className="space-y-5">
             {sortedPositions.map((abbr, pi) => {
               const posName = groups[abbr][0]?.position?.name ?? abbr
+              const stats = groups[abbr]
               return (
                 <div key={abbr || `pos-${pi}`}>
                   <p className="text-xs font-medium mb-2 tracking-wider text-gray-400">{posName} <span className="text-gray-600">({abbr})</span></p>
                   <div className="space-y-0.5">
-                    {groups[abbr].map((athlete: any, ai) => {
+                    {stats.map((athlete: any, ai) => {
                       const rookie = checkRookie(athlete)
+                      const hasStats = athlete.seasonStats
+                      const isNfl = team.sport === 'NFL'
+                      const nflRendered = isNfl && hasStats ? renderNflStats(athlete.seasonStats, athlete.position?.abbreviation ?? '') : null
+                      const nflSchema = nflRendered?.schema
+                      const nflValues = nflRendered?.values
                       return (
                         <div key={athlete.id ?? `athlete-${pi}-${ai}`} className="flex items-center gap-3 rounded-lg px-3 py-1.5" style={{ backgroundColor: rookie ? `${team.colors.primary}12` : 'transparent' }}>
                           <span className="text-xs w-6 text-right font-mono text-gray-500">{athlete.jersey}</span>
                           <span className="text-sm flex-1 truncate text-white/80">{athlete.fullName ?? `${athlete.firstName ?? ''} ${athlete.lastName ?? ''}`}</span>
-                          {athlete.college?.name && (
-                            <span className="text-[10px] text-gray-600 hidden md:inline truncate max-w-24">{athlete.college.name}</span>
+                          {nflSchema && nflSchema.length > 0 && (
+                            <div className="flex items-center gap-3 font-mono tabular-nums" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {nflSchema.map((s, si) => (
+                                <div key={s.key} className="text-right" style={{ minWidth: si < 2 ? '4.5rem' : '3.5rem' }}>
+                                  <span className="text-[10px] text-gray-500">{s.label}</span>
+                                  <span className="text-[11px] text-white/80 ml-1">{nflValues![si] ?? '—'}</span>
+                                </div>
+                              ))}
+                            </div>
                           )}
-                          <span className="text-xs text-gray-500">{athlete.experience?.displayValue ?? ''}</span>
+                          {!isNfl && hasStats && relevantStats[team.sport] && (
+                            <div className="flex items-center gap-2 font-mono tabular-nums" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                              {relevantStats[team.sport].map(s => {
+                                const v = athlete.seasonStats[s.key]
+                                if (v === undefined || v === null) return null
+                                return (
+                                  <div key={s.key} className="text-right" style={{ minWidth: '3.5rem' }}>
+                                    <span className="text-[10px] text-gray-500">{s.label}</span>
+                                    <span className="text-[11px] text-white/80 ml-1">{v}</span>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                          {!hasStats && athlete.college?.name && (
+                            <span className="text-[10px] text-gray-600 hidden lg:inline truncate max-w-20">{athlete.college.name}</span>
+                          )}
+                          {!hasStats && !athlete.college?.name && athlete.experience?.displayValue && (
+                            <span className="text-[10px] text-gray-500">{athlete.experience.displayValue}</span>
+                          )}
+                          {!hasStats && !athlete.college?.name && !athlete.experience?.displayValue && (
+                            <span className="text-[10px] text-gray-600">No stats yet</span>
+                          )}
                           {rookie && (
                             <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold" style={{ backgroundColor: `${team.colors.primary}40`, color: team.colors.secondary }}>R</span>
                           )}
