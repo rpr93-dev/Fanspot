@@ -9,6 +9,7 @@ interface StandingRow {
   record: string
   conference: string
   division: string
+  teamId: string
 }
 
 interface ConferenceGroup {
@@ -130,6 +131,7 @@ export async function GET(request: Request) {
           record,
           conference: match?.conference ?? '',
           division: match?.division ?? '',
+          teamId: match?.id ?? '',
         })
       }
     }
@@ -168,6 +170,7 @@ export async function GET(request: Request) {
                 record: overall?.summary ?? '',
                 conference: match?.conference ?? '',
                 division: match?.division ?? '',
+                teamId: match?.id ?? '',
               })
             }
           }
@@ -202,6 +205,7 @@ export async function GET(request: Request) {
                 record: overall?.summary ?? '',
                 conference: match?.conference ?? '',
                 division: match?.division ?? '',
+                teamId: match?.id ?? '',
               })
             }
           }

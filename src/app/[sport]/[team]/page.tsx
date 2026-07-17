@@ -664,18 +664,18 @@ export default function TeamDashboard() {
                         {conf.divisions.map((div) => (
                           <div key={div.name} className="mb-3">
                             <p className="text-xs mb-1 ml-1 text-gray-500">{div.name}</p>
-                            <div className="space-y-0.5">
+                  <div className="space-y-0.5">
                               {div.teams.map((entry, i) => {
                                 const isMyTeam = entry.abbr === getEspnAbbr(team.id, team.abbreviation)
                                 return (
-                                  <div key={entry.abbr} className="flex items-center gap-2 rounded-lg px-2.5 py-1" style={{
+                                  <Link key={entry.abbr} href={`/${sport}/${entry.teamId}`} className="flex items-center gap-2 rounded-lg px-2.5 py-1 transition-all hover:opacity-80" style={{
                                     backgroundColor: isMyTeam ? `${team.colors.primary}18` : 'transparent',
                                   }}>
                                     <span className="text-xs w-4 text-right text-gray-600">{i + 1}</span>
                                     <img src={entry.logo} alt="" className="w-4 h-4 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
                                     <span className={`text-xs flex-1 truncate ${isMyTeam ? 'text-white/90' : 'text-white/60'}`}>{entry.name.replace(/^(Los Angeles|Las Vegas|New York|New England|San Francisco|San Diego|Tampa Bay|Green Bay|Kansas City|Oklahoma City|Golden State|New Orleans|Salt Lake City|St\. Louis|Portland|Oklahoma )/, '')}</span>
                                     {entry.record && <span className="text-xs font-mono text-gray-400">{entry.record}</span>}
-                                  </div>
+                                  </Link>
                                 )
                               })}
                             </div>
@@ -1218,7 +1218,7 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
 
   return (
     <div className="animate-fade-in-up">
-      <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
+      <div className="rounded-xl p-6 overflow-hidden" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">Roster</h2>
           <button onClick={onBack}
@@ -1258,11 +1258,11 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
                       const nflSchema = nflRendered?.schema
                       const nflValues = nflRendered?.values
                       return (
-                        <div key={athlete.id ?? `athlete-${pi}-${ai}`} className="flex items-center gap-2 sm:gap-3 rounded-lg px-2 sm:px-3 py-1.5" style={{ backgroundColor: rookie ? `${team.colors.primary}12` : 'transparent' }}>
-                          <span className="text-xs w-5 sm:w-6 text-right font-mono text-gray-500">{athlete.jersey}</span>
-                          <span className="text-xs sm:text-sm flex-1 truncate text-white/80">{athlete.fullName ?? `${athlete.firstName ?? ''} ${athlete.lastName ?? ''}`}</span>
+                        <div key={athlete.id ?? `athlete-${pi}-${ai}`} className="flex items-center gap-2 sm:gap-3 rounded-lg px-2 sm:px-3 py-1.5 overflow-x-auto" style={{ backgroundColor: rookie ? `${team.colors.primary}12` : 'transparent' }}>
+                          <span className="text-xs w-5 sm:w-6 text-right font-mono text-gray-500 flex-shrink-0">{athlete.jersey}</span>
+                          <span className="text-xs sm:text-sm flex-shrink-0 text-white/80 whitespace-nowrap">{athlete.fullName ?? `${athlete.firstName ?? ''} ${athlete.lastName ?? ''}`}</span>
                           {nflSchema && nflSchema.length > 0 && (
-                            <div className="flex items-center gap-2 sm:gap-3 font-mono tabular-nums overflow-x-auto" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            <div className="flex items-center gap-2 sm:gap-3 font-mono tabular-nums flex-shrink-0" style={{ fontVariantNumeric: 'tabular-nums' }}>
                               {nflSchema.map((s, si) => (
                                 <div key={s.key} className="text-right flex-shrink-0" style={{ minWidth: si < 2 ? '3.5rem' : '2.5rem' }}>
                                   <span className="text-[9px] sm:text-[10px] text-gray-500">{s.label}</span>
@@ -1272,7 +1272,7 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
                             </div>
                           )}
                           {!isNfl && hasStats && relevantStats[team.sport] && (
-                            <div className="flex items-center gap-1.5 sm:gap-2 font-mono tabular-nums overflow-x-auto" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            <div className="flex items-center gap-1.5 sm:gap-2 font-mono tabular-nums flex-shrink-0" style={{ fontVariantNumeric: 'tabular-nums' }}>
                               {relevantStats[team.sport].map(s => {
                                 const v = athlete.seasonStats[s.key]
                                 if (v === undefined || v === null) return null
