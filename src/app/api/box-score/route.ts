@@ -174,6 +174,10 @@ export async function GET(request: Request) {
           abbreviation: abbr,
           displayName: t.team?.displayName ?? '',
           logo: t.team?.logo ?? '',
+          homeAway: headerComp?.homeAway ?? '',
+          score: headerComp?.score
+            ? { displayValue: headerComp.score.displayValue ?? '' }
+            : undefined,
           linescores,
           statistics: flattenTeamStats(t.statistics ?? []).filter(s =>
             sport.toUpperCase() !== 'MLB' || mlbKeyStatNames.has(s.name)

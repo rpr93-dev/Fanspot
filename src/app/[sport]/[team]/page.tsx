@@ -53,7 +53,7 @@ interface OddsInfo {
 }
 
 interface TeamDashboardData {
-  upcoming: { date: string; opponent: string; opponentLogo: string; location: 'home' | 'away'; venue?: string; isPreseason?: boolean } | null
+  upcoming: { date: string; opponent: string; opponentLogo: string; location: 'home' | 'away'; venue?: string; isPreseason?: boolean; isLive?: boolean; eventId?: string; homeScore?: string; awayScore?: string; homeAbbr?: string; awayAbbr?: string; statusDetail?: string } | null
   lastFive: { date: string; opponent: string; opponentLogo: string; result: 'W' | 'L'; score: string; eventId: string; isPreseason?: boolean }[]
   oddsInfo: OddsInfo | null
   news: { title: string; source: string; date: string; snippet: string; url: string }[]
@@ -112,6 +112,9 @@ export default function TeamDashboard() {
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
   const [boxScoreData, setBoxScoreData] = useState<any>(null)
   const [boxScoreLoading, setBoxScoreLoading] = useState(false)
+  const [liveBoxScore, setLiveBoxScore] = useState<any>(null)
+  const [isLiveGame, setIsLiveGame] = useState(false)
+  const liveGameIdRef = useRef<string | null>(null)
   const upcomingGameRef = useRef<{ id: string; date: string } | null>(null)
 
   const team = teams.find((t) => t.id === teamId && t.sport === sport.toUpperCase())
@@ -177,6 +180,9 @@ export default function TeamDashboard() {
           teamStanding: standingsRes?.teamStanding ?? '',
           standingsMessage: standingsRes?.message ?? '',
         })
+        const live = schedForState.upcoming?.isLive
+        setIsLiveGame(!!live)
+        liveGameIdRef.current = live ? (schedForState.upcomingEventId ?? null) : null
       } catch (err) {
         console.error('[dashboard] Failed to load team data:', err)
         if (!cancelled) setData(getFallbackData(t.name, t.sport))
@@ -202,7 +208,7 @@ export default function TeamDashboard() {
       .catch(() => setRosterLoading(false))
   }, [showRoster, team?.id])
 
-  // Odds poll every 30s
+  // Odds poll every 30s (uses upcoming or live game ID)
   useEffect(() => {
     if (!team) return
     const abbr = getEspnAbbr(team.id, team.abbreviation)
@@ -210,7 +216,10 @@ export default function TeamDashboard() {
       try {
         let url = `/api/odds?sport=${team.sport}&team=${abbr}`
         const ug = upcomingGameRef.current
-        if (ug) url += `&eventId=${encodeURIComponent(ug.id)}&date=${ug.date}`
+        const lg = liveGameIdRef.current
+        const gameId = lg || ug?.id
+        const gameDate = ug?.date
+        if (gameId && gameDate) url += `&eventId=${encodeURIComponent(gameId)}&date=${gameDate}`
         const res = await fetch(url)
         if (res.ok) {
           const json = await res.json()
@@ -274,10 +283,60 @@ export default function TeamDashboard() {
           ? { id: result.upcomingEventId, date: result.upcomingDate! }
           : null
         setData(p => p ? { ...p, upcoming: result.upcoming, lastFive: result.lastFive } : p)
+        const live = result.upcoming?.isLive
+        setIsLiveGame(!!live)
+        liveGameIdRef.current = live ? (result.upcomingEventId ?? null) : null
       } catch { /* silent */ }
     }, 300000)
     return () => clearInterval(id)
   }, [team?.id])
+
+  // Live box score poll every 15s when a game is in progress
+  useEffect(() => {
+    if (!team || !isLiveGame || !liveGameIdRef.current) return
+    const eventId = liveGameIdRef.current
+    const t = team
+
+    async function fetchLiveBoxScore() {
+      try {
+        const res = await fetch(`/api/box-score?sport=${t.sport}&eventId=${eventId}`)
+        if (res.ok) {
+          const json = await res.json()
+          if (json?.boxScore) {
+            setLiveBoxScore(json.boxScore)
+            // Update the upcoming game score display from live box score
+            const teams = json.boxScore.teams
+            const bsStatus = json.boxScore?.status
+            if (teams?.length >= 2) {
+              setData(p => {
+                if (!p?.upcoming?.isLive) return p
+                const home = teams.find((t: any) => t.homeAway === 'home')
+                const away = teams.find((t: any) => t.homeAway === 'away')
+                const statusDetail = bsStatus?.description ?? bsStatus?.shortDetail ?? p.upcoming.statusDetail
+                return {
+                  ...p,
+                  upcoming: {
+                    ...p.upcoming,
+                    homeScore: home?.score?.displayValue ?? p.upcoming.homeScore,
+                    awayScore: away?.score?.displayValue ?? p.upcoming.awayScore,
+                    homeAbbr: home?.abbreviation ?? p.upcoming.homeAbbr,
+                    awayAbbr: away?.abbreviation ?? p.upcoming.awayAbbr,
+                    statusDetail,
+                  },
+                }
+              })
+            }
+            // If user is viewing this game's box score, update it live too
+            setBoxScoreData((prev: any) => prev ? json.boxScore : prev)
+          }
+        }
+      } catch { /* silent */ }
+    }
+
+    fetchLiveBoxScore()
+    const id = setInterval(fetchLiveBoxScore, 15000)
+    return () => { clearInterval(id); setLiveBoxScore(null) }
+  }, [team?.id, isLiveGame])
 
   // Box score fetch on game click
   useEffect(() => {
@@ -351,8 +410,12 @@ export default function TeamDashboard() {
         <Link href={`/${sport}`} className="text-sm text-gray-500 hover:text-white transition-colors inline-block mb-8">&larr; {config.name}</Link>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-            <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}12`, border: `1px solid ${team.colors.primary}20` }}>
-              <h2 className="text-xs font-medium text-gray-500 tracking-wider uppercase mb-4">Next Game</h2>
+            <div className={`rounded-xl p-6 ${data?.upcoming?.isLive ? 'cursor-pointer transition-all duration-300 group' : ''}`}
+              style={{ backgroundColor: `${team.colors.primary}12`, border: `1px solid ${team.colors.primary}20` }}
+              onClick={() => { if (data?.upcoming?.isLive && data.upcoming.eventId) { setSelectedGameId(data.upcoming.eventId) } }}
+              onMouseEnter={(e) => { if (data?.upcoming?.isLive) { e.currentTarget.style.boxShadow = `0 0 20px -6px ${team.colors.primary}50`; e.currentTarget.style.borderColor = `${team.colors.primary}40` } }}
+              onMouseLeave={(e) => { if (data?.upcoming?.isLive) { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = `${team.colors.primary}20` } }}>
+              <h2 className="text-xs font-medium text-gray-500 tracking-wider uppercase mb-4">{data?.upcoming?.isLive ? 'Live' : 'Next Game'}</h2>
               {loading ? (
                 <div className="animate-pulse space-y-3">
                   <div className="h-7 rounded w-3/4" style={{ backgroundColor: `${team.colors.primary}20` }} />
@@ -368,8 +431,38 @@ export default function TeamDashboard() {
                       {data.upcoming.location === 'home' ? 'vs' : '@'} {data.upcoming.opponent}
                     </p>
                   </div>
-                  <p className="text-sm text-gray-500 mt-1">{data.upcoming.date}</p>
-                  <p className="text-xs text-gray-600 mt-0.5">{data.upcoming.location === 'home' ? 'Home' : 'Away'}{data.upcoming.venue ? ` · ${data.upcoming.venue}` : ''}</p>
+                  {data.upcoming.isLive ? (
+                    <div className="mt-1">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider bg-red-500/20 text-red-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
+                          LIVE
+                        </span>
+                        <span className="text-sm text-gray-400">{data.upcoming.statusDetail ?? 'Starting soon'}</span>
+                        <span className="text-[10px] text-gray-600 ml-auto animate-pulse">auto-refreshing</span>
+                      </div>
+                      {data.upcoming.awayScore != null && data.upcoming.homeScore != null ? (
+                        <div className="flex items-center gap-5 mt-1">
+                          <div className="flex items-center gap-3">
+                            <span className="text-xs font-medium text-gray-500 w-8 text-right">{data.upcoming.awayAbbr ?? 'Away'}</span>
+                            <span className="text-2xl font-bold font-mono text-white/90 min-w-[3ch] text-right tabular-nums">{data.upcoming.awayScore}</span>
+                          </div>
+                          <span className="text-lg text-gray-600">-</span>
+                          <div className="flex items-center gap-3">
+                            <span className="text-2xl font-bold font-mono text-white/90 min-w-[3ch] text-right tabular-nums">{data.upcoming.homeScore}</span>
+                            <span className="text-xs font-medium text-gray-500 w-8 text-left">{data.upcoming.homeAbbr ?? 'Home'}</span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-gray-600 mt-1 animate-pulse">Score data loading...</p>
+                      )}
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-sm text-gray-500 mt-1">{data.upcoming.date}</p>
+                      <p className="text-xs text-gray-600 mt-0.5">{data.upcoming.location === 'home' ? 'Home' : 'Away'}{data.upcoming.venue ? ` · ${data.upcoming.venue}` : ''}</p>
+                    </>
+                  )}
                   {data.upcoming.isPreseason && <span className="inline-block mt-2 px-2 py-0.5 text-xs font-medium bg-amber-500/15 text-amber-400 rounded">Preseason</span>}
                   {data.oddsInfo ? (
                     <div className="mt-5 pt-4 space-y-3" style={{ borderTop: `1px solid ${team.colors.primary}15` }}>
@@ -488,6 +581,7 @@ export default function TeamDashboard() {
               teamAbbr={getEspnAbbr(team.id, team.abbreviation)}
               teamColor={team.colors.primary}
               sport={team.sport}
+              isLive={isLiveGame}
               onBack={() => { setSelectedGameId(null); setBoxScoreData(null) }}
             />
           </>
@@ -685,7 +779,7 @@ function prettifyName(name: string): string {
     .trim()
 }
 
-function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { data: any; loading: boolean; teamAbbr: string; teamColor: string; sport: string; onBack: () => void }) {
+function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBack }: { data: any; loading: boolean; teamAbbr: string; teamColor: string; sport: string; isLive?: boolean; onBack: () => void }) {
   const [showPlayerStats, setShowPlayerStats] = useState(false)
 
   const ourIdx = data?.teams?.findIndex((t: any) => t.abbreviation === teamAbbr) ?? -1
@@ -730,6 +824,15 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, onBack }: { 
       <div className="flex items-center justify-between mb-2">
         <h3 className="text-xs font-medium tracking-wider uppercase text-gray-400">Box Score</h3>
         <div className="flex items-center gap-2">
+          {isLive && (
+            <span className="inline-flex items-center gap-1.5 text-[10px] text-red-400 font-medium mr-1">
+              <span className="relative flex w-2 h-2">
+                <span className="absolute w-full h-full rounded-full bg-red-400 animate-ping opacity-75" />
+                <span className="relative w-2 h-2 rounded-full bg-red-500" />
+              </span>
+              LIVE · updating
+            </span>
+          )}
           <button onClick={() => setShowPlayerStats((v) => !v)}
             className="text-xs px-2 py-1 rounded transition-colors text-gray-400 hover:text-white"
             style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
@@ -891,15 +994,39 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
   let upcomingDate: string | null = null
 
   if (schedule.upcoming) {
+    const comp = schedule.upcoming.competitions?.[0]
+    const status = comp?.status?.type
+    const isLive = status?.state === 'in' || (status?.name === 'STATUS_IN_PROGRESS')
     const opp = getOpponent(schedule.upcoming, espnAbbr, sport)
-    const venue = schedule.upcoming.competitions?.[0]?.venue?.fullName
+    const venue = comp?.venue?.fullName
+
+    let homeScore: string | undefined
+    let awayScore: string | undefined
+    let homeAbbr: string | undefined
+    let awayAbbr: string | undefined
+    if (isLive && comp?.competitors) {
+      const home = comp.competitors.find(c => c.homeAway === 'home')
+      const away = comp.competitors.find(c => c.homeAway === 'away')
+      homeScore = home?.score?.displayValue
+      awayScore = away?.score?.displayValue
+      homeAbbr = home?.team?.abbreviation
+      awayAbbr = away?.team?.abbreviation
+    }
+
     upcoming = {
-      date: getGameDetail(schedule.upcoming),
+      date: isLive ? (status?.detail ?? status?.shortDetail) : getGameDetail(schedule.upcoming),
       opponent: opp.name,
       opponentLogo: opp.logo,
       location: opp.location,
       venue,
       isPreseason: schedule.upcoming.seasonType?.type === 1 || schedule.upcoming.season?.type === 1,
+      isLive,
+      eventId: schedule.upcoming.id,
+      homeScore,
+      awayScore,
+      homeAbbr,
+      awayAbbr,
+      statusDetail: isLive ? (status?.detail ?? status?.shortDetail ?? 'In progress') : undefined,
     }
     upcomingEventId = schedule.upcoming.id
     upcomingDate = schedule.upcoming.date.slice(0, 10).replace(/-/g, '')

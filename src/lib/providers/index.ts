@@ -32,6 +32,7 @@ function hasUpcomingGame(events: EspnEvent[]): boolean {
   return events.some((e) => {
     const c = e.competitions?.[0]
     if (c?.status?.type?.completed || c?.status?.type?.state === 'post') return false
+    if (c?.status?.type?.state === 'in') return true
     return new Date(e.date) > now
   })
 }
@@ -59,11 +60,16 @@ function computeResult(events: EspnEvent[]): ScheduleResult {
     .filter((e) => {
       const c = e.competitions?.[0]
       if (c?.status?.type?.completed || c?.status?.type?.state === 'post') return false
+      if (c?.status?.type?.state === 'in') return false // live games handled separately
       return new Date(e.date) > now
     })
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
 
-  const upcoming = future[0] ?? null
+  // Live / in-progress game — prefer most recent started
+  const live = events
+    .filter((e) => e.competitions?.[0]?.status?.type?.state === 'in')
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+  const upcoming = live[0] ?? future.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0] ?? null
 
   return { upcoming, lastFive }
 }

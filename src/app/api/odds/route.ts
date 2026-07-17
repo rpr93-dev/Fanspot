@@ -81,7 +81,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid sport' }, { status: 400 })
   }
 
-  log(`Looking up odds for ${sport}/${team}`)
+  log(`Request params: sport=${sport} team=${team} eventId=${eventId} date=${providedDate}`)
 
   try {
     let gameDate: string
@@ -114,6 +114,7 @@ export async function GET(request: Request) {
       const upcoming = events.find((e: any) => {
         const c = e.competitions?.[0]
         if (c?.status?.type?.completed || c?.status?.type?.state === 'post') return false
+        if (c?.status?.type?.state === 'in') return true
         return new Date(e.date) > now
       })
 
@@ -187,7 +188,9 @@ export async function GET(request: Request) {
       return NextResponse.json({ odds: null, source: 'espn' })
     }
 
-    log(`Game matched for ${sport}/${gameDate}`)
+    const eventStatus = sbEvent.competitions?.[0]?.status
+    const eventState = eventStatus?.type?.state ?? eventStatus?.state ?? 'unknown'
+    log(`Scoreboard event found: state=${eventState}, detail=${eventStatus?.detail ?? '-'}`)
 
     const sbCompetitors = sbEvent.competitions?.[0]?.competitors ?? []
     const { home: sbHome, away: sbAway } = findHomeAway(sbCompetitors)
@@ -200,10 +203,33 @@ export async function GET(request: Request) {
     const sbHomeAbbr = getTeamAbbr(sbHome)
     const sbAwayAbbr = getTeamAbbr(sbAway)
 
-    // Step 7: Extract odds
-    const oddsArr = sbEvent.competitions?.[0]?.odds
+    // Step 7: Extract odds — try scoreboard first, then summary endpoint for live games
+    let oddsArr = sbEvent.competitions?.[0]?.odds
+    log(`Scoreboard event odds: ${oddsArr ? oddsArr.length + ' entries' : 'absent'}`)
+
+    if ((!oddsArr || oddsArr.length === 0) && eventIdStr) {
+      // Fallback: fetch the summary endpoint for this event (may have odds during live games)
+      const summaryUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${eventIdStr}`
+      log(`Fallback: fetching summary endpoint: ${summaryUrl}`)
+      try {
+        const summaryRes = await fetch(summaryUrl, { signal: AbortSignal.timeout(10000) })
+        if (summaryRes.ok) {
+          const summaryData = await summaryRes.json()
+          oddsArr = summaryData?.header?.competitions?.[0]?.odds
+          log(`Summary endpoint odds: ${oddsArr ? oddsArr.length + ' entries' : 'absent'}`)
+          if (oddsArr?.length) {
+            log('Using odds from summary endpoint (live game fallback)')
+          }
+        } else {
+          log(`Summary endpoint returned ${summaryRes.status}`)
+        }
+      } catch (e: any) {
+        log(`Summary endpoint fetch error: ${e.message}`)
+      }
+    }
+
     if (!oddsArr || oddsArr.length === 0) {
-      log('No odds array in competition data — odds not yet posted by sportsbooks')
+      log('No odds array from either source — odds not posted')
       return NextResponse.json({ odds: null, source: 'espn' })
     }
 
