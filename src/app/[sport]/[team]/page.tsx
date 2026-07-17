@@ -53,8 +53,8 @@ interface OddsInfo {
 }
 
 interface TeamDashboardData {
-  upcoming: { date: string; opponent: string; opponentLogo: string; location: 'home' | 'away'; venue?: string; isPreseason?: boolean; isLive?: boolean; eventId?: string; homeScore?: string; awayScore?: string; homeAbbr?: string; awayAbbr?: string; statusDetail?: string } | null
-  lastFive: { date: string; opponent: string; opponentLogo: string; result: 'W' | 'L'; score: string; eventId: string; isPreseason?: boolean }[]
+  upcoming: { date: string; opponent: string; opponentLogo: string; location: 'home' | 'away'; venue?: string; isPreseason?: boolean; isLive?: boolean; eventId?: string; homeScore?: string; awayScore?: string; homeAbbr?: string; awayAbbr?: string; statusDetail?: string; seasonTypeName?: string } | null
+  lastFive: { date: string; opponent: string; opponentLogo: string; result: 'W' | 'L'; score: string; eventId: string; isPreseason?: boolean; seasonTypeName?: string }[]
   oddsInfo: OddsInfo | null
   news: { title: string; source: string; date: string; snippet: string; url: string }[]
   standings: ConferenceGroup[]
@@ -406,11 +406,11 @@ export default function TeamDashboard() {
 
   return (
     <div className="min-h-screen" style={{ background: `linear-gradient(135deg, #0a0a0f, ${team.colors.primary}08, #1a1a2e)` }}>
-      <div className="px-6 py-10">
+      <div className="px-4 sm:px-6 py-6 sm:py-10">
         <Link href={`/${sport}`} className="text-sm text-gray-500 hover:text-white transition-colors inline-block mb-8">&larr; {config.name}</Link>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-            <div className={`rounded-xl p-6 ${data?.upcoming?.isLive ? 'cursor-pointer transition-all duration-300 group' : ''}`}
+            <div className={`rounded-xl p-5 sm:p-6 ${data?.upcoming?.isLive ? 'cursor-pointer transition-all duration-300 group' : ''}`}
               style={{ backgroundColor: `${team.colors.primary}12`, border: `1px solid ${team.colors.primary}20` }}
               onClick={() => { if (data?.upcoming?.isLive && data.upcoming.eventId) { setSelectedGameId(data.upcoming.eventId) } }}
               onMouseEnter={(e) => { if (data?.upcoming?.isLive) { e.currentTarget.style.boxShadow = `0 0 20px -6px ${team.colors.primary}50`; e.currentTarget.style.borderColor = `${team.colors.primary}40` } }}
@@ -433,13 +433,13 @@ export default function TeamDashboard() {
                   </div>
                   {data.upcoming.isLive ? (
                     <div className="mt-1">
-                      <div className="flex items-center gap-2 mb-2">
+                      <div className="flex items-center gap-2 mb-2 flex-wrap">
                         <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider bg-red-500/20 text-red-400">
                           <span className="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse" />
                           LIVE
                         </span>
-                        <span className="text-sm text-gray-400">{data.upcoming.statusDetail ?? 'Starting soon'}</span>
-                        <span className="text-[10px] text-gray-600 ml-auto animate-pulse">auto-refreshing</span>
+                        <span className="text-xs sm:text-sm text-gray-400">{data.upcoming.statusDetail ?? 'Starting soon'}</span>
+                        <span className="text-[10px] text-gray-600 ml-auto animate-pulse hidden sm:inline">auto-refreshing</span>
                       </div>
                       {data.upcoming.awayScore != null && data.upcoming.homeScore != null ? (
                         <div className="flex items-center gap-5 mt-1">
@@ -463,7 +463,7 @@ export default function TeamDashboard() {
                       <p className="text-xs text-gray-600 mt-0.5">{data.upcoming.location === 'home' ? 'Home' : 'Away'}{data.upcoming.venue ? ` · ${data.upcoming.venue}` : ''}</p>
                     </>
                   )}
-                  {data.upcoming.isPreseason && <span className="inline-block mt-2 px-2 py-0.5 text-xs font-medium bg-amber-500/15 text-amber-400 rounded">Preseason</span>}
+                  {data.upcoming.seasonTypeName && <span className="inline-block mt-2 px-2 py-0.5 text-xs font-medium bg-amber-500/15 text-amber-400 rounded">{data.upcoming.seasonTypeName}</span>}
                   {data.oddsInfo ? (
                     <div className="mt-5 pt-4 space-y-3" style={{ borderTop: `1px solid ${team.colors.primary}15` }}>
                       <div className="flex items-center justify-between text-sm">
@@ -550,7 +550,7 @@ export default function TeamDashboard() {
                   {data?.teamStanding && <span className="text-xs text-gray-500">{data.teamStanding}</span>}
                 </div>
                 {data?.lastFive.length ? (
-                  <div className="grid grid-cols-5 gap-2">
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                     {data.lastFive.map((game, i) => (
                       <div key={i} className="rounded-lg p-2 flex flex-col items-center text-center transition-all duration-200 cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : 'transparent'}` }}
                         onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}
@@ -567,6 +567,7 @@ export default function TeamDashboard() {
                         <span className="text-[11px] text-white/80 truncate max-w-full">{game.opponent}</span>
                         <span className="text-[11px] text-gray-400">{game.score}</span>
                         {game.isPreseason && <span className="text-[9px] text-amber-400/70">Pre</span>}
+                        {!game.isPreseason && game.seasonTypeName && <span className="text-[9px] text-amber-400/70">{game.seasonTypeName === 'Preseason' ? 'Pre' : game.seasonTypeName}</span>}
                       </div>
                     ))}
                   </div>
@@ -594,13 +595,13 @@ export default function TeamDashboard() {
                   {data?.teamStanding && <span className="text-xs text-gray-500">{data.teamStanding}</span>}
                 </div>
                 {loading ? (
-                  <div className="grid grid-cols-5 gap-3">
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3">
                     {[...Array(5)].map((_, i) => (
                       <div key={i} className="h-24 rounded-lg animate-pulse" style={{ backgroundColor: `${team.colors.primary}15` }} />
                     ))}
                   </div>
                 ) : data?.lastFive.length ? (
-                  <div className="grid grid-cols-5 gap-3 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
+                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
                     {data.lastFive.map((game, i) => (
                       <div key={i} className="rounded-lg p-3 flex flex-col items-center text-center transition-all duration-200 cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : team.colors.primary}10` }}
                         onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}
@@ -619,6 +620,7 @@ export default function TeamDashboard() {
                         <div className="flex items-center gap-1 mt-0.5">
                           <span className="text-[10px] text-gray-500">{game.date}</span>
                           {game.isPreseason && <span className="text-[10px] text-amber-400/70">Pre</span>}
+                          {!game.isPreseason && game.seasonTypeName && <span className="text-[10px] text-amber-400/70">{game.seasonTypeName === 'Preseason' ? 'Pre' : game.seasonTypeName}</span>}
                         </div>
                       </div>
                     ))}
@@ -727,7 +729,19 @@ export default function TeamDashboard() {
   )
 }
 
-const periodLabels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+function getPeriodLabels(sport: string): string[] {
+  const sportKey = sport.toUpperCase()
+  if (sportKey === 'NBA' || sportKey === 'NFL') {
+    return ['Q1', 'Q2', 'Q3', 'Q4', 'OT1', 'OT2', 'OT3', 'OT4', 'OT5', 'OT6', 'OT7', 'OT8']
+  }
+  if (sportKey === 'NHL') {
+    return ['1st', '2nd', '3rd', 'OT', 'SO', '', '', '', '', '', '', '']
+  }
+  if (sportKey === 'MLB') {
+    return ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th']
+  }
+  return ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+}
 
 const sum = (arr: number[]) => arr.reduce((a, b) => a + b, 0)
 
@@ -854,31 +868,31 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
         <>
           {/* Period scores — always visible */}
           {maxPeriods > 0 && (
-            <div className="overflow-x-auto mb-2">
+            <div className="overflow-x-auto mb-3">
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-gray-600">
-                    <th className="text-left pr-2 pb-0.5 font-medium" />
+                    <th className="text-left pr-3 pb-1 font-medium tracking-wider text-[10px]" />
                     {Array.from({ length: maxPeriods }, (_, i) => (
-                      <th key={i} className="text-center px-1 pb-0.5 font-medium">{periodLabels[i]}</th>
+                      <th key={i} className="text-center px-1.5 pb-1 font-medium text-[10px] tracking-wider">{getPeriodLabels(sport)[i]}</th>
                     ))}
-                    <th className="text-center pl-2 pb-0.5 font-medium text-white/60">T</th>
+                    <th className="text-center pl-2 pb-1 font-medium text-white/60 text-[10px] tracking-wider">T</th>
                   </tr>
                 </thead>
                 <tbody>
-                  <tr className="text-white/80">
-                    <td className="pr-2 py-0.5 font-medium truncate max-w-16 text-xs">{ourTeam?.displayName ?? 'Home'}</td>
+                  <tr className="text-white/85" style={{ borderBottom: `1px solid ${teamColor}10` }}>
+                    <td className="pr-3 py-1 font-medium text-xs">{ourTeam?.abbreviation ?? 'Home'}</td>
                     {Array.from({ length: maxPeriods }, (_, i) => (
-                      <td key={i} className="text-center px-1 py-0.5 font-mono">{ourTeam?.linescores?.[i] ?? '-'}</td>
+                      <td key={i} className="text-center px-1.5 py-1 font-mono tabular-nums">{ourTeam?.linescores?.[i] ?? '-'}</td>
                     ))}
-                    <td className="text-center pl-2 py-0.5 font-mono text-white font-medium">{ourTeam ? sum(ourTeam.linescores) : '-'}</td>
+                    <td className="text-center pl-2 py-1 font-mono tabular-nums text-white font-semibold">{ourTeam ? sum(ourTeam.linescores) : '-'}</td>
                   </tr>
-                  <tr className="text-white/80">
-                    <td className="pr-2 py-0.5 font-medium truncate max-w-16 text-xs">{oppTeam?.displayName ?? 'Away'}</td>
+                  <tr className="text-white/85">
+                    <td className="pr-3 py-1 font-medium text-xs">{oppTeam?.abbreviation ?? 'Away'}</td>
                     {Array.from({ length: maxPeriods }, (_, i) => (
-                      <td key={i} className="text-center px-1 py-0.5 font-mono">{oppTeam?.linescores?.[i] ?? '-'}</td>
+                      <td key={i} className="text-center px-1.5 py-1 font-mono tabular-nums">{oppTeam?.linescores?.[i] ?? '-'}</td>
                     ))}
-                    <td className="text-center pl-2 py-0.5 font-mono text-white font-medium">{oppTeam ? sum(oppTeam.linescores) : '-'}</td>
+                    <td className="text-center pl-2 py-1 font-mono tabular-nums text-white font-semibold">{oppTeam ? sum(oppTeam.linescores) : '-'}</td>
                   </tr>
                 </tbody>
               </table>
@@ -893,17 +907,17 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-gray-600">
-                        <th className="text-left pr-2 pb-0.5 font-medium" />
-                        <th className="text-center px-1 pb-0.5 font-medium text-gray-500">{ourTeam?.abbreviation ?? 'Home'}</th>
-                        <th className="text-center pl-1 pr-2 pb-0.5 font-medium text-gray-500">{oppTeam?.abbreviation ?? 'Away'}</th>
+                        <th className="text-left pr-3 pb-1 font-medium tracking-wider uppercase text-[10px]" />
+                        <th className="text-right px-2 pb-1 font-medium tracking-wider uppercase text-[10px]" style={{ color: teamColor }}>{ourTeam?.abbreviation ?? 'Home'}</th>
+                        <th className="text-right pl-2 pb-1 font-medium tracking-wider uppercase text-[10px] text-gray-500">{oppTeam?.abbreviation ?? 'Away'}</th>
                       </tr>
                     </thead>
                     <tbody>
                       {allStats.map((s, si) => (
-                        <tr key={`${si}`} className="text-white/70">
-                          <td className="pr-2 py-0.5 text-gray-400 text-xs">{teamStatLabels[s.name] ?? prettifyName(s.name)}</td>
-                          <td className="text-center px-1 py-0.5 font-mono">{s.our}</td>
-                          <td className="text-center pl-1 pr-2 py-0.5 font-mono">{s.opp}</td>
+                        <tr key={si} className="text-white/70" style={si % 2 === 1 ? { backgroundColor: `${teamColor}08` } : undefined}>
+                          <td className="pr-3 py-1 text-gray-400 text-xs tracking-wide">{teamStatLabels[s.name] ?? prettifyName(s.name)}</td>
+                          <td className="text-right px-2 py-1 font-mono tabular-nums">{s.our}</td>
+                          <td className="text-right pl-2 py-1 font-mono tabular-nums">{s.opp}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -920,45 +934,48 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
             <>
               {hasAnyPlayerStats ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {sortedPlayerStats.map((team: any, ti: number) => (
-                    <div key={team.teamAbbr || ti}>
-                      <p className="text-xs font-medium mb-2 text-white/70">
-                        {team.teamAbbr === teamAbbr ? team.teamAbbr : `${team.teamAbbr}`}
-                      </p>
-                      {team.categories.map((cat: any, ci: number) => (
-                        <div key={`${cat.label || 'cat'}-${ci}`} className="mb-3">
-                          <h5 className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wider">{cat.label}</h5>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="text-gray-600">
-                                  <th className="text-left pr-2 py-0.5 font-medium">#</th>
-                                  <th className="text-left pr-2 py-0.5 font-medium">Player</th>
-                                  {cat.statNames.map((n: string, ni: number) => (
-                                    <th key={`${n}-${ni}`} className="text-center px-1 py-0.5 font-medium text-gray-500">{playerStatLabels[n] ?? prettifyName(n)}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {cat.athletes.map((a: any, ai: number) => (
-                                  <tr key={a.id || ai} className="text-white/70">
-                                    <td className="pr-2 py-0.5 font-mono text-gray-500 text-right">{a.jersey ?? ''}</td>
-                                    <td className="pr-2 py-0.5 truncate max-w-24">
-                                      {a.displayName}
-                                      {a.position ? <span className="text-gray-500 ml-0.5">({a.position})</span> : ''}
-                                    </td>
+                  {sortedPlayerStats.map((team: any, ti: number) => {
+                    const isOurTeam = team.teamAbbr === teamAbbr
+                    return (
+                      <div key={team.teamAbbr || ti}>
+                        <p className="text-xs font-medium mb-2 tracking-wider uppercase" style={{ color: isOurTeam ? teamColor : undefined, opacity: isOurTeam ? 1 : 0.7 }}>
+                          {team.teamAbbr}
+                        </p>
+                        {team.categories.map((cat: any, ci: number) => (
+                          <div key={ci} className="mb-3">
+                            <h5 className="text-[10px] font-medium text-gray-500 mb-1 uppercase tracking-wider">{cat.label}</h5>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-xs">
+                                <thead>
+                                  <tr className="text-gray-600">
+                                    <th className="text-left pr-2 pb-1 font-medium">#</th>
+                                    <th className="text-left pr-2 pb-1 font-medium">Player</th>
                                     {cat.statNames.map((n: string, ni: number) => (
-                                      <td key={`${n}-${ni}`} className="text-center px-1 py-0.5 font-mono">{a.stats?.[n] ?? '-'}</td>
+                                      <th key={ni} className="text-right px-1 pb-1 font-medium text-gray-500 text-[10px] tracking-wider">{playerStatLabels[n] ?? prettifyName(n)}</th>
                                     ))}
                                   </tr>
-                                ))}
-                              </tbody>
-                            </table>
+                                </thead>
+                                <tbody>
+                                  {cat.athletes.map((a: any, ai: number) => (
+                                    <tr key={a.id || ai} className="text-white/70" style={ai % 2 === 1 ? { backgroundColor: isOurTeam ? `${teamColor}08` : `${teamColor}04` } : undefined}>
+                                      <td className="pr-2 py-0.5 font-mono text-gray-500 text-right">{a.jersey ?? ''}</td>
+                                      <td className="pr-2 py-0.5 truncate max-w-28">
+                                        {a.displayName}
+                                        {a.position ? <span className="text-gray-500 ml-0.5">({a.position})</span> : ''}
+                                      </td>
+                                      {cat.statNames.map((n: string, ni: number) => (
+                                        <td key={ni} className="text-right px-1 py-0.5 font-mono tabular-nums">{a.stats?.[n] ?? '-'}</td>
+                                      ))}
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
                           </div>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
+                        ))}
+                      </div>
+                    )
+                  })}
                 </div>
               ) : (
                 <p className="text-sm text-gray-500">Player stats not yet available</p>
@@ -975,6 +992,15 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
   )
 }
 
+function getSeasonTypeName(e: EspnEvent): string | undefined {
+  const t = e.seasonType?.type ?? e.season?.type
+  if (!t) return undefined
+  if (t === 1) return 'Preseason'
+  if (t === 3) return 'Playoffs'
+  if (t === 4) return 'Summer League'
+  return e.seasonType?.name ?? undefined
+}
+
 function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFive: EspnEvent[] }, espnAbbr: string, sport: string) {
   const lastFive = schedule.lastFive.map((e) => {
     const opp = getOpponent(e, espnAbbr, sport)
@@ -986,6 +1012,7 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
       score: getScore(e, espnAbbr),
       eventId: e.id,
       isPreseason: e.seasonType?.type === 1 || e.season?.type === 1,
+      seasonTypeName: getSeasonTypeName(e),
     }
   })
 
@@ -1027,6 +1054,7 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
       homeAbbr,
       awayAbbr,
       statusDetail: isLive ? (status?.detail ?? status?.shortDetail ?? 'In progress') : undefined,
+      seasonTypeName: getSeasonTypeName(schedule.upcoming),
     }
     upcomingEventId = schedule.upcoming.id
     upcomingDate = schedule.upcoming.date.slice(0, 10).replace(/-/g, '')
@@ -1230,28 +1258,28 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
                       const nflSchema = nflRendered?.schema
                       const nflValues = nflRendered?.values
                       return (
-                        <div key={athlete.id ?? `athlete-${pi}-${ai}`} className="flex items-center gap-3 rounded-lg px-3 py-1.5" style={{ backgroundColor: rookie ? `${team.colors.primary}12` : 'transparent' }}>
-                          <span className="text-xs w-6 text-right font-mono text-gray-500">{athlete.jersey}</span>
-                          <span className="text-sm flex-1 truncate text-white/80">{athlete.fullName ?? `${athlete.firstName ?? ''} ${athlete.lastName ?? ''}`}</span>
+                        <div key={athlete.id ?? `athlete-${pi}-${ai}`} className="flex items-center gap-2 sm:gap-3 rounded-lg px-2 sm:px-3 py-1.5" style={{ backgroundColor: rookie ? `${team.colors.primary}12` : 'transparent' }}>
+                          <span className="text-xs w-5 sm:w-6 text-right font-mono text-gray-500">{athlete.jersey}</span>
+                          <span className="text-xs sm:text-sm flex-1 truncate text-white/80">{athlete.fullName ?? `${athlete.firstName ?? ''} ${athlete.lastName ?? ''}`}</span>
                           {nflSchema && nflSchema.length > 0 && (
-                            <div className="flex items-center gap-3 font-mono tabular-nums" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            <div className="flex items-center gap-2 sm:gap-3 font-mono tabular-nums overflow-x-auto" style={{ fontVariantNumeric: 'tabular-nums' }}>
                               {nflSchema.map((s, si) => (
-                                <div key={s.key} className="text-right" style={{ minWidth: si < 2 ? '4.5rem' : '3.5rem' }}>
-                                  <span className="text-[10px] text-gray-500">{s.label}</span>
-                                  <span className="text-[11px] text-white/80 ml-1">{nflValues![si] ?? '—'}</span>
+                                <div key={s.key} className="text-right flex-shrink-0" style={{ minWidth: si < 2 ? '3.5rem' : '2.5rem' }}>
+                                  <span className="text-[9px] sm:text-[10px] text-gray-500">{s.label}</span>
+                                  <span className="text-[10px] sm:text-[11px] text-white/80 ml-0.5">{nflValues![si] ?? '—'}</span>
                                 </div>
                               ))}
                             </div>
                           )}
                           {!isNfl && hasStats && relevantStats[team.sport] && (
-                            <div className="flex items-center gap-2 font-mono tabular-nums" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                            <div className="flex items-center gap-1.5 sm:gap-2 font-mono tabular-nums overflow-x-auto" style={{ fontVariantNumeric: 'tabular-nums' }}>
                               {relevantStats[team.sport].map(s => {
                                 const v = athlete.seasonStats[s.key]
                                 if (v === undefined || v === null) return null
                                 return (
-                                  <div key={s.key} className="text-right" style={{ minWidth: '3.5rem' }}>
-                                    <span className="text-[10px] text-gray-500">{s.label}</span>
-                                    <span className="text-[11px] text-white/80 ml-1">{v}</span>
+                                  <div key={s.key} className="text-right flex-shrink-0" style={{ minWidth: '2.5rem' }}>
+                                    <span className="text-[9px] sm:text-[10px] text-gray-500">{s.label}</span>
+                                    <span className="text-[10px] sm:text-[11px] text-white/80 ml-0.5">{v}</span>
                                   </div>
                                 )
                               })}

@@ -89,17 +89,40 @@ export async function getTeamSchedule(
   const espnResult = await espn.fetchTeamSchedule(sport, teamId, teamAbbreviation)
   const espnEvents = espnResult.events as EspnEvent[]
 
-  let validation = validateSchedule(espnEvents, sport, teamAbbr)
-  const espnTypes = seasonTypeCoverage(espnEvents)
-  const espnHasUpcoming = hasUpcomingGame(espnEvents)
-  const espnHasCompleted = hasCompletedGames(espnEvents)
+  let espnHasUpcoming = hasUpcomingGame(espnEvents)
+  let espnHasCompleted = hasCompletedGames(espnEvents)
+
+  // For NBA, also fetch Summer League games and merge
+  let allEvents = [...espnEvents]
+  if (sport === 'NBA') {
+    const slResult = await espn.fetchSummerLeagueEvents(teamAbbr)
+    if (slResult.events.length > 0) {
+      const existingIds = new Set(allEvents.map((e) => e.id))
+      for (const e of slResult.events) {
+        if (!existingIds.has(e.id)) {
+          allEvents.push(e)
+          existingIds.add(e.id)
+        }
+      }
+      if (!slResult.problems.length) {
+        espnHasUpcoming = hasUpcomingGame(allEvents)
+        espnHasCompleted = hasCompletedGames(allEvents)
+      }
+    }
+    if (slResult.problems.length > 0) {
+      log('ESPN', sport, teamAbbr, `Summer League: ${slResult.problems.join('; ')}`)
+    }
+  }
+
+  let validation = validateSchedule(allEvents, sport, teamAbbr)
+  const espnTypes = seasonTypeCoverage(allEvents)
 
   const issues: string[] = []
 
   if (!validation.valid) {
     issues.push(...validation.errors.slice(0, 5))
   }
-  if (espnEvents.length === 0) {
+  if (allEvents.length === 0) {
     issues.push('No events returned')
   }
   if (!espnHasUpcoming) {
@@ -128,14 +151,14 @@ export async function getTeamSchedule(
   }
 
   if (validation.valid && espnHasCompleted) {
-    return computeResult(espnEvents)
+    return computeResult(allEvents)
   }
 
   const fallback = fallbackProviders[sport]
   if (!fallback) {
-    if (espnEvents.length > 0) {
+    if (allEvents.length > 0) {
       log('ESPN', sport, teamAbbr, 'Partial data accepted (no fallback available)')
-      return computeResult(espnEvents)
+      return computeResult(allEvents)
     }
     return { upcoming: null, lastFive: [] }
   }
@@ -148,7 +171,7 @@ export async function getTeamSchedule(
     log(`${sport} API`, sport, teamAbbr, fallbackResult.problems.join('; '))
   }
 
-  const merged = [...espnEvents]
+  const merged = [...allEvents]
   const existingIds = new Set(merged.map((e) => e.id))
 
   for (const e of fallbackEvents) {

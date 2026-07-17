@@ -6,6 +6,12 @@ export const espnSportMap: Record<string, string> = {
   NBA: 'basketball/nba',
   NHL: 'hockey/nhl',
   MLB: 'baseball/mlb',
+  NBA_SUMMER: 'basketball/nba-summer',
+}
+
+export const SUMMER_LEAGUE_CONFIG = {
+  startMonth: 6,
+  endMonth: 7,
 }
 
 const espnTeamAbbr: Record<string, string> = {
@@ -39,12 +45,16 @@ export function getEspnAbbr(teamId: string, teamAbbreviation: string): string {
 
 function getSeasonYears(sport: string, year: number, month: number): number[] {
   switch (sport) {
-    case 'NFL':  return [year - 1, year - 2]
-    case 'NBA': case 'NHL': return [year, year - 1, year - 2]
+    case 'NFL':  return [year - 1]
+    case 'NBA': case 'NHL': return [year, year - 1]
     case 'MLB':  return [year]
-    default:     return [year - 1, year]
+    default:     return [year - 1]
   }
 }
+
+// Simple in-memory TTL cache for schedule fetches (reduces repeated calls within short windows)
+const scheduleCache = new Map<string, { events: EspnEvent[]; problems: string[]; ts: number }>()
+const SCHEDULE_CACHE_TTL = 120_000 // 2 minutes
 
 export async function fetchTeamSchedule(
   sport: string,
@@ -53,6 +63,12 @@ export async function fetchTeamSchedule(
 ): Promise<{ events: EspnEvent[]; problems: string[] }> {
   const problems: string[] = []
   const abbr = getEspnAbbr(teamId, teamAbbreviation)
+  const cacheKey = `${sport}:${abbr}`
+  const cached = scheduleCache.get(cacheKey)
+  if (cached && Date.now() - cached.ts < SCHEDULE_CACHE_TTL) {
+    return { events: cached.events, problems: cached.problems }
+  }
+
   const cfg = scoreboardConfig[sport]
 
   try {
@@ -61,30 +77,39 @@ export async function fetchTeamSchedule(
     const month = now.getMonth() + 1
 
     const seasonYears = getSeasonYears(sport, currentYear, month)
-    let allEvents: EspnEvent[] = []
 
-    for (const year of seasonYears) {
-      try {
-        const res = await fetch(`/api/schedule?sport=${sport}&team=${abbr}&season=${year}`)
-        if (!res.ok) {
-          problems.push(`ESPN season=${year} returned status ${res.status}`)
-          continue
+    // Fetch all season years in parallel
+    const seasonResults = await Promise.all(
+      seasonYears.map(async (year) => {
+        try {
+          const res = await fetch(`/api/schedule?sport=${sport}&team=${abbr}&season=${year}`, {
+            signal: AbortSignal.timeout(10000),
+          })
+          if (res.ok) {
+            const data = await res.json()
+            return { events: (data?.events as EspnEvent[]) ?? [], problem: data.events?.length === 0 ? `ESPN season=${year} returned 0 events` : '' }
+          }
+          return { events: [], problem: `ESPN season=${year} returned status ${res.status}` }
+        } catch {
+          return { events: [], problem: `ESPN season=${year} fetch failed` }
         }
-        const data = await res.json()
-        if (data?.events) {
-          allEvents = [...allEvents, ...data.events]
-          if (data.events.length === 0) problems.push(`ESPN season=${year} returned 0 events`)
-        }
-      } catch {
-        problems.push(`ESPN season=${year} fetch failed`)
-      }
+      })
+    )
+
+    let allEvents: EspnEvent[] = []
+    for (const r of seasonResults) {
+      allEvents = [...allEvents, ...r.events]
+      if (r.problem) problems.push(r.problem)
     }
 
+    // Fetch current schedule in parallel with season fetches (not in the array since it's a different URL)
     try {
-      const res = await fetch(`/api/schedule?sport=${sport}&team=${abbr}`)
-      if (res.ok) {
-        const data = await res.json()
-        if (data?.events) {
+      const currentRes = await fetch(`/api/schedule?sport=${sport}&team=${abbr}`, {
+        signal: AbortSignal.timeout(10000),
+      })
+      if (currentRes.ok) {
+        const data = await currentRes.json()
+        if (data?.events?.length) {
           const existingIds = new Set(allEvents.map((e) => e.id))
           for (const e of data.events) {
             if (!existingIds.has(e.id)) {
@@ -137,18 +162,24 @@ export async function fetchTeamSchedule(
     if (cfg) {
       const existingIds = new Set(allEvents.map((e) => e.id))
 
+      // Collect all scoreboard fetch tasks and run them in parallel
+      const sbTasks: Promise<void>[] = []
+
       for (const year of seasonYears) {
         for (const mon of cfg.preseasonMonths) {
-          await fetchScoreboard(`${year}${String(mon).padStart(2, '0')}`, existingIds)
+          sbTasks.push(fetchScoreboard(`${year}${String(mon).padStart(2, '0')}`, existingIds))
         }
         const nextYear = year + 1
         const [startMM, endMM] = cfg.postseasonRange.split('-')
-        await fetchScoreboard(`${nextYear}${startMM}-${nextYear}${endMM}`, existingIds)
+        sbTasks.push(fetchScoreboard(`${nextYear}${startMM}-${nextYear}${endMM}`, existingIds))
       }
 
       for (const mon of cfg.extraCurrentMonths) {
-        await fetchScoreboard(`${currentYear}${String(mon).padStart(2, '0')}`, existingIds)
+        sbTasks.push(fetchScoreboard(`${currentYear}${String(mon).padStart(2, '0')}`, existingIds))
       }
+
+      // Run all scoreboard fetches in parallel
+      await Promise.all(sbTasks)
 
       const upcoming = allEvents
         .filter((e: any) => {
@@ -165,9 +196,62 @@ export async function fetchTeamSchedule(
 
     const unique = deduplicateById(allEvents)
 
-    return { events: unique, problems }
+    const result = { events: unique, problems }
+    scheduleCache.set(cacheKey, { ...result, ts: Date.now() })
+    return result
   } catch (err) {
     return { events: [], problems: [`ESPN provider error: ${err}`] }
+  }
+}
+
+export async function fetchSummerLeagueEvents(teamAbbr: string): Promise<{ events: EspnEvent[]; problems: string[] }> {
+  const problems: string[] = []
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = now.getMonth() + 1
+
+  if (month < SUMMER_LEAGUE_CONFIG.startMonth || month > SUMMER_LEAGUE_CONFIG.endMonth) {
+    return { events: [], problems }
+  }
+
+  const cacheKey = `SL:${teamAbbr}`
+  const cached = scheduleCache.get(cacheKey)
+  if (cached && Date.now() - cached.ts < SCHEDULE_CACHE_TTL) {
+    return { events: cached.events, problems: cached.problems }
+  }
+
+  try {
+    const startPad = String(SUMMER_LEAGUE_CONFIG.startMonth).padStart(2, '0')
+    const endPad = String(SUMMER_LEAGUE_CONFIG.endMonth).padStart(2, '0')
+    const dates = `${year}${startPad}01-${year}${endPad}31`
+    const res = await fetch(`/api/schedule?sport=NBA_SUMMER&team=${teamAbbr}&source=scoreboard&dates=${dates}`, {
+      signal: AbortSignal.timeout(15000),
+    })
+    if (!res.ok) {
+      problems.push(`Summer League scoreboard returned ${res.status}`)
+      return { events: [], problems }
+    }
+    const data = await res.json()
+    let events: EspnEvent[] = (data?.events ?? []) as EspnEvent[]
+
+    events = events.filter((e) => {
+      const comps = e.competitions?.[0]?.competitors ?? []
+      return comps.some((c) => c.team?.abbreviation?.toUpperCase() === teamAbbr.toUpperCase())
+    })
+
+    events = events.map((e) => ({
+      ...e,
+      seasonType: { id: '4', type: 4, name: 'Summer League' },
+      season: undefined,
+    }))
+
+    const result = { events, problems }
+    scheduleCache.set(cacheKey, { ...result, ts: Date.now() })
+    console.log(`[espn] Summer League: ${events.length} games for ${teamAbbr} (${dates})`)
+    return result
+  } catch (err) {
+    problems.push(`Summer League fetch error: ${err}`)
+    return { events: [], problems }
   }
 }
 

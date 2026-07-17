@@ -27,7 +27,7 @@ export default async function SportPage({ params }: { params: Promise<{ sport: s
 
   return (
     <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #0a0a0f, #1a1a2e)' }}>
-      <div className="max-w-6xl mx-auto px-6 py-10">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
         <Link href="/" className="text-sm text-gray-600 hover:text-white transition-colors inline-block mb-8">&larr; All Leagues</Link>
 
         <div className="mb-10">
