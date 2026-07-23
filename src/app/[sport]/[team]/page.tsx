@@ -2,12 +2,12 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
-import { teams, sportConfig } from '@/data/teams'
+import { teams, sportConfig, sportPath } from '@/data/teams'
 import { useParams } from 'next/navigation'
 import { getTeamSchedule, getTeamNews, getEspnAbbr } from '@/lib/sports-api'
+import StandingsBox from './StandingsBox'
+import AiConcierge from '@/components/AiConcierge'
 import type { EspnEvent } from '@/lib/sports-api'
-
-const sportPath: Record<string, string> = { NFL: 'nfl', NBA: 'nba', NHL: 'nhl', MLB: 'mlb' }
 
 function getTeamLogoUrl(teamAbbr: string, sport: string): string {
   const path = sportPath[sport.toUpperCase()]
@@ -105,7 +105,7 @@ export default function TeamDashboard() {
   const [data, setData] = useState<TeamDashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [logoFailed, setLogoFailed] = useState(false)
-  const [showAllStandings, setShowAllStandings] = useState(false)
+
   const [showRoster, setShowRoster] = useState(false)
   const [rosterData, setRosterData] = useState<any[] | null>(null)
   const [rosterLoading, setRosterLoading] = useState(false)
@@ -175,7 +175,7 @@ export default function TeamDashboard() {
           upcoming: schedForState.upcoming,
           lastFive: schedForState.lastFive,
           oddsInfo: oddsRes?.odds ?? null,
-          news: newsItems.length > 0 ? newsItems : getFallbackNews(t.name, t.sport),
+          news: newsItems.length > 0 ? newsItems : getFallbackNews(t.name, t.sport, getEspnAbbr(t.id, t.abbreviation)),
           standings: standingsRes?.standings ?? [],
           teamStanding: standingsRes?.teamStanding ?? '',
           standingsMessage: standingsRes?.message ?? '',
@@ -185,7 +185,7 @@ export default function TeamDashboard() {
         liveGameIdRef.current = live ? (schedForState.upcomingEventId ?? null) : null
       } catch (err) {
         console.error('[dashboard] Failed to load team data:', err)
-        if (!cancelled) setData(getFallbackData(t.name, t.sport))
+        if (!cancelled) setData(getFallbackData(t.name, t.sport, getEspnAbbr(t.id, t.abbreviation)))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -205,7 +205,7 @@ export default function TeamDashboard() {
         setRosterData(res?.athletes ?? null)
         setRosterLoading(false)
       })
-      .catch(() => setRosterLoading(false))
+      .catch((e) => { console.error('[roster fetch]', e); setRosterLoading(false) })
   }, [showRoster, team?.id])
 
   // Odds poll every 30s (uses upcoming or live game ID)
@@ -225,7 +225,7 @@ export default function TeamDashboard() {
           const json = await res.json()
           setData(p => p ? { ...p, oddsInfo: json.odds ?? null } : p)
         }
-      } catch { /* silent */ }
+      } catch (e) { console.error('[odds poll]', e) }
     }, 30000)
     return () => clearInterval(id)
   }, [team?.id])
@@ -249,8 +249,8 @@ export default function TeamDashboard() {
             ? (a.links.web.href.startsWith('http') ? a.links.web.href : `https://www.espn.com${a.links.web.href}`)
             : a.url ?? '#',
         }))
-        setData(p => p ? { ...p, news: items.length > 0 ? items : getFallbackNews(team.name, team.sport) } : p)
-      } catch { /* silent */ }
+        setData(p => p ? { ...p, news: items.length > 0 ? items : getFallbackNews(team.name, team.sport, getEspnAbbr(team.id, team.abbreviation)) } : p)
+      } catch (e) { console.error('[news poll]', e) }
     }, 120000)
     return () => clearInterval(id)
   }, [team?.id])
@@ -266,7 +266,7 @@ export default function TeamDashboard() {
           const json = await res.json()
           setData(p => p ? { ...p, standings: json.standings ?? [], teamStanding: json.teamStanding ?? '', standingsMessage: json.message ?? '' } : p)
         }
-      } catch { /* silent */ }
+      } catch (e) { console.error('[standings poll]', e) }
     }, 120000)
     return () => clearInterval(id)
   }, [team?.id])
@@ -286,7 +286,7 @@ export default function TeamDashboard() {
         const live = result.upcoming?.isLive
         setIsLiveGame(!!live)
         liveGameIdRef.current = live ? (result.upcomingEventId ?? null) : null
-      } catch { /* silent */ }
+      } catch (e) { console.error('[schedule poll]', e) }
     }, 300000)
     return () => clearInterval(id)
   }, [team?.id])
@@ -330,7 +330,7 @@ export default function TeamDashboard() {
             setBoxScoreData((prev: any) => prev ? json.boxScore : prev)
           }
         }
-      } catch { /* silent */ }
+      } catch (e) { console.error('[live box score poll]', e) }
     }
 
     fetchLiveBoxScore()
@@ -347,46 +347,10 @@ export default function TeamDashboard() {
     fetch(`/api/box-score?sport=${team.sport}&eventId=${selectedGameId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((res) => {
-        if (res?.boxScore?._debug) {
-          console.log('[BoxScore] Debug info', res.boxScore._debug)
-        }
-        if (res?.boxScore?.playerStats) {
-          // Log first category's stat names vs first athlete's stats keys for comparison
-          const firstTeam = res.boxScore.playerStats[0]
-          const firstCat = firstTeam?.categories?.[0]
-          if (firstCat) {
-            console.log('[BoxScore KEYCHECK] statNames:', JSON.stringify(firstCat.statNames))
-            const firstAth = firstCat.athletes?.[0]
-            if (firstAth) {
-              console.log('[BoxScore KEYCHECK] athlete stats keys:', JSON.stringify(Object.keys(firstAth.stats ?? {})))
-              console.log('[BoxScore KEYCHECK] athlete stats:', JSON.stringify(firstAth.stats))
-              // Check for key overlap
-              const statNameSet = new Set(firstCat.statNames ?? [])
-              const athleteKeys = Object.keys(firstAth.stats ?? {})
-              const overlap = athleteKeys.filter(k => statNameSet.has(k))
-              console.log('[BoxScore KEYCHECK] overlapping keys:', JSON.stringify(overlap))
-              if (overlap.length === 0 && athleteKeys.length > 0 && firstCat.statNames.length > 0) {
-                console.warn('[BoxScore KEYCHECK] ZERO KEY OVERLAP — stat names and stats keys are disjoint sets')
-              }
-            }
-          }
-          for (const team of res.boxScore.playerStats) {
-            for (const cat of (team.categories ?? [])) {
-              if (cat.athletes?.length > 0 && cat.statNames?.length === 0) {
-                console.warn('[BoxScore] Category has athletes but no statNames', team.teamAbbr, cat.label, cat.athletes[0])
-              }
-              for (const a of (cat.athletes ?? [])) {
-                if (Object.keys(a.stats ?? {}).length === 0) {
-                  console.warn('[BoxScore] Athlete has no stats', team.teamAbbr, cat.label, a.displayName, a)
-                }
-              }
-            }
-          }
-        }
         setBoxScoreData(res?.boxScore ?? null)
         setBoxScoreLoading(false)
       })
-      .catch(() => setBoxScoreLoading(false))
+      .catch((e) => { console.error('[box score fetch]', e); setBoxScoreLoading(false) })
   }, [selectedGameId, team?.id])
 
   if (!team || !config) {
@@ -395,7 +359,7 @@ export default function TeamDashboard() {
         <div className="flex items-center justify-center min-h-screen">
           <div className="text-center">
             <h1 className="text-2xl text-gray-600 mb-4 font-light">Team not found</h1>
-            <Link href={`/${sport}`} className="text-sm text-gray-600 hover:text-white transition-colors">&larr; Back to League</Link>
+            <Link href={`/${sport}`} className="hover-lift text-sm text-gray-600 hover:text-white" style={{ '--card-color': 'rgba(255,255,255,0.3)' } as React.CSSProperties}>&larr; Back to League</Link>
           </div>
         </div>
       </div>
@@ -407,14 +371,12 @@ export default function TeamDashboard() {
   return (
     <div className="min-h-screen" style={{ background: `linear-gradient(135deg, #0a0a0f, ${team.colors.primary}08, #1a1a2e)` }}>
       <div className="px-4 sm:px-6 py-6 sm:py-10">
-        <Link href={`/${sport}`} className="text-sm text-gray-500 hover:text-white transition-colors inline-block mb-8">&larr; {config.name}</Link>
+        <Link href={`/${sport}`} className="hover-lift text-sm text-gray-500 hover:text-white inline-block mb-8" style={{ '--card-color': team.colors.primary } as React.CSSProperties}>&larr; {config.name}</Link>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-            <div className={`rounded-xl p-5 sm:p-6 ${data?.upcoming?.isLive ? 'cursor-pointer transition-all duration-300 group' : ''}`}
-              style={{ backgroundColor: `${team.colors.primary}12`, border: `1px solid ${team.colors.primary}20` }}
-              onClick={() => { if (data?.upcoming?.isLive && data.upcoming.eventId) { setSelectedGameId(data.upcoming.eventId) } }}
-              onMouseEnter={(e) => { if (data?.upcoming?.isLive) { e.currentTarget.style.boxShadow = `0 0 20px -6px ${team.colors.primary}50`; e.currentTarget.style.borderColor = `${team.colors.primary}40` } }}
-              onMouseLeave={(e) => { if (data?.upcoming?.isLive) { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = `${team.colors.primary}20` } }}>
+            <div className={`rounded-xl p-5 sm:p-6 ${data?.upcoming?.isLive ? 'hover-card cursor-pointer group' : ''}`}
+              style={{ backgroundColor: `${team.colors.primary}12`, border: `1px solid ${team.colors.primary}20`, '--card-color': team.colors.primary } as React.CSSProperties}
+              onClick={() => { if (data?.upcoming?.isLive && data.upcoming.eventId) { setSelectedGameId(data.upcoming.eventId) } }}>
               <h2 className="text-xs font-medium text-gray-500 tracking-wider uppercase mb-4">{data?.upcoming?.isLive ? 'Live' : 'Next Game'}</h2>
               {loading ? (
                 <div className="animate-pulse space-y-3">
@@ -511,10 +473,8 @@ export default function TeamDashboard() {
               )}
             </div>
 
-            <div className="rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 hover:scale-[1.02] group" style={{ backgroundColor: `${team.colors.primary}10`, border: `1px solid ${team.colors.primary}18` }}
-              onClick={() => setShowRoster((v) => !v)}
-              onMouseEnter={(e) => { e.currentTarget.style.boxShadow = `0 0 24px -6px ${team.colors.primary}50`; e.currentTarget.style.borderColor = `${team.colors.primary}40` }}
-              onMouseLeave={(e) => { e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.borderColor = `${team.colors.primary}18` }}>
+            <div className="hover-card rounded-xl p-6 flex flex-col items-center justify-center cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}10`, border: `1px solid ${team.colors.primary}18`, '--card-color': team.colors.primary } as React.CSSProperties}
+              onClick={() => setShowRoster((v) => !v)}>
               <div className="w-28 h-28 flex items-center justify-center mb-4 relative">
                 {logoFailed ? (
                   <div className="w-28 h-28 rounded-full flex items-center justify-center" style={{ backgroundColor: team.colors.primary }}>
@@ -552,10 +512,8 @@ export default function TeamDashboard() {
                 {data?.lastFive.length ? (
                   <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                     {data.lastFive.map((game, i) => (
-                      <div key={i} className="rounded-lg p-2 flex flex-col items-center text-center transition-all duration-200 cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : 'transparent'}` }}
-                        onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}
-                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18`; e.currentTarget.style.boxShadow = `0 4px 16px -6px ${team.colors.primary}40`; e.currentTarget.style.transform = 'translateY(-2px)' }}
-                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a`; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}>
+                      <div key={i} className="hover-card rounded-lg p-2 flex flex-col items-center text-center cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : 'transparent'}`, '--card-color': team.colors.primary } as React.CSSProperties}
+                        onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}>
                         <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-medium mb-0.5 ${
                           game.result === 'W' ? 'text-green-400' : 'text-red-400'
                         }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)' }}>
@@ -582,7 +540,7 @@ export default function TeamDashboard() {
               teamAbbr={getEspnAbbr(team.id, team.abbreviation)}
               teamColor={team.colors.primary}
               sport={team.sport}
-              isLive={isLiveGame}
+              isLive={isLiveGame && selectedGameId === liveGameIdRef.current}
               onBack={() => { setSelectedGameId(null); setBoxScoreData(null) }}
             />
           </>
@@ -603,10 +561,8 @@ export default function TeamDashboard() {
                 ) : data?.lastFive.length ? (
                   <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
                     {data.lastFive.map((game, i) => (
-                      <div key={i} className="rounded-lg p-3 flex flex-col items-center text-center transition-all duration-200 cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : team.colors.primary}10` }}
-                        onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}
-                        onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18`; e.currentTarget.style.boxShadow = `0 4px 16px -6px ${team.colors.primary}40`; e.currentTarget.style.transform = 'translateY(-2px)' }}
-                        onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a`; e.currentTarget.style.boxShadow = 'none'; e.currentTarget.style.transform = 'translateY(0)' }}>
+                      <div key={i} className="hover-card rounded-lg p-3 flex flex-col items-center text-center cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : team.colors.primary}10`, '--card-color': team.colors.primary } as React.CSSProperties}
+                        onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}>
                         <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium mb-1 ${
                           game.result === 'W' ? 'text-green-400' : 'text-red-400'
                         }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(74,222,128,0.15)' : 'rgba(248,113,113,0.15)' }}>
@@ -632,67 +588,21 @@ export default function TeamDashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
-                <div className="flex items-center justify-between mb-4">
-                  <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">
-                    Standings
-                  </h2>
-                  {data?.standings.some((c) => c.name !== team?.conference) && (
-                    <button onClick={() => setShowAllStandings((v) => !v)}
-                      className="text-xs px-2.5 py-1 rounded-full transition-colors text-gray-400"
-                      style={{
-                        backgroundColor: showAllStandings ? `${team?.colors.primary}25` : `${team.colors.primary}10`,
-                        border: `1px solid ${team.colors.primary}20`,
-                      }}>
-                      {showAllStandings ? `Show ${team?.conference} Only` : 'All Conferences'}
-                    </button>
-                  )}
-                </div>
-                {loading ? (
-                  <div className="animate-pulse space-y-3">
-                    {[...Array(8)].map((_, i) => (
-                      <div key={i} className="h-8 rounded-lg" style={{ backgroundColor: `${team.colors.primary}12` }} />
-                    ))}
-                  </div>
-                ) : data?.standingsMessage ? (
-                  <p className="text-sm text-gray-500 animate-fade-in-up">{data.standingsMessage}</p>
-                ) : data?.standings.length ? (
-                  <div className="space-y-4 animate-fade-in-up" style={{ animationDelay: '100ms' }}>
-                    {(showAllStandings ? data.standings : data.standings.filter((c) => c.name === team?.conference)).map((conf) => (
-                      <div key={conf.name}>
-                        <p className="text-xs font-medium mb-2 uppercase tracking-wider text-gray-400">{conf.name}</p>
-                        {conf.divisions.map((div) => (
-                          <div key={div.name} className="mb-3">
-                            <p className="text-xs mb-1 ml-1 text-gray-500">{div.name}</p>
-                  <div className="space-y-0.5">
-                              {div.teams.map((entry, i) => {
-                                const isMyTeam = entry.abbr === getEspnAbbr(team.id, team.abbreviation)
-                                return (
-                                  <Link key={entry.abbr} href={`/${sport}/${entry.teamId}`} className="flex items-center gap-2 rounded-lg px-2.5 py-1 transition-all hover:opacity-80" style={{
-                                    backgroundColor: isMyTeam ? `${team.colors.primary}18` : 'transparent',
-                                  }}>
-                                    <span className="text-xs w-4 text-right text-gray-600">{i + 1}</span>
-                                    <img src={entry.logo} alt="" className="w-4 h-4 object-contain" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                                    <span className={`text-xs flex-1 truncate ${isMyTeam ? 'text-white/90' : 'text-white/60'}`}>{entry.name.replace(/^(Los Angeles|Las Vegas|New York|New England|San Francisco|San Diego|Tampa Bay|Green Bay|Kansas City|Oklahoma City|Golden State|New Orleans|Salt Lake City|St\. Louis|Portland|Oklahoma )/, '')}</span>
-                                    {entry.record && <span className="text-xs font-mono text-gray-400">{entry.record}</span>}
-                                  </Link>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-gray-500 animate-fade-in">Standings unavailable</p>
-                )}
-              </div>
+              <StandingsBox
+                standings={data?.standings ?? []}
+                teamId={team.id}
+                teamAbbr={team.abbreviation}
+                teamConference={team.conference}
+                teamColor={team.colors.primary}
+                sport={sport}
+                loading={loading}
+                standingsMessage={data?.standingsMessage}
+              />
 
-              <div className="rounded-xl p-6" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
+              <div className="rounded-xl p-6 flex flex-col" style={{ backgroundColor: `${team.colors.primary}08`, border: `1px solid ${team.colors.primary}15` }}>
                 <h2 className="text-xs font-medium tracking-wider uppercase mb-4 text-gray-400">Latest News</h2>
                 {loading ? (
-                  <div className="animate-pulse space-y-4">
+                  <div className="animate-pulse space-y-4 flex-1">
                     {[...Array(4)].map((_, i) => (
                       <div key={i} className="space-y-2">
                         <div className="h-4 rounded w-3/4" style={{ backgroundColor: `${team.colors.primary}15` }} />
@@ -701,12 +611,10 @@ export default function TeamDashboard() {
                     ))}
                   </div>
                 ) : data?.news.length ? (
-                  <div className="space-y-3 animate-fade-in-up" style={{ animationDelay: '150ms' }}>
+                  <div className="space-y-3 animate-fade-in-up flex-1 flex flex-col justify-center" style={{ animationDelay: '150ms' }}>
                     {data.news.map((item, i) => (
                       <a key={i} href={item.url} target="_blank" rel="noopener noreferrer"
-                         className="block rounded-lg p-3.5 transition-all" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${team.colors.primary}08` }}
-                         onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}18`; e.currentTarget.style.borderColor = `${team.colors.primary}30` }}
-                         onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = `${team.colors.primary}0a`; e.currentTarget.style.borderColor = `${team.colors.primary}08` }}>
+                         className="hover-bright block rounded-lg p-3.5" style={{ backgroundColor: `${team.colors.primary}0a`, border: `1px solid ${team.colors.primary}08`, '--card-color': team.colors.primary } as React.CSSProperties}>
                         <h3 className="text-sm font-medium text-white/80 leading-snug mb-1.5 line-clamp-2">{item.title}</h3>
                         <p className="text-xs mb-2 line-clamp-2 text-gray-400">{item.snippet}</p>
                         <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -718,12 +626,21 @@ export default function TeamDashboard() {
                     ))}
                   </div>
                 ) : (
-                  <p className="text-sm text-gray-500 animate-fade-in">No news available</p>
+                  <p className="text-sm text-gray-500 animate-fade-in flex-1 flex items-center justify-center">No news available</p>
                 )}
               </div>
             </div>
           </>
         )}
+
+        <AiConcierge
+          sport={team.sport}
+          teamId={team.id}
+          teamAbbreviation={team.abbreviation}
+          teamColor={team.colors.primary}
+          pageType={selectedGameId && !isLiveGame ? 'past-game' : 'team'}
+          eventId={selectedGameId && !isLiveGame ? selectedGameId : undefined}
+        />
       </div>
     </div>
   )
@@ -848,13 +765,13 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
             </span>
           )}
           <button onClick={() => setShowPlayerStats((v) => !v)}
-            className="text-xs px-2 py-1 rounded transition-colors text-gray-400 hover:text-white"
-            style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
+            className="hover-bright text-xs px-2 py-1 rounded text-gray-400 hover:text-white"
+            style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}>
             {showPlayerStats ? 'Team Stats' : 'Player Stats'}
           </button>
           <button onClick={onBack}
-            className="text-xs px-2 py-1 rounded transition-colors text-gray-400 hover:text-white"
-            style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25` }}>
+            className="hover-bright text-xs px-2 py-1 rounded text-gray-400 hover:text-white"
+            style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}>
             &larr; Back
           </button>
         </div>
@@ -1222,8 +1139,8 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">Roster</h2>
           <button onClick={onBack}
-            className="text-xs px-3 py-1.5 rounded-full transition-colors text-gray-400 hover:text-white"
-            style={{ backgroundColor: `${team.colors.primary}15`, border: `1px solid ${team.colors.primary}25` }}>
+            className="hover-bright text-xs px-3 py-1.5 rounded-full text-gray-400 hover:text-white"
+            style={{ backgroundColor: `${team.colors.primary}15`, border: `1px solid ${team.colors.primary}25`, '--card-color': team.colors.primary } as React.CSSProperties}>
             &larr; Dashboard
           </button>
         </div>
@@ -1311,22 +1228,26 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
   )
 }
 
-function getFallbackNews(name: string, sport: string) {
-  const espnUrl = `https://www.espn.com/${sport.toLowerCase()}/team/_/name/${name.split(' ').pop()?.toLowerCase() ?? ''}`
+function getFallbackNews(name: string, sport: string, abbr?: string) {
+  const espnSlug = abbr?.toLowerCase() ?? name.split(' ').pop()?.toLowerCase() ?? ''
+  const espnUrl = `https://www.espn.com/${sport.toLowerCase()}/team/_/name/${espnSlug}`
+  const now = new Date()
+  const month = now.toLocaleDateString('en-US', { month: 'short' })
+  const d = (n: number) => `${month} ${now.getDate() + n}`
   return [
-    { title: `${name} Latest News & Updates`, source: 'ESPN', date: 'Jul ' + new Date().getDate(), snippet: `Latest news, scores, and updates for ${name}.`, url: espnUrl },
-    { title: `${name} Schedule & Results`, source: 'ESPN', date: 'Jul ' + (new Date().getDate() - 2), snippet: `View the full schedule and recent results for ${name}.`, url: espnUrl },
-    { title: `${name} Roster & Transactions`, source: 'ESPN', date: 'Jul ' + (new Date().getDate() - 4), snippet: `Roster moves, injuries, and transactions for ${name}.`, url: espnUrl },
-    { title: `${name} Standings & Playoff Race`, source: 'ESPN', date: 'Jul ' + (new Date().getDate() - 6), snippet: `Where ${name} stand in the ${sport} playoff race.`, url: `https://www.espn.com/${sport.toLowerCase()}/standings` },
+    { title: `${name} Latest News & Updates`, source: 'ESPN', date: d(0), snippet: `Latest news, scores, and updates for ${name}.`, url: espnUrl },
+    { title: `${name} Schedule & Results`, source: 'ESPN', date: d(-2), snippet: `View the full schedule and recent results for ${name}.`, url: espnUrl },
+    { title: `${name} Roster & Transactions`, source: 'ESPN', date: d(-4), snippet: `Roster moves, injuries, and transactions for ${name}.`, url: espnUrl },
+    { title: `${name} Standings & Playoff Race`, source: 'ESPN', date: d(-6), snippet: `Where ${name} stand in the ${sport} playoff race.`, url: `https://www.espn.com/${sport.toLowerCase()}/standings` },
   ]
 }
 
-function getFallbackData(name: string, sport: string): TeamDashboardData {
+function getFallbackData(name: string, sport: string, abbr?: string): TeamDashboardData {
   return {
     upcoming: null,
     lastFive: [],
     oddsInfo: null,
-    news: getFallbackNews(name, sport),
+    news: getFallbackNews(name, sport, abbr),
     standings: [],
     teamStanding: '',
   }

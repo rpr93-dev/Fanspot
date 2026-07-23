@@ -17,6 +17,16 @@ interface ConferenceGroup {
   divisions: { name: string; teams: StandingRow[] }[]
 }
 
+function cleanRecord(raw: string | undefined | any[]): string {
+  if (typeof raw === 'string' && raw) {
+    const parts = raw.split(',')
+    const clean = parts[0].trim()
+    if (/^\d+-\d+(-\d+)?$/.test(clean)) return clean
+    return clean
+  }
+  return ''
+}
+
 function parsePct(record: string): number {
   const parts = record.split('-')
   if (parts.length >= 2) {
@@ -47,9 +57,6 @@ function groupStandings(standings: StandingRow[]): ConferenceGroup[] {
     }
   })
 }
-
-const rawRevalidate = parseInt(process.env.STANDINGS_REVALIDATE ?? '300', 10)
-const REVALIDATE_SECONDS = Number.isFinite(rawRevalidate) && rawRevalidate > 0 ? rawRevalidate : 300
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -94,14 +101,10 @@ export async function GET(request: Request) {
   }
 
   try {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 15000)
-
     const res = await fetch(
       `https://site.web.api.espn.com/apis/v2/sports/${espnPath}/standings`,
-      { signal: controller.signal, next: { revalidate: REVALIDATE_SECONDS } }
+      { signal: AbortSignal.timeout(15000) }
     )
-    clearTimeout(timeout)
 
     if (!res.ok) {
       console.error(`[standings] ESPN v2 standings returned ${res.status} for ${sport}`)
@@ -118,8 +121,9 @@ export async function GET(request: Request) {
         if (!team?.abbreviation) continue
 
         const abbr = team.abbreviation.toUpperCase()
-        const overallStat = (entry.stats ?? []).find((s: any) => s.type === 'total')
-        const record = overallStat?.displayValue ?? ''
+        const allStats: any[] = entry.stats ?? []
+        const overallStat = allStats.find((s: any) => s.type === 'total' || s.type === 'overall' || s.name === 'overall')
+        const record = cleanRecord(overallStat?.summary ?? overallStat?.displayValue ?? allStats)
 
         const logo = team.logos?.[0]?.href ?? ''
 
@@ -167,7 +171,7 @@ export async function GET(request: Request) {
                 abbr,
                 name: comp.team.displayName ?? abbr,
                 logo: `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${abbr.toLowerCase()}.png`,
-                record: overall?.summary ?? '',
+                record: cleanRecord(overall?.summary ?? ''),
                 conference: match?.conference ?? '',
                 division: match?.division ?? '',
                 teamId: match?.id ?? '',
@@ -202,7 +206,7 @@ export async function GET(request: Request) {
                 abbr,
                 name: comp.team.displayName ?? abbr,
                 logo: `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${abbr.toLowerCase()}.png`,
-                record: overall?.summary ?? '',
+                record: cleanRecord(overall?.summary ?? ''),
                 conference: match?.conference ?? '',
                 division: match?.division ?? '',
                 teamId: match?.id ?? '',

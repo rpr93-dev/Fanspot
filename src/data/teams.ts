@@ -142,6 +142,8 @@ export const teams: Team[] = [
   { id: 'wsh_mlb', name: 'Washington Nationals', abbreviation: 'WSH', sport: 'MLB', colors: { primary: '#AB0003', secondary: '#14225A' }, conference: 'NL', division: 'East' },
 ]
 
+export const sportPath: Record<string, string> = { NFL: 'nfl', NBA: 'nba', NHL: 'nhl', MLB: 'mlb' }
+
 export const sportConfig: Record<string, { name: string, abbreviation: string, emoji: string, gradient: string }> = {
   NFL: {
     name: 'National Football League',

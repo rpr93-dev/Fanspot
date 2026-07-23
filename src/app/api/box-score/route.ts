@@ -144,14 +144,14 @@ export async function GET(request: Request) {
   try {
     let res = await fetch(
       `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${eventId}`,
-      { signal: AbortSignal.timeout(15000), next: { revalidate: 300 } }
+      { signal: AbortSignal.timeout(15000) }
     )
     if (!res.ok && sport.toUpperCase() === 'NBA') {
       // Fallback: Summer League games live under nba-summer path
       const slPath = 'basketball/nba-summer'
       res = await fetch(
         `https://site.api.espn.com/apis/site/v2/sports/${slPath}/summary?event=${eventId}`,
-        { signal: AbortSignal.timeout(15000), next: { revalidate: 300 } }
+        { signal: AbortSignal.timeout(15000) }
       )
     }
     if (!res.ok) {
@@ -284,103 +284,10 @@ export async function GET(request: Request) {
         return { teamAbbr, categories }
       })
     } catch (e) {
-      // Partial data still usable
+      console.error('[box-score] Partial extraction error:', e)
     }
 
     const status = data?.header?.competitions?.[0]?.status?.type
-
-    // Debug: dump raw ESPN structure to server console and response
-    let debug: any = null
-    try {
-      const firstPlayer = boxscore.players?.[0]
-      if (firstPlayer) {
-        // Dump full raw first player stats to server console
-        console.log('[BoxScore RAW] firstPlayer statistics:',
-          JSON.stringify(firstPlayer.statistics, null, 2).slice(0, 20000))
-
-        const firstCat = firstPlayer?.statistics?.[0]
-        const firstAth = firstCat?.athletes?.[0]
-        if (firstAth) {
-          const debugGroups = new Map<string, { values: string[] }>()
-          for (const a of (firstCat?.athletes ?? [])) {
-            const id = a.athlete?.id
-            if (!id) continue
-            if (!debugGroups.has(id)) debugGroups.set(id, { values: [] })
-            const dv = a.displayValue ?? a.value
-            if (dv !== undefined && dv !== null) debugGroups.get(id)!.values.push(String(dv))
-          }
-
-          // Dump all unique keys from every athlete entry in first category
-          const allAthleteKeys = new Set<string>()
-          for (const a of (firstCat?.athletes ?? [])) {
-            for (const k of Object.keys(a)) allAthleteKeys.add(k)
-          }
-
-          // Sample the raw athlete entries as-is (first 3)
-          const rawSamples = (firstCat?.athletes ?? []).slice(0, 3).map((a: any) => ({
-            keys: Object.keys(a),
-            hasAthlete: !!a.athlete,
-            hasDisplayValue: 'displayValue' in a,
-            hasValue: 'value' in a,
-            hasStats: 'stats' in a,
-            hasStatistics: 'statistics' in a,
-            hasValues: 'values' in a,
-            displayValue: a.displayValue,
-            value: a.value,
-            statsType: a.stats ? (Array.isArray(a.stats) ? 'array' : typeof a.stats) : 'undefined',
-            statsSample: a.stats ? JSON.stringify(Array.isArray(a.stats) ? a.stats.slice(0, 2) : a.stats).slice(0, 200) : null,
-            athleteKeys: a.athlete ? Object.keys(a.athlete) : [],
-          }))
-
-          // Simulate the extraction to see what the fix produces
-          const simStats: Record<string, string> = {}
-          const simLabels = firstCat?.labels ?? firstCat?.keys ?? []
-          const simValues = firstAth?.stats ?? []
-          if (simLabels.length > 0 && simValues.length > 0) {
-            for (let i = 0; i < Math.min(simLabels.length, simValues.length); i++) {
-              if (simLabels[i]) simStats[simLabels[i]] = String(simValues[i])
-            }
-          }
-          debug = {
-            categoryName: firstCat?.name,
-            categoryLabel: firstCat?.label,
-            extractionMethod: simLabels.length > 0 && simValues.length > 0 ? 'positional (labels + a.stats)' : 'extractStats',
-            allAthleteKeysInCategory: Array.from(allAthleteKeys),
-            rawSamples,
-            athleteKeys: Object.keys(firstAth),
-            rawAthlete: JSON.parse(JSON.stringify(firstAth)),
-            rawAthleteStatsType: Array.isArray(firstAth?.stats) ? 'string[]' : typeof firstAth?.stats,
-            rawAthleteStatsSample: Array.isArray(firstAth?.stats) ? firstAth.stats.slice(0, 3) : firstAth?.stats,
-            rawAthleteDisplayValue: firstAth?.displayValue ?? firstAth?.value,
-            extractedStats: extractStats(firstAth, firstCat?.name ?? ''),
-            displayNames: firstCat?.displayNames?.map((d: any) => d.displayName ?? d.name ?? '') ?? [],
-            labels: firstCat?.labels,
-            keys: firstCat?.keys,
-            hasMultiValue: Array.from(debugGroups.values()).some(g => g.values.length > 1),
-            groupCount: debugGroups.size,
-            simulatedPositionalStats: simStats,
-          }
-        } else {
-          // No athletes - dump the full cat structure
-          debug = {
-            catKeys: firstCat ? Object.keys(firstCat) : [],
-            firstCatName: firstCat?.name,
-            firstCatRaw: firstCat ? JSON.stringify(firstCat).slice(0, 3000) : 'no categories',
-          }
-        }
-      } else {
-        // No players - dump what boxscore looks like
-        const boxscoreKeys = boxscore ? Object.keys(boxscore) : []
-        debug = {
-          boxscoreKeys,
-          hasPlayers: !!boxscore?.players,
-          playersType: boxscore?.players ? (Array.isArray(boxscore.players) ? 'array' : typeof boxscore.players) : 'undefined',
-          playersLength: boxscore?.players?.length,
-        }
-      }
-    } catch (e: any) {
-      debug = { error: String(e).slice(0, 500) }
-    }
 
     return NextResponse.json({
       boxScore: {
@@ -395,7 +302,6 @@ export async function GET(request: Request) {
               shortDetail: status.shortDetail,
             }
           : null,
-        _debug: debug,
       },
     }, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
   } catch (err) {

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { notFound } from 'next/navigation'
 import type { Metadata } from 'next'
 import { teams, sportConfig } from '@/data/teams'
 import TeamCard from './TeamCard'
@@ -19,9 +20,7 @@ export default async function SportPage({ params }: { params: Promise<{ sport: s
   const sportKey = sport.toUpperCase()
   const config = sportConfig[sportKey]
 
-  if (!config) {
-    return <div className="p-8 text-center text-2xl text-gray-600">League not found</div>
-  }
+  if (!config) notFound()
 
   const sportTeams = teams.filter((team) => team.sport === sportKey).sort((a, b) => a.name.localeCompare(b.name))
 

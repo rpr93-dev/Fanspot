@@ -119,7 +119,7 @@ export async function fetchTeamSchedule(
           }
         }
       }
-    } catch { /* non-fatal */ }
+    } catch (e) { console.error('[espn] current schedule error:', e) }
 
     function normalizeScore(e: any): any {
       if (e && typeof e === 'string') {
@@ -156,7 +156,7 @@ export async function fetchTeamSchedule(
             }
           }
         }
-      } catch { /* non-fatal */ }
+    } catch (e) { console.error('[espn] current schedule fetch error:', e) }
     }
 
     if (cfg) {

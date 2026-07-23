@@ -2,10 +2,8 @@
 
 import Link from 'next/link'
 import { useState } from 'react'
-import type { Team } from '@/data/teams'
+import { type Team, sportPath } from '@/data/teams'
 import { getEspnAbbr } from '@/lib/providers/espn'
-
-const sportPath: Record<string, string> = { NFL: 'nfl', NBA: 'nba', NHL: 'nhl', MLB: 'mlb' }
 
 function teamLogoUrl(team: Team): string {
   const path = sportPath[team.sport]
@@ -21,8 +19,8 @@ export default function TeamCard({ team, sport }: { team: Team; sport: string })
   return (
     <Link
       href={`/${sport}/${team.id}`}
-      className="group rounded-xl p-5 transition-all duration-300 hover:-translate-y-0.5 animate-fade-in"
-      style={{ backgroundColor: `${team.colors.primary}15`, border: `1px solid ${team.colors.primary}20` }}
+      className="group hover-card rounded-xl p-5 animate-fade-in"
+      style={{ backgroundColor: `${team.colors.primary}15`, border: `1px solid ${team.colors.primary}20`, '--card-color': team.colors.primary } as React.CSSProperties}
     >
       <div className="flex flex-col items-center text-center">
         <div className="w-14 h-14 mb-3 flex items-center justify-center">

@@ -20,8 +20,14 @@ export default function HomePage() {
             <Link
               key={league.id}
               href={`/${league.id}`}
-              className="group relative rounded-2xl p-8 text-center transition-all duration-300 hover:-translate-y-1"
-              style={{ backgroundColor: `${league.color}15`, border: `1px solid ${league.color}25` }}
+              className="league-card group relative rounded-2xl p-8 text-center transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.03] active:scale-[0.98]"
+              style={{
+                backgroundColor: `${league.color}18`,
+                border: `1px solid ${league.color}30`,
+                boxShadow: `0 2px 12px ${league.color}08`,
+                '--glow-color': `${league.color}60`,
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+              } as React.CSSProperties}
             >
               <div className="w-20 h-20 mx-auto mb-5 flex items-center justify-center">
                 <img

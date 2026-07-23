@@ -83,6 +83,20 @@ export async function GET(request: Request) {
 
   log(`Request params: sport=${sport} team=${team} eventId=${eventId} date=${providedDate}`)
 
+  // Skip ESPN fetch if game is more than 3 days away (odds won't be posted yet)
+  if (providedDate) {
+    const gameYear = parseInt(providedDate.slice(0, 4), 10)
+    const gameMonth = parseInt(providedDate.slice(4, 6), 10) - 1
+    const gameDay = parseInt(providedDate.slice(6, 8), 10)
+    const gameDt = new Date(gameYear, gameMonth, gameDay)
+    const now = new Date()
+    const diffDays = (gameDt.getTime() - now.getTime()) / 86400000
+    if (diffDays > 3) {
+      log(`Game ${providedDate} is ${Math.round(diffDays)} days away (>3), skipping odds fetch`)
+      return NextResponse.json({ odds: null, source: 'espn' })
+    }
+  }
+
   try {
     let gameDate: string
     let homeAbbr: string | undefined
@@ -100,7 +114,7 @@ export async function GET(request: Request) {
       const schedUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${team.toUpperCase()}/schedule`
       log(`Fetching schedule: ${schedUrl}`)
 
-      const schedRes = await fetch(schedUrl, { signal: AbortSignal.timeout(15000), next: { revalidate: 60 } })
+      const schedRes = await fetch(schedUrl, { signal: AbortSignal.timeout(15000) })
       if (!schedRes.ok) {
         log(`Schedule fetch failed: ${schedRes.status} ${schedRes.statusText}`)
         return NextResponse.json({ odds: null, source: 'espn' })
@@ -138,7 +152,7 @@ export async function GET(request: Request) {
     const sbUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${gameDate}&limit=100`
     log(`Fetching scoreboard: ${sbUrl}`)
 
-    const sbRes = await fetch(sbUrl, { signal: AbortSignal.timeout(15000), next: { revalidate: 60 } })
+    const sbRes = await fetch(sbUrl, { signal: AbortSignal.timeout(15000) })
     if (!sbRes.ok) {
       log(`Scoreboard fetch failed: ${sbRes.status} ${sbRes.statusText}`)
       return NextResponse.json({ odds: null, source: 'espn' })

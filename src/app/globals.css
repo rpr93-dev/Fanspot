@@ -1,8 +1,10 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 @theme {
   --animate-fade-in: fade-in 0.45s ease-out both;
   --animate-fade-in-up: fade-in-up 0.5s ease-out both;
+  --animate-wigolo-progress: wigolo-progress 2s ease-in-out infinite;
 }
 
 @keyframes fade-in {
@@ -14,6 +16,38 @@
   from { opacity: 0; transform: translateY(12px) }
   to { opacity: 1; transform: translateY(0) }
 }
+
+@keyframes wigolo-progress {
+  0% { transform: translateX(-100%) }
+  50% { transform: translateX(100%) }
+  100% { transform: translateX(400%) }
+}
+
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 8px var(--glow, transparent), 0 0 16px var(--glow, transparent); }
+  50% { box-shadow: 0 0 20px var(--glow, transparent), 0 0 40px var(--glow, transparent), 0 0 60px var(--glow, transparent); }
+}
+
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: scale(0.4); opacity: 0.3; }
+  40% { transform: scale(1); opacity: 1; }
+}
+
+.gen-btn-glow {
+  animation: glow-pulse 2s ease-in-out infinite;
+  transition: all 0.25s ease;
+}
+
+.gen-btn-glow:hover {
+  transform: translateY(-1px) scale(1.02);
+}
+
+.loader-dot {
+  animation: bounce-dot 1.4s ease-in-out infinite both;
+}
+.loader-dot:nth-child(1) { animation-delay: -0.32s; }
+.loader-dot:nth-child(2) { animation-delay: -0.16s; }
+.loader-dot:nth-child(3) { animation-delay: 0s; }
 
 ::-webkit-scrollbar {
   width: 6px;
@@ -36,4 +70,43 @@
 * {
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+
+.league-card {
+  --glow-color: rgba(255, 255, 255, 0.15);
+}
+
+.league-card:hover {
+  box-shadow: 0 8px 32px var(--glow-color) !important;
+  border-color: color-mix(in srgb, var(--glow-color) 60%, transparent) !important;
+}
+
+.hover-card {
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.hover-card:hover {
+  transform: translateY(-2px) scale(1.02) !important;
+  box-shadow: 0 8px 32px -8px rgba(255, 255, 255, 0.12) !important;
+  border-color: color-mix(in srgb, var(--card-color, rgba(255,255,255,0.3)) 50%, transparent) !important;
+  background-color: color-mix(in srgb, var(--card-color, rgba(255,255,255,0.15)) 25%, transparent) !important;
+}
+
+.hover-lift {
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+.hover-lift:hover {
+  transform: translateY(-1.5px) !important;
+  box-shadow: 0 4px 16px -4px rgba(255, 255, 255, 0.08) !important;
+}
+
+.hover-bright {
+  transition: all 0.2s ease !important;
+}
+
+.hover-bright:hover {
+  background-color: color-mix(in srgb, var(--card-color, rgba(255,255,255,0.2)) 35%, transparent) !important;
+  border-color: color-mix(in srgb, var(--card-color, rgba(255,255,255,0.3)) 50%, transparent) !important;
+  transform: translateY(-1px) !important;
 }

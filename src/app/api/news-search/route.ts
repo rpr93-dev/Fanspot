@@ -105,7 +105,7 @@ function getSourceName(item: any): string {
 async function fetchGoogleNews(query: string): Promise<NewsItem[]> {
   try {
     const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000), next: { revalidate: 3600 } })
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
     if (!res.ok) return []
     const xml = await res.text()
     const data = parser.parse(xml)

@@ -13,10 +13,10 @@ export default function TeamError({ error, reset }: { error: Error; reset: () =>
         <h1 className="text-2xl font-light text-white/90 mb-2">Failed to load team data</h1>
         <p className="text-sm text-gray-500 mb-6">{error.message}</p>
         <div className="flex items-center justify-center gap-4">
-          <button onClick={reset} className="px-6 py-2 text-sm text-white/80 rounded-lg transition-colors" style={{ backgroundColor: 'rgba(255,255,255,0.08)' }}>
+          <button onClick={reset} className="hover-bright px-6 py-2 text-sm text-white/80 rounded-lg" style={{ backgroundColor: 'rgba(255,255,255,0.08)', '--card-color': 'rgba(255,255,255,0.6)' } as React.CSSProperties}>
             Try again
           </button>
-          <Link href={`/${sport}`} className="text-sm text-gray-600 hover:text-white transition-colors">&larr; Back to League</Link>
+          <Link href={`/${sport}`} className="hover-lift text-sm text-gray-600 hover:text-white">&larr; Back to League</Link>
         </div>
       </div>
     </div>

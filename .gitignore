@@ -5,3 +5,5 @@ node_modules/
 LEARNER_NOTES.md
 AGENTS.md
 AUTONOMOUS_OPTIMIZATION_LOG.md
+tsconfig.tsbuildinfo
+*.tsbuildinfo
