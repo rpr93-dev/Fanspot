@@ -6,8 +6,41 @@ import { teams, sportConfig, sportPath } from '@/data/teams'
 import { useParams } from 'next/navigation'
 import { getTeamSchedule, getTeamNews, getEspnAbbr } from '@/lib/sports-api'
 import StandingsBox from './StandingsBox'
-import AiConcierge from '@/components/AiConcierge'
+import AiNalyst from '@/components/AiNalyst'
 import type { EspnEvent } from '@/lib/sports-api'
+
+function useTeamDashboard(sport: string, teamId: string, teamName: string, teamAbbreviation: string) {
+  const [data, setData] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    if (!teamId) { setLoading(false); return }
+    let cancelled = false
+    const abbr = getEspnAbbr(teamId, teamAbbreviation)
+
+    async function load() {
+      try {
+        const res = await fetch(`/api/team/${teamId}/dashboard?sport=${sport}&roster=false`, {
+          signal: AbortSignal.timeout(20000),
+        })
+        if (!res.ok) throw new Error(`Dashboard API returned ${res.status}`)
+        const dashboard = await res.json()
+        if (cancelled) return
+        setData(dashboard)
+      } catch (err) {
+        console.error('[dashboard] Failed to load:', err)
+        if (!cancelled) setData(null)
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    load()
+    return () => { cancelled = true }
+  }, [teamId, sport])
+
+  return { dashboard: data, loading }
+}
 
 function getTeamLogoUrl(teamAbbr: string, sport: string): string {
   const path = sportPath[sport.toUpperCase()]
@@ -120,80 +153,59 @@ export default function TeamDashboard() {
   const team = teams.find((t) => t.id === teamId && t.sport === sport.toUpperCase())
   const config = sportConfig[sport.toUpperCase()]
 
+  const { dashboard, loading: dashLoading } = useTeamDashboard(
+    sport, teamId, team?.name ?? '', team?.abbreviation ?? ''
+  )
+
   useEffect(() => {
-    if (!team) { setLoading(false); return }
-    let cancelled = false
-    const t = team
-
-    async function load() {
-      try {
-        const espnAbbrForApi = getEspnAbbr(t.id, t.abbreviation)
-
-        // Fire schedule, news, and standings in parallel immediately
-        const schedulePromise = getTeamSchedule(t.sport, t.id, t.abbreviation)
-        const newsPromise = getTeamNews(t.sport, t.id, t.name, t.abbreviation)
-        const standingsPromise = fetch(`/api/standings?sport=${t.sport}&team=${espnAbbrForApi}`)
-          .then((r) => r.ok ? r.json() : null)
-
-        // Await schedule first so we can build the odds URL with the event ID
-        const schedule = await schedulePromise
-
-        const schedForState = processScheduleForState(schedule, espnAbbrForApi, t.sport)
-        upcomingGameRef.current = schedForState.upcomingEventId
-          ? { id: schedForState.upcomingEventId, date: schedForState.upcomingDate! }
-          : null
-
-        let oddsUrl = `/api/odds?sport=${t.sport}&team=${espnAbbrForApi}`
-        if (schedForState.upcomingEventId && schedForState.upcomingDate) {
-          oddsUrl += `&eventId=${encodeURIComponent(schedForState.upcomingEventId)}&date=${schedForState.upcomingDate}`
-        }
-
-        // Await remaining fetches in parallel with odds (already in-flight)
-        const [news, standingsRes, oddsRes] = await Promise.all([
-          newsPromise,
-          standingsPromise,
-          fetch(oddsUrl).then((r) => r.ok ? r.json() : null),
-        ])
-
-        if (cancelled) return
-
-        const newsItems = news.map((a: any) => ({
-          title: a.headline ?? a.title ?? '',
-          source: a.source ?? 'ESPN',
-          date: a.published
-            ? new Date(a.published).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-            : a.date
-              ? new Date(a.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-              : '',
-          snippet: a.description ?? a.snippet ?? '',
-          url: a.links?.web?.href
-            ? (a.links.web.href.startsWith('http') ? a.links.web.href : `https://www.espn.com${a.links.web.href}`)
-            : a.url ?? '#',
-        }))
-
-        setData({
-          upcoming: schedForState.upcoming,
-          lastFive: schedForState.lastFive,
-          oddsInfo: oddsRes?.odds ?? null,
-          news: newsItems.length > 0 ? newsItems : getFallbackNews(t.name, t.sport, getEspnAbbr(t.id, t.abbreviation)),
-          standings: standingsRes?.standings ?? [],
-          teamStanding: standingsRes?.teamStanding ?? '',
-          standingsMessage: standingsRes?.message ?? '',
-        })
-        const live = schedForState.upcoming?.isLive
-        setIsLiveGame(!!live)
-        liveGameIdRef.current = live ? (schedForState.upcomingEventId ?? null) : null
-      } catch (err) {
-        console.error('[dashboard] Failed to load team data:', err)
-        if (!cancelled) setData(getFallbackData(t.name, t.sport, getEspnAbbr(t.id, t.abbreviation)))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+    if (dashLoading) return
+    if (!dashboard) {
+      setLoading(false)
+      setData(team ? getFallbackData(team.name, team.sport, getEspnAbbr(team.id, team.abbreviation)) : null)
+      return
     }
 
-    load()
-    return () => { cancelled = true }
-  }, [team?.id])
+    const abbr = getEspnAbbr(dashboard.team.id, dashboard.team.abbreviation)
+    const schedule = dashboard.schedule
+    const schedForState = processScheduleForState(
+      { upcoming: schedule.upcoming, lastFive: schedule.lastFive },
+      abbr,
+      dashboard.team.sport
+    )
+
+    upcomingGameRef.current = schedForState.upcomingEventId
+      ? { id: schedForState.upcomingEventId, date: schedForState.upcomingDate! }
+      : null
+
+    const standings = dashboard.standings
+    const newsItems = (dashboard.news ?? []).map((a: any) => ({
+      title: a.headline ?? a.title ?? '',
+      source: a.source ?? 'ESPN',
+      date: a.published
+        ? new Date(a.published).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : a.date
+          ? new Date(a.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          : '',
+      snippet: a.description ?? a.snippet ?? '',
+      url: a.links?.web?.href
+        ? (a.links.web.href.startsWith('http') ? a.links.web.href : `https://www.espn.com${a.links.web.href}`)
+        : a.url ?? '#',
+    }))
+
+    setData({
+      upcoming: schedForState.upcoming,
+      lastFive: schedForState.lastFive,
+      oddsInfo: dashboard.odds?.odds ?? null,
+      news: newsItems.length > 0 ? newsItems : getFallbackNews(dashboard.team.name, dashboard.team.sport, abbr),
+      standings: standings?.standings ?? [],
+      teamStanding: standings?.teamStanding ?? '',
+      standingsMessage: standings?.message ?? '',
+    })
+    const live = schedForState.upcoming?.isLive
+    setIsLiveGame(!!live)
+    liveGameIdRef.current = live ? (schedForState.upcomingEventId ?? null) : null
+    setLoading(false)
+  }, [dashboard, dashLoading])
 
   useEffect(() => {
     if (!showRoster || rosterData || rosterLoading || !team) return
@@ -633,7 +645,7 @@ export default function TeamDashboard() {
           </>
         )}
 
-        <AiConcierge
+        <AiNalyst
           sport={team.sport}
           teamId={team.id}
           teamAbbreviation={team.abbreviation}

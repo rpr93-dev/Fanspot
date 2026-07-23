@@ -20,7 +20,50 @@ function getPastGameAreas(sport: string): string[] {
   return PAST_GAME_AREAS[sport.toUpperCase()] ?? PAST_GAME_AREAS.MLB
 }
 
-interface AiConciergeProps {
+function SportIcon({ sport }: { sport: string }) {
+  const s = sport.toUpperCase()
+  const svgProps = { width: 22, height: 22, viewBox: "0 0 24 24", fill: "none", stroke: "white", strokeWidth: 1.8, strokeLinecap: "round" as const, strokeLinejoin: "round" as const }
+
+  switch (s) {
+    case 'NFL':
+      return (
+        <svg {...svgProps}>
+          <ellipse cx="12" cy="12" rx="6" ry="10" strokeWidth="2" />
+          <line x1="12" y1="3" x2="12" y2="6" strokeWidth="1.2" />
+          <line x1="12" y1="18" x2="12" y2="21" strokeWidth="1.2" />
+          <line x1="9.5" y1="4.5" x2="14.5" y2="4.5" strokeWidth="0.8" opacity="0.6" />
+          <line x1="9.5" y1="19.5" x2="14.5" y2="19.5" strokeWidth="0.8" opacity="0.6" />
+        </svg>
+      )
+    case 'NBA':
+      return (
+        <svg {...svgProps}>
+          <circle cx="12" cy="12" r="9" strokeWidth="2" />
+          <line x1="3.5" y1="12" x2="20.5" y2="12" strokeWidth="1.5" />
+          <path d="M7.5 7.5Q12 10 16.5 7.5" strokeWidth="0.8" opacity="0.5" />
+          <path d="M7.5 16.5Q12 14 16.5 16.5" strokeWidth="0.8" opacity="0.5" />
+        </svg>
+      )
+    case 'NHL':
+      return (
+        <svg {...svgProps}>
+          <ellipse cx="12" cy="12" rx="9" ry="6" strokeWidth="2" />
+          <line x1="6" y1="10" x2="18" y2="10" strokeWidth="0.8" opacity="0.4" />
+          <line x1="6" y1="14" x2="18" y2="14" strokeWidth="0.8" opacity="0.4" />
+        </svg>
+      )
+    default:
+      return (
+        <svg {...svgProps}>
+          <circle cx="12" cy="12" r="9" strokeWidth="2" />
+          <path d="M5.5 7.5Q12 11 5.5 16.5" strokeWidth="1.2" opacity="0.7" />
+          <path d="M18.5 7.5Q12 11 18.5 16.5" strokeWidth="1.2" opacity="0.7" />
+        </svg>
+      )
+  }
+}
+
+interface AiNalystProps {
   sport: string
   teamId: string
   teamAbbreviation: string
@@ -29,7 +72,7 @@ interface AiConciergeProps {
   eventId?: string
 }
 
-export default function AiConcierge({ sport, teamId, teamAbbreviation, teamColor, pageType, eventId }: AiConciergeProps) {
+export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, pageType, eventId }: AiNalystProps) {
   const [open, setOpen] = useState(false)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
@@ -108,13 +151,12 @@ export default function AiConcierge({ sport, teamId, teamAbbreviation, teamColor
     <>
       <button
         onClick={() => setOpen(v => !v)}
-        className="fixed bottom-6 right-6 z-50 w-12 h-12 rounded-full flex items-center justify-center shadow-lg hover:scale-110 transition-transform duration-200"
-        style={{ backgroundColor: teamColor }}
-        title="AI Concierge"
+        className="fixed bottom-8 right-8 z-50 gen-btn-glow flex items-center gap-2.5 px-5 py-3 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200"
+        style={{ backgroundColor: teamColor, '--glow': `${teamColor}88` } as any}
+        title="The AI-nalyst"
       >
-        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="white" width="20" height="20">
-          <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 17.93c-3.95-.49-7-3.85-7-7.93 0-.62.08-1.21.21-1.79L9 15v1c0 1.1.9 2 2 2v1.93zm6.9-2.54c-.26-.81-1-1.39-1.9-1.39h-1v-3c0-.55-.45-1-1-1H8v-2h2c.55 0 1-.45 1-1V7h2c1.1 0 2-.9 2-2v-.41c2.93 1.19 5 4.06 5 7.41 0 2.08-.8 3.97-2.1 5.39z"/>
-        </svg>
+        <SportIcon sport={sport} />
+        <span className="text-sm font-bold tracking-wide text-white drop-shadow-sm">The AI-nalyst</span>
       </button>
 
       {open && (

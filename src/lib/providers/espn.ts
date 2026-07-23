@@ -56,10 +56,15 @@ function getSeasonYears(sport: string, year: number, month: number): number[] {
 const scheduleCache = new Map<string, { events: EspnEvent[]; problems: string[]; ts: number }>()
 const SCHEDULE_CACHE_TTL = 120_000 // 2 minutes
 
+function apiOrigin(origin?: string): string {
+  return origin ?? ''
+}
+
 export async function fetchTeamSchedule(
   sport: string,
   teamId: string,
   teamAbbreviation: string,
+  origin?: string,
 ): Promise<{ events: EspnEvent[]; problems: string[] }> {
   const problems: string[] = []
   const abbr = getEspnAbbr(teamId, teamAbbreviation)
@@ -70,6 +75,7 @@ export async function fetchTeamSchedule(
   }
 
   const cfg = scoreboardConfig[sport]
+  const base = apiOrigin(origin)
 
   try {
     const now = new Date()
@@ -82,7 +88,7 @@ export async function fetchTeamSchedule(
     const seasonResults = await Promise.all(
       seasonYears.map(async (year) => {
         try {
-          const res = await fetch(`/api/schedule?sport=${sport}&team=${abbr}&season=${year}`, {
+          const res = await fetch(`${base}/api/schedule?sport=${sport}&team=${abbr}&season=${year}`, {
             signal: AbortSignal.timeout(10000),
           })
           if (res.ok) {
@@ -104,7 +110,7 @@ export async function fetchTeamSchedule(
 
     // Fetch current schedule in parallel with season fetches (not in the array since it's a different URL)
     try {
-      const currentRes = await fetch(`/api/schedule?sport=${sport}&team=${abbr}`, {
+      const currentRes = await fetch(`${base}/api/schedule?sport=${sport}&team=${abbr}`, {
         signal: AbortSignal.timeout(10000),
       })
       if (currentRes.ok) {
@@ -131,7 +137,7 @@ export async function fetchTeamSchedule(
 
     async function fetchScoreboard(dates: string, existingIds: Set<string>) {
       try {
-        const res = await fetch(`/api/schedule?sport=${sport}&team=${abbr}&source=scoreboard&dates=${dates}`)
+        const res = await fetch(`${base}/api/schedule?sport=${sport}&team=${abbr}&source=scoreboard&dates=${dates}`)
         if (res.ok) {
           const data = await res.json()
           if (data?.events) {
@@ -204,11 +210,12 @@ export async function fetchTeamSchedule(
   }
 }
 
-export async function fetchSummerLeagueEvents(teamAbbr: string): Promise<{ events: EspnEvent[]; problems: string[] }> {
+export async function fetchSummerLeagueEvents(teamAbbr: string, origin?: string): Promise<{ events: EspnEvent[]; problems: string[] }> {
   const problems: string[] = []
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
+  const base = apiOrigin(origin)
 
   if (month < SUMMER_LEAGUE_CONFIG.startMonth || month > SUMMER_LEAGUE_CONFIG.endMonth) {
     return { events: [], problems }
@@ -224,7 +231,7 @@ export async function fetchSummerLeagueEvents(teamAbbr: string): Promise<{ event
     const startPad = String(SUMMER_LEAGUE_CONFIG.startMonth).padStart(2, '0')
     const endPad = String(SUMMER_LEAGUE_CONFIG.endMonth).padStart(2, '0')
     const dates = `${year}${startPad}01-${year}${endPad}31`
-    const res = await fetch(`/api/schedule?sport=NBA_SUMMER&team=${teamAbbr}&source=scoreboard&dates=${dates}`, {
+    const res = await fetch(`${base}/api/schedule?sport=NBA_SUMMER&team=${teamAbbr}&source=scoreboard&dates=${dates}`, {
       signal: AbortSignal.timeout(15000),
     })
     if (!res.ok) {
@@ -260,9 +267,11 @@ export async function fetchTeamNews(
   teamId: string,
   teamName: string,
   teamAbbreviation: string,
+  origin?: string,
 ): Promise<EspnArticle[]> {
+  const base = apiOrigin(origin)
   try {
-    const res = await fetch(`/api/news-search?team=${encodeURIComponent(teamName)}&sport=${encodeURIComponent(sport)}`)
+    const res = await fetch(`${base}/api/news-search?team=${encodeURIComponent(teamName)}&sport=${encodeURIComponent(sport)}`)
     if (!res.ok) return []
     const data = await res.json()
     return data?.articles ?? []

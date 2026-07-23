@@ -83,10 +83,11 @@ export async function getTeamSchedule(
   sport: string,
   teamId: string,
   teamAbbreviation: string,
+  origin?: string,
 ): Promise<ScheduleResult> {
   const teamAbbr = getEspnAbbr(teamId, teamAbbreviation)
 
-  const espnResult = await espn.fetchTeamSchedule(sport, teamId, teamAbbreviation)
+  const espnResult = await espn.fetchTeamSchedule(sport, teamId, teamAbbreviation, origin)
   const espnEvents = espnResult.events as EspnEvent[]
 
   let espnHasUpcoming = hasUpcomingGame(espnEvents)
@@ -95,7 +96,7 @@ export async function getTeamSchedule(
   // For NBA, also fetch Summer League games and merge
   let allEvents = [...espnEvents]
   if (sport === 'NBA') {
-    const slResult = await espn.fetchSummerLeagueEvents(teamAbbr)
+    const slResult = await espn.fetchSummerLeagueEvents(teamAbbr, origin)
     if (slResult.events.length > 0) {
       const existingIds = new Set(allEvents.map((e) => e.id))
       for (const e of slResult.events) {

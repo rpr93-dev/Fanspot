@@ -7,3 +7,4 @@ AGENTS.md
 AUTONOMOUS_OPTIMIZATION_LOG.md
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+docs/data-flow.md
