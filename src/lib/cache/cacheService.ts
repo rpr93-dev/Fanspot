@@ -76,7 +76,11 @@ export async function swr<T>(
   }
 
   if (cached && isStale(cached.ts, ttl, stale)) {
-    fetchFn().then((fresh) => setCached(key, fresh)).catch(() => {})
+    // Background revalidation: the caller already knows the data is stale via the
+    // returned flag, but a silent failure here made repeated staleness untraceable.
+    fetchFn()
+      .then((fresh) => setCached(key, fresh))
+      .catch((e) => console.warn('[swr] background refresh failed:', key, e))
     return { data: cached.data, fromCache: true, stale: true }
   }
 

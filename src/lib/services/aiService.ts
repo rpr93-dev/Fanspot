@@ -1,7 +1,8 @@
 import { TTL } from '@/lib/cache/ttl'
 import { fetchOrCache, setCached, getCached, invalidate } from '@/lib/cache/cacheService'
 
-const OLLAMA_BASE = 'http://100.112.124.101:11434'
+// Set OLLAMA_BASE_URL in .env.local to move this off the checked-in tailnet address.
+const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || 'http://100.112.124.101:11434'
 const MODEL = 'llama3.1:70b-instruct-q4_K_M'
 
 const STYLE_PROMPTS: Record<string, string> = {

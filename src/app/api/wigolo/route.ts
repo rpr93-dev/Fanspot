@@ -56,7 +56,7 @@ async function fetchGoogleNews(query: string): Promise<WigoloArticle[]> {
 async function enrichWithContent(articles: WigoloArticle[], maxContent: number): Promise<WigoloArticle[]> {
   const enriched = await Promise.all(
     articles.slice(0, maxContent).map(async (a) => {
-      if (!a.url || a.url === '#' || a.url.startsWith('http')) {
+      if (a.url && a.url !== '#' && a.url.startsWith('http')) {
         try {
           const res = await fetch(a.url, {
             signal: AbortSignal.timeout(8000),
