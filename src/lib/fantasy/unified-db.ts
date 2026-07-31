@@ -275,7 +275,9 @@ export function unifiedToFantasyPlayerEnriched(
       proTeamId: 0,
       active: unified.canonical.active,
       injured: unified.injury?.injured ?? false,
-      injuryStatus: unified.injury?.status ?? 'ACTIVE',
+      // No fallback to ACTIVE: a player nobody reported on has an unknown status, and
+      // claiming otherwise would let the boards describe them as healthy.
+      injuryStatus: unified.injury?.status ?? 'unknown',
       ownership: {
         averageDraftPosition: pprRank ?? 999,
         percentOwned: unified.ownership?.percentOwned ?? 0,
