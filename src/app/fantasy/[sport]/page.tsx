@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { isFantasySportLive } from '@/lib/providers/fantasy-constants'
+import { resolveTeamTheme, themeVars } from '@/lib/fantasy/team-theme'
 import styles from './steals.module.css'
 
 type InjuryTier = 'healthy' | 'probable' | 'questionable' | 'doubtful' | 'out' | 'severe'
@@ -183,6 +184,7 @@ function Row({
   detail,
   onToggle,
   watch,
+  target,
 }: {
   row: StealRow
   index: number
@@ -190,13 +192,15 @@ function Row({
   detail?: DetailState
   onToggle: () => void
   watch?: boolean
+  target?: boolean
 }) {
   const isValue = row.gap > 0
   const badge = INJURY_BADGES[row.injuryTier]
   return (
     <>
       <div
-        className={`${styles.row} ${styles.clickable} ${!watch && index === 0 ? styles.top : ''} ${watch ? styles.watch : ''} ${open ? styles.open : ''}`}
+        id={`player-${row.playerId}`}
+        className={`${styles.row} ${styles.clickable} ${!watch && index === 0 ? styles.top : ''} ${watch ? styles.watch : ''} ${target ? styles.target : ''} ${open ? styles.open : ''}`}
         onClick={onToggle}
         onKeyDown={(e) => {
           if (e.key === 'Enter' || e.key === ' ') {
@@ -215,6 +219,7 @@ function Row({
             <span className={styles.tag}>
               <span className={styles.pos}>{row.pos}</span> · {row.team}
             </span>
+            {target && <span className={styles.targetTag}>FROM TEAM PAGE</span>}
             {badge && (
               <span
                 className={`${styles.injTag} ${badge.warn ? styles.warn : ''}`}
@@ -274,7 +279,13 @@ export default function FantasySportPage() {
   const sport = ((params.sport as string) || 'nfl').toLowerCase()
   const live = isFantasySportLive(sport)
 
-  const [pos, setPos] = useState('QB')
+  const teamFilter = searchParams.get('team')
+  const targetPlayerId = Number(searchParams.get('player')) || null
+  // Themed only when arriving from a team page; a direct visit keeps the neutral palette.
+  const theme = resolveTeamTheme(sport, searchParams.get('theme'))
+
+  const initialPos = (searchParams.get('pos') ?? 'QB').toUpperCase()
+  const [pos, setPos] = useState(POSITIONS.includes(initialPos) ? initialPos : 'QB')
   const [sort, setSort] = useState('gap')
   const [scoring, setScoring] = useState('ppr')
   const [adpPlatform, setAdpPlatform] = useState('espn')
@@ -293,8 +304,8 @@ export default function FantasySportPage() {
   const [openPlayer, setOpenPlayer] = useState<number | null>(null)
   const [details, setDetails] = useState<Record<number, DetailState>>({})
 
-  const teamFilter = searchParams.get('team')
   const requestId = useRef(0)
+  const scrolledTo = useRef<number | null>(null)
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250)
@@ -353,6 +364,23 @@ export default function FantasySportPage() {
     load()
   }, [load])
 
+  // Deep link from a team page: open and scroll to that player once, after the first
+  // page of rows lands. Runs once per id so it doesn't fight later user interaction.
+  useEffect(() => {
+    if (!targetPlayerId || loading || scrolledTo.current === targetPlayerId) return
+    const present =
+      rows.some((r) => r.playerId === targetPlayerId) ||
+      injuryWatch.some((r) => r.playerId === targetPlayerId)
+    if (!present) return
+    scrolledTo.current = targetPlayerId
+    setOpenPlayer(targetPlayerId)
+    void loadDetail(targetPlayerId)
+    requestAnimationFrame(() => {
+      document.getElementById(`player-${targetPlayerId}`)?.scrollIntoView({ block: 'center' })
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targetPlayerId, loading, rows, injuryWatch])
+
   async function loadMore() {
     setLoadingMore(true)
     try {
@@ -397,6 +425,10 @@ export default function FantasySportPage() {
       return
     }
     setOpenPlayer(playerId)
+    await loadDetail(playerId)
+  }
+
+  async function loadDetail(playerId: number) {
     if (details[playerId]?.status === 'ready') return
 
     setDetails((prev) => ({ ...prev, [playerId]: { status: 'loading' } }))
@@ -419,13 +451,20 @@ export default function FantasySportPage() {
   }
 
   return (
-    <div className={styles.board}>
+    <div className={styles.board} style={themeVars(theme)}>
       <div className={styles.wrap}>
         <p className={styles.eyebrow}>Fanspot / {SPORT_NAMES[sport] ?? sport.toUpperCase()} / Draft Prep</p>
         <h1 className={styles.title}>Steals Board</h1>
         <p className={styles.sub}>
           Players going <b>later</b> than their projected value. Ranked within position — a QB and a kicker are never compared directly.
         </p>
+
+        {theme && teamFilter && (
+          <p className={styles.teamBanner}>
+            Viewing {theme.name}
+            <Link href={`/fantasy/${sport}`}>Show the whole league</Link>
+          </p>
+        )}
 
         <div className={styles.stickybar}>
           <div className={styles.controls}>
@@ -500,6 +539,7 @@ export default function FantasySportPage() {
             key={row.playerId}
             row={row}
             index={i}
+            target={row.playerId === targetPlayerId}
             open={openPlayer === row.playerId}
             detail={details[row.playerId]}
             onToggle={() => togglePlayer(row.playerId)}
@@ -529,6 +569,7 @@ export default function FantasySportPage() {
                 row={row}
                 index={i}
                 watch
+                target={row.playerId === targetPlayerId}
                 open={openPlayer === row.playerId}
                 detail={details[row.playerId]}
                 onToggle={() => togglePlayer(row.playerId)}

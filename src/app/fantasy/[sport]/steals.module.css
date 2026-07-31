@@ -12,8 +12,14 @@
   --red: #E85D4C;
   --gold: #E8B94C;
 
+  /* Chrome accent. Overridden per team when the board is entered from a team page.
+     --turf and --red are NOT themeable: they encode value vs. reach on the field bar. */
+  --accent: var(--turf);
+  --accent-soft: var(--turf);
+  --accent-glow: rgba(139, 197, 63, 0.06);
+
   background:
-    radial-gradient(1200px 600px at 15% -10%, rgba(139, 197, 63, 0.06), transparent 60%),
+    radial-gradient(1200px 600px at 15% -10%, var(--accent-glow), transparent 60%),
     var(--bg);
   color: var(--text);
   font-family: var(--font-body), sans-serif;
@@ -50,8 +56,8 @@
   cursor: pointer;
 }
 .loadmore:hover {
-  border-color: var(--turf);
-  color: var(--turf);
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .loadmore:disabled {
   opacity: 0.4;
@@ -70,7 +76,7 @@
   font-size: 11px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--turf);
+  color: var(--accent);
   margin: 0 0 6px;
   display: flex;
   align-items: center;
@@ -80,7 +86,7 @@
   content: "";
   width: 6px;
   height: 6px;
-  background: var(--turf);
+  background: var(--accent);
   border-radius: 1px;
   display: inline-block;
 }
@@ -133,7 +139,7 @@
   cursor: pointer;
 }
 .postabs button.active {
-  background: var(--turf);
+  background: var(--accent);
   color: #0B0F0D;
 }
 .postabs button:not(.active):hover {
@@ -163,7 +169,7 @@
 }
 .select:focus,
 .search:focus {
-  outline: 2px solid var(--turf);
+  outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
 
@@ -212,7 +218,7 @@
   cursor: pointer;
 }
 .row.open {
-  border-color: var(--turf);
+  border-color: var(--accent);
   margin-bottom: 0;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
@@ -220,7 +226,7 @@
 
 .detail {
   background: var(--panel-2);
-  border: 1px solid var(--turf);
+  border: 1px solid var(--accent);
   border-top: none;
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
@@ -272,7 +278,7 @@
   font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--turf);
+  color: var(--accent);
   margin: 0 0 8px;
 }
 .newsItem {
@@ -283,7 +289,7 @@
   color: var(--text);
 }
 .newsItem:hover .newsTitle {
-  color: var(--turf);
+  color: var(--accent);
 }
 .newsTitle {
   font-size: 13px;
@@ -336,7 +342,7 @@
   letter-spacing: 0.03em;
 }
 .tag .pos {
-  color: var(--turf);
+  color: var(--accent);
 }
 
 .popTag {
@@ -387,6 +393,43 @@
 }
 .row.watch .rank {
   color: var(--red);
+}
+
+/* Row the board was deep-linked to from a team page. */
+.row.target {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-soft) inset;
+}
+.targetTag {
+  font-family: var(--font-mono-data), monospace;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  padding: 2px 5px;
+  border-radius: 3px;
+  color: var(--bg);
+  background: var(--accent);
+}
+.teamBanner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono-data), monospace;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin: 0 0 16px;
+}
+.teamBanner a {
+  color: var(--muted);
+  text-decoration: underline;
+  margin-left: auto;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .metaLine {
@@ -547,7 +590,7 @@
   margin-left: 10px;
   background: transparent;
   border: none;
-  color: var(--turf);
+  color: var(--accent);
   font-family: var(--font-mono-data), monospace;
   font-size: 12px;
   cursor: pointer;
@@ -581,7 +624,7 @@
   font-size: 12px;
   font-weight: 600;
   color: #0B0F0D;
-  background: var(--turf);
+  background: var(--accent);
   border-radius: 8px;
   padding: 9px 18px;
   text-decoration: none;
