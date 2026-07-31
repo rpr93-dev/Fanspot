@@ -88,7 +88,7 @@ interface OddsInfo {
 
 interface TeamDashboardData {
   upcoming: { date: string; opponent: string; opponentLogo: string; location: 'home' | 'away'; venue?: string; isPreseason?: boolean; isLive?: boolean; eventId?: string; homeScore?: string; awayScore?: string; homeAbbr?: string; awayAbbr?: string; statusDetail?: string; seasonTypeName?: string } | null
-  lastFive: { date: string; opponent: string; opponentLogo: string; result: 'W' | 'L'; score: string; eventId: string; isPreseason?: boolean; seasonTypeName?: string }[]
+  lastFive: { date: string; opponent: string; opponentAbbr: string; opponentLogo: string; result: 'W' | 'L'; score: string; eventId: string; isPreseason?: boolean; seasonTypeName?: string }[]
   oddsInfo: OddsInfo | null
   news: { title: string; source: string; date: string; snippet: string; url: string }[]
   standings: ConferenceGroup[]
@@ -104,7 +104,7 @@ function getShortDate(event: EspnEvent): string {
   return new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
 }
 
-function getOpponent(event: EspnEvent, teamAbbr: string, sport: string): { name: string; logo: string; location: 'home' | 'away' } {
+function getOpponent(event: EspnEvent, teamAbbr: string, sport: string): { name: string; abbr: string; logo: string; location: 'home' | 'away' } {
   const competitors = event.competitions?.[0]?.competitors ?? []
   const opponent = competitors.find((c) => c.team.abbreviation !== teamAbbr)
   const home = competitors.find((c) => c.homeAway === 'home')
@@ -112,6 +112,7 @@ function getOpponent(event: EspnEvent, teamAbbr: string, sport: string): { name:
   const oppAbbr = opponent?.team.abbreviation ?? ''
   return {
     name: opponent?.team.displayName ?? 'Unknown',
+    abbr: oppAbbr,
     logo: opponent?.team.logo ?? (oppAbbr ? getTeamLogoUrl(oppAbbr, sport) : ''),
     location: isHome ? 'home' : ('away' as 'home' | 'away'),
   }
@@ -383,7 +384,9 @@ export default function TeamDashboard() {
 
   return (
     <div className="min-h-screen" style={{ background: `linear-gradient(135deg, #0a0a0f, ${team.colors.primary}08, #1a1a2e)` }}>
-      <div className="px-4 sm:px-6 py-6 sm:py-10">
+      {/* pb-28 clears the fixed AI-nalyst button, which otherwise sits on top of the
+          last card on a phone. */}
+      <div className="px-4 sm:px-6 py-6 sm:py-10 pb-28 sm:pb-10">
         <Link href={`/${sport}`} className="hover-lift text-sm text-gray-500 hover:text-white inline-block mb-8" style={{ '--card-color': team.colors.primary } as React.CSSProperties}>&larr; {config.name}</Link>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
@@ -584,7 +587,10 @@ export default function TeamDashboard() {
                         {game.opponentLogo && (
                           <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain mb-1" />
                         )}
-                        <span className="text-xs text-white/80 truncate max-w-full">{game.opponent}</span>
+                        <span className="text-xs text-white/80 truncate max-w-full">
+                          <span className="sm:hidden">{game.opponentAbbr || game.opponent}</span>
+                          <span className="hidden sm:inline">{game.opponent}</span>
+                        </span>
                         <span className="text-xs mt-0.5 text-gray-400">{game.score}</span>
                         <div className="flex items-center gap-1 mt-0.5">
                           <span className="text-[10px] text-gray-500">{game.date}</span>
@@ -943,6 +949,7 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
     return {
       date: getShortDate(e),
       opponent: opp.name,
+      opponentAbbr: opp.abbr,
       opponentLogo: opp.logo,
       result: getResult(e, espnAbbr),
       score: getScore(e, espnAbbr),

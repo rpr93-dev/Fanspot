@@ -802,8 +802,21 @@
 @media (max-width: 640px) {
   .auctionHead,
   .auctionRow {
-    grid-template-columns: 1fr 60px 68px 58px;
+    grid-template-columns: 1fr 56px 58px 52px;
+    gap: 6px;
     padding: 12px;
+  }
+  /* Keep "RB · BAL · 253 proj" on one line; wrapping it doubled every row's height. */
+  .auctionName em {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .auctionValue {
+    font-size: 15px;
+  }
+  .auctionMarket {
+    font-size: 13px;
   }
 }
 
@@ -827,6 +840,9 @@
   }
   .field {
     grid-column: 1 / -1;
+    /* The rank labels hang 14px above the track. In the desktop column nothing sits
+       above them; stacked on mobile they land on the note text without this. */
+    margin-top: 14px;
   }
   .gap {
     grid-column: 1 / -1;
@@ -840,5 +856,54 @@
   }
   .search {
     width: 100%;
+  }
+
+  /* The bar wraps to several rows on a phone, which pushed its fading tail far enough
+     down the screen that row text showed through it. Solid below this width. */
+  .stickybar {
+    background: var(--bg);
+    padding-bottom: 4px;
+  }
+
+  /* Keep the position tabs on one swipeable row rather than wrapping to three. */
+  .postabs {
+    overflow-x: auto;
+    scrollbar-width: none;
+    max-width: 100%;
+  }
+  .postabs::-webkit-scrollbar {
+    display: none;
+  }
+  .postabs button {
+    flex: 0 0 auto;
+  }
+
+  .controls {
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  /* The spacer only exists to push controls apart on a wide row. */
+  .spacer {
+    display: none;
+  }
+  .select {
+    flex: 1 1 45%;
+    min-width: 0;
+  }
+  .scaleNote {
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+
+  .board {
+    padding: 20px 14px 64px;
+  }
+
+  .numField {
+    flex: 1 1 30%;
+  }
+  .numField input {
+    width: 100%;
+    min-width: 0;
   }
 }
