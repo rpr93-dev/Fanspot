@@ -44,8 +44,8 @@ export async function enrichInjuries(
   return { injuries, source: 'espn' }
 }
 
-function mapInjuryStatus(status: string): PlayerInjury['status'] {
-  const upper = status.toUpperCase()
+export function mapInjuryStatus(status: string | undefined): PlayerInjury['status'] {
+  const upper = (status ?? '').toUpperCase()
   if (upper === 'ACTIVE') return 'ACTIVE'
   if (upper === 'QUESTIONABLE') return 'QUESTIONABLE'
   if (upper === 'DOUBTFUL') return 'DOUBTFUL'

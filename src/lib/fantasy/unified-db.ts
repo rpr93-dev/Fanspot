@@ -7,7 +7,7 @@ import { FANTASY_POSITIONS_NFL } from './player-types'
 import { buildMasterPlayerList, getSleeperMasterLogs, clearMasterPlayerCache, type MasterPlayerList } from './sleeper-master'
 import { buildMatchContext, logUnmatchedPlayers, type MatchContext } from './player-matching-engine'
 import { enrichFromEspn, getEspnEnricherLogs, type EspnEnrichmentResult } from './enrichers/espn-enricher'
-import { enrichInjuries, getInjuryEnricherLogs, type InjuryEnrichmentResult } from './enrichers/injury-enricher'
+import { enrichInjuries, getInjuryEnricherLogs, mapInjuryStatus, type InjuryEnrichmentResult } from './enrichers/injury-enricher'
 import { enrichVegas, getVegasEnricherLogs, type VegasEnrichmentResult } from './enrichers/vegas-enricher'
 import { PRO_TEAM_MAPPER } from '../fantasy-types'
 import type { AdpSource } from '../fantasy-types'
@@ -143,7 +143,7 @@ export async function buildUnifiedDatabase(options: BuildOptions = {}): Promise<
 
         if (espnEntry.injured || espnEntry.injuryStatus !== 'ACTIVE') {
           player.injury = {
-            status: mapInjStatus(espnEntry.injuryStatus),
+            status: mapInjuryStatus(espnEntry.injuryStatus),
             injured: espnEntry.injured,
           }
         }
@@ -234,18 +234,6 @@ export function invalidateUnifiedDb(): void {
   cacheExpiresAt = 0
   clearMasterPlayerCache()
   log('info', 'cache', 'Unified database cache invalidated')
-}
-
-function mapInjStatus(status: string | undefined): PlayerInjury['status'] {
-  const upper = (status ?? '').toUpperCase()
-  if (upper === 'ACTIVE') return 'ACTIVE'
-  if (upper === 'QUESTIONABLE') return 'QUESTIONABLE'
-  if (upper === 'DOUBTFUL') return 'DOUBTFUL'
-  if (upper === 'OUT') return 'OUT'
-  if (upper === 'IR') return 'IR'
-  if (upper === 'PUP') return 'PUP'
-  if (upper === 'SUSPENDED' || upper === 'SUSP') return 'SUSPENDED'
-  return 'unknown'
 }
 
 export function unifiedToFantasyPlayerEnriched(
