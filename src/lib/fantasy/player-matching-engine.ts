@@ -151,34 +151,6 @@ export function matchCanonicalToEspn(
   }
 }
 
-export function findCanonicalByEspnId(
-  espnId: number,
-  ctx: MatchContext,
-): CanonicalPlayer | undefined {
-  return ctx.master.byEspnId.get(espnId)
-}
-
-export function findCanonicalBySleeperId(
-  sleeperId: string,
-  ctx: MatchContext,
-): CanonicalPlayer | undefined {
-  return ctx.master.bySleeperId.get(sleeperId)
-}
-
-export function findCanonicalByGsisId(
-  gsisId: string,
-  ctx: MatchContext,
-): CanonicalPlayer | undefined {
-  return ctx.master.byGsisId.get(gsisId)
-}
-
-export function findCanonicalByPfrId(
-  pfrId: string,
-  ctx: MatchContext,
-): CanonicalPlayer | undefined {
-  return ctx.master.byPfrId.get(pfrId)
-}
-
 export function matchEspnPlayerToMaster(
   espnPlayer: UnmatchedEspnPlayer,
   ctx: MatchContext,
@@ -223,23 +195,5 @@ export function logUnmatchedPlayers(unmatched: UnmatchedEspnPlayer[]): void {
   }
   if (unmatched.length > 20) {
     console.warn(`  ... and ${unmatched.length - 20} more`)
-  }
-}
-
-export function getMatchingStats(matches: PlayerMatchResult[]): {
-  total: number
-  byStrategy: Record<string, number>
-  avgConfidence: number
-} {
-  const byStrategy: Record<string, number> = {}
-  let totalConf = 0
-  for (const m of matches) {
-    byStrategy[m.strategy] = (byStrategy[m.strategy] ?? 0) + 1
-    totalConf += m.confidence
-  }
-  return {
-    total: matches.length,
-    byStrategy,
-    avgConfidence: matches.length > 0 ? totalConf / matches.length : 0,
   }
 }

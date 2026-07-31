@@ -90,15 +90,3 @@ export function validateUnifiedDatabase(players: UnifiedPlayer[]): ValidationRep
     teamConflicts,
   }
 }
-
-export function validateCanonicalPlayer(p: CanonicalPlayer): string[] {
-  const errors: string[] = []
-  if (!p.sleeperId) errors.push('Missing sleeperId')
-  if (!p.fullName) errors.push('Missing fullName')
-  if (!p.position) errors.push('Missing position')
-  if (!p.team) errors.push('Missing team')
-  if (p.position && !VALID_POSITIONS_NFL.has(p.position)) {
-    errors.push(`Invalid position: ${p.position}`)
-  }
-  return errors
-}

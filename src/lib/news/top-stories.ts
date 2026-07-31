@@ -20,10 +20,6 @@ interface CacheEntry {
 }
 const cache = new Map<string, CacheEntry>()
 
-export function invalidateTopStories(): void {
-  cache.clear()
-}
-
 function text(v: unknown): string {
   if (typeof v === 'string') return v
   if (v && typeof v === 'object' && '#text' in (v as Record<string, unknown>)) {
