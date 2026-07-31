@@ -5,6 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { isFantasySportLive } from '@/lib/providers/fantasy-constants'
 import { resolveTeamTheme, themeVars } from '@/lib/fantasy/team-theme'
+import AuctionBoard from './AuctionBoard'
 import styles from './steals.module.css'
 
 type InjuryTier = 'healthy' | 'probable' | 'questionable' | 'doubtful' | 'out' | 'severe'
@@ -287,6 +288,9 @@ export default function FantasySportPage() {
 
   const initialPos = (searchParams.get('pos') ?? 'QB').toUpperCase()
   const [pos, setPos] = useState(POSITIONS.includes(initialPos) ? initialPos : 'QB')
+  const [mode, setMode] = useState<'snake' | 'auction'>(
+    searchParams.get('mode') === 'auction' ? 'auction' : 'snake',
+  )
   const [sort, setSort] = useState('gap')
   const [scoring, setScoring] = useState('ppr')
   const [adpPlatform, setAdpPlatform] = useState('espn')
@@ -463,9 +467,18 @@ export default function FantasySportPage() {
     <div className={styles.board} style={themeVars(theme)}>
       <div className={styles.wrap}>
         <p className={styles.eyebrow}>Fanspot / {SPORT_NAMES[sport] ?? sport.toUpperCase()} / Draft Prep</p>
-        <h1 className={styles.title}>Steals Board</h1>
+        <h1 className={styles.title}>{mode === 'auction' ? 'Auction Values' : 'Steals Board'}</h1>
         <p className={styles.sub}>
-          Players going <b>later</b> than their projected value. Ranked within position — a QB and a kicker are never compared directly.
+          {mode === 'auction' ? (
+            <>
+              What each player is worth in <b>your</b> league, priced off the money and roster spots you
+              enter. Compared against what the market pays for them.
+            </>
+          ) : (
+            <>
+              Players going <b>later</b> than their projected value. Ranked within position — a QB and a kicker are never compared directly.
+            </>
+          )}
         </p>
 
         {theme && teamFilter && (
@@ -474,6 +487,26 @@ export default function FantasySportPage() {
             <Link href={`/fantasy/${sport}`}>Show the whole league</Link>
           </p>
         )}
+
+        <div className={styles.modeTabs}>
+          <button
+            className={mode === 'snake' ? styles.active : undefined}
+            onClick={() => setMode('snake')}
+          >
+            Snake
+          </button>
+          <button
+            className={mode === 'auction' ? styles.active : undefined}
+            onClick={() => setMode('auction')}
+          >
+            Auction
+          </button>
+        </div>
+
+        {mode === 'auction' && <AuctionBoard sport={sport} teamFilter={teamFilter} />}
+
+        {mode === 'snake' && (
+        <>
 
         <div className={styles.stickybar}>
           <div className={styles.controls}>
@@ -595,13 +628,19 @@ export default function FantasySportPage() {
             ))}
           </>
         )}
+        </>
+        )}
 
         <footer className={styles.footer}>
           <span>
             {tracked} players tracked
             {generatedAt ? ` · updated ${new Date(generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
           </span>
-          <span>gap = ADP rank − projected rank, within position</span>
+          <span>
+            {mode === 'auction'
+              ? 'value = projection above the last startable player, priced to your budget'
+              : 'gap = ADP rank − projected rank, within position'}
+          </span>
         </footer>
       </div>
     </div>
