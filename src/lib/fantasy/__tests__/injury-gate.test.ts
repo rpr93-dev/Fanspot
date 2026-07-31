@@ -57,6 +57,16 @@ describe('resolveInjuryTier', () => {
   it('treats a bare injured flag as questionable, not severe', () => {
     expect(resolveInjuryTier({ espnStatus: 'ACTIVE', espnInjured: true }).tier).toBe('questionable')
   })
+
+  it('separates a reported clean status from no report at all', () => {
+    expect(resolveInjuryTier({ espnStatus: 'ACTIVE' }).designationKnown).toBe(true)
+    expect(resolveInjuryTier({ sleeperStatus: 'Questionable' }).designationKnown).toBe(true)
+    // Both still land on `healthy`, so the tier alone cannot tell these apart.
+    expect(resolveInjuryTier({}).designationKnown).toBe(false)
+    expect(resolveInjuryTier({ espnStatus: '' }).designationKnown).toBe(false)
+    expect(resolveInjuryTier({ espnStatus: 'unknown' }).designationKnown).toBe(false)
+    expect(resolveInjuryTier({ espnStatus: 'unknown' }).tier).toBe('healthy')
+  })
 })
 
 describe('detectSevereLanguage', () => {
@@ -125,7 +135,7 @@ describe('applyInjuryGate', () => {
     const checked: string[] = []
     const ranked = Array.from({ length: 40 }, (_, i) => row({ playerId: i, name: `P${i}`, gap: 40 - i }))
 
-    await applyInjuryGate(ranked, {
+    const { board } = await applyInjuryGate(ranked, {
       sport: 'nfl',
       crossCheckTop: 5,
       fetchHeadlines: async (name) => {
@@ -135,6 +145,11 @@ describe('applyInjuryGate', () => {
     })
 
     expect(checked).toHaveLength(5)
+    // Rows past the cutoff had no verification, so their notes must not imply any.
+    expect(board.filter((r) => r.injuryChecked)).toHaveLength(5)
+    expect(board[39].injuryChecked).toBe(false)
+    expect(board[39].note).toContain('recent headlines were not checked')
+    expect(board[0].note).toContain('recent headlines are clear')
   })
 
   it('survives a failing headline fetch', async () => {
@@ -147,6 +162,9 @@ describe('applyInjuryGate', () => {
     })
     expect(board).toHaveLength(1)
     expect(board[0].injuryTier).toBe('healthy')
+    // A failed lookup is not a clean result.
+    expect(board[0].injuryChecked).toBe(false)
+    expect(board[0].note).not.toContain('headlines are clear')
   })
 })
 
@@ -172,8 +190,33 @@ describe('composeNote', () => {
       row({ pos: 'RB', posRank: 2, adpRank: 4, gap: 2, confidenceDriver: '210 FP last season' }),
     )
     expect(note).toBe(
-      'Falling past projected value — RB2 projection at RB4 price with no injury concerns. 210 FP last season.',
+      'Falling past projected value — RB2 projection at RB4 price — listed active, though recent headlines were not checked. 210 FP last season.',
     )
+  })
+
+  it('never claims a player has no injury concerns', () => {
+    for (const r of [
+      row({ gap: 2 }),
+      row({ gap: 2, injuryChecked: true }),
+      row({ gap: 2, injuryDesignationKnown: false }),
+    ]) {
+      expect(composeNote(r)).not.toContain('no injury concerns')
+    }
+  })
+
+  it('only claims headlines are clear when the cross-check actually ran', () => {
+    expect(composeNote(row({ gap: 2, injuryChecked: true }))).toContain(
+      'listed active, and recent headlines are clear',
+    )
+    expect(composeNote(row({ gap: 2, injuryChecked: false }))).toContain(
+      'recent headlines were not checked',
+    )
+  })
+
+  it('says nothing was reported when no provider gave a designation', () => {
+    const note = composeNote(row({ gap: 2, injuryDesignationKnown: false, injuryChecked: true }))
+    expect(note).toContain('no injury status reported either way')
+    expect(note).not.toContain('listed active')
   })
 
   it('describes a negative gap as a reach', () => {

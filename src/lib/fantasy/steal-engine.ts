@@ -186,6 +186,10 @@ export interface StealRow {
   injuryStatus: string
   injuryDetail?: string
   injurySource?: ResolvedInjury['source']
+  /** False when no provider reported a designation — an absent report, not a clearance. */
+  injuryDesignationKnown?: boolean
+  /** True only when the headline cross-check ran and came back clean. */
+  injuryChecked?: boolean
   /** True when the injury gate moved this row off its earned rank. */
   gateApplied: boolean
   gateReason?: 'severe-injury' | 'doubtful-rank-floor'
@@ -287,9 +291,11 @@ export function buildStealBoard(
         overallAdp: e.adp,
         impliedTeamTotal: e.player.vegas?.teamImpliedPoints,
         injuryTier: injury.tier,
-        injuryStatus: e.player.player.injuryStatus ?? 'ACTIVE',
+        injuryStatus: e.player.player.injuryStatus || 'UNKNOWN',
         injuryDetail: injury.detail || undefined,
         injurySource: injury.source,
+        injuryDesignationKnown: injury.designationKnown,
+        injuryChecked: false,
         gateApplied: false,
         confidenceDriver: buildConfidenceDriver(e.player),
       }

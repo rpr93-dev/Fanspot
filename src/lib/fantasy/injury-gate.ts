@@ -72,6 +72,12 @@ function tierFromDesignation(status: string | undefined): InjuryTier {
   return 'healthy'
 }
 
+/** ESPN sends a literal `unknown` for some players; that is an absent report, not a clearance. */
+function isRealDesignation(status: string | undefined): boolean {
+  const s = (status ?? '').trim().toUpperCase()
+  return s !== '' && s !== 'UNKNOWN' && s !== 'N/A'
+}
+
 export interface InjurySignals {
   /** ESPN's designation — the primary source, but it lags real severity. */
   espnStatus?: string
@@ -88,6 +94,11 @@ export interface ResolvedInjury {
   /** Human-readable cause, e.g. `Knee - ACL`, `torn ACL`. Empty when healthy. */
   detail: string
   source: 'espn' | 'sleeper-detail' | 'headlines' | 'none'
+  /**
+   * False when no provider gave a usable designation. A `healthy` tier then means
+   * "nothing was reported", which is not the same as a clean bill of health.
+   */
+  designationKnown: boolean
 }
 
 /**
@@ -112,7 +123,12 @@ export function resolveInjuryTier(signals: InjurySignals): ResolvedInjury {
     source = 'sleeper-detail'
   }
 
-  return { tier, detail: tier === 'healthy' ? '' : detailText, source }
+  return {
+    tier,
+    detail: tier === 'healthy' ? '' : detailText,
+    source,
+    designationKnown: isRealDesignation(signals.espnStatus) || isRealDesignation(signals.sleeperStatus),
+  }
 }
 
 export interface GateOptions {
@@ -133,7 +149,9 @@ export interface GateResult {
  * averaged away by a large ADP gap.
  */
 export async function applyInjuryGate(ranked: StealRow[], opts: GateOptions): Promise<GateResult> {
-  const rows = ranked.map((r, i) => ({ ...r, rankByGap: i + 1 }))
+  // Default the flag here rather than trusting callers: the note wording depends on it,
+  // and an undefined flag must read as "not checked", never as a clean result.
+  const rows = ranked.map((r, i) => ({ ...r, rankByGap: i + 1, injuryChecked: r.injuryChecked ?? false }))
 
   const crossCheckTop = opts.crossCheckTop ?? DEFAULT_CROSS_CHECK_TOP
   if (opts.fetchHeadlines) {
@@ -144,8 +162,10 @@ export async function applyInjuryGate(ranked: StealRow[], opts: GateOptions): Pr
         try {
           headlines = await opts.fetchHeadlines!(row.name, row.team, opts.sport)
         } catch {
+          // A failed lookup is not a clean result, so the row stays marked unchecked.
           return
         }
+        row.injuryChecked = true
         for (const h of headlines) {
           const label = detectSevereLanguage(h)
           if (label) {
@@ -196,6 +216,17 @@ function gapClause(row: StealRow): string {
   return `Priced about right — ${projected} projection at ${priced}`
 }
 
+/**
+ * What we can honestly say about a row carrying no injury flag. `healthy` is the fallback
+ * when nothing is reported, and the headline cross-check only reaches the top of page one,
+ * so most rows have had no verification at all — the note must not imply otherwise.
+ */
+function healthClause(row: StealRow): string {
+  if (row.injuryDesignationKnown === false) return 'no injury status reported either way'
+  if (row.injuryChecked) return 'listed active, and recent headlines are clear'
+  return 'listed active, though recent headlines were not checked'
+}
+
 /** Composed from whatever actually drove the outcome: injury > ADP gap > confidence. */
 export function composeNote(row: StealRow): string {
   const detail = row.injuryDetail ? ` (${row.injuryDetail})` : ''
@@ -215,5 +246,5 @@ export function composeNote(row: StealRow): string {
     const tag = row.injuryTier === 'questionable' ? 'Questionable' : 'Probable'
     return `${gapClause(row)}, though tagged ${tag}${detail}.`
   }
-  return `${gapClause(row)} with no injury concerns. ${row.confidenceDriver}.`
+  return `${gapClause(row)} — ${healthClause(row)}. ${row.confidenceDriver}.`
 }
