@@ -373,7 +373,13 @@ export default function FantasySportPage() {
   // Deep link from a team page: open and scroll to that player once, after the first
   // page of rows lands. Runs once per id so it doesn't fight later user interaction.
   useEffect(() => {
-    if (!targetPlayerId || loading || scrolledTo.current === targetPlayerId) return
+    // Clearing the deep link (e.g. "Show the whole league") must retract the notice —
+    // the early return below would otherwise leave it up with nothing to refer to.
+    if (!targetPlayerId) {
+      setMissingTarget(false)
+      return
+    }
+    if (loading || scrolledTo.current === targetPlayerId) return
     const present =
       rows.some((r) => r.playerId === targetPlayerId) ||
       injuryWatch.some((r) => r.playerId === targetPlayerId)
