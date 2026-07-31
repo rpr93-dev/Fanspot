@@ -57,19 +57,24 @@ export async function fetchSleeperPlayersRaw(): Promise<Record<string, Record<st
  * veterans like Matthew Stafford (LAR, 17 yrs exp, 38yo) or Aaron Rodgers (PIT, 21
  * yrs exp, 42yo) who are still real, draftable players.
  *
- * The years_exp >= 18 guard catches the lone stale-team outlier — Ben Roethlisberger,
- * whom Sleeper still has at team="PIT" but who is genuinely retired.
+ * The years_exp >= 18 guard catches stale-team outliers — Ben Roethlisberger, whom
+ * Sleeper still has at team="PIT" but who is genuinely retired. It additionally
+ * requires the absence of a depth chart slot, because that is the only field that
+ * separates Roethlisberger from Aaron Rodgers: both are PIT quarterbacks in Sleeper's
+ * data at 18+ years and 39+, and Sleeper's `status` reads "Active" for both. Only
+ * Rodgers is listed on the depth chart.
  */
 function likelyRetired(raw: Record<string, unknown>): boolean {
   const yearsExp = (raw.years_exp as number) ?? 0
   const team = (raw.team as string) || ''
   const age = (raw.age as number) ?? 0
+  const onDepthChart = raw.depth_chart_order != null
   if (!team) {
     if (yearsExp >= 15) return true
     if (yearsExp >= 12 && age >= 33) return true
     if (yearsExp >= 10 && age >= 35) return true
   }
-  if (yearsExp >= 18 && age >= 39) return true
+  if (yearsExp >= 18 && age >= 39 && !onDepthChart) return true
   return false
 }
 
