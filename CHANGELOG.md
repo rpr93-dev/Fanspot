@@ -17,6 +17,8 @@ separable from it. To discard **everything** from this session: `git reset --har
 | 3 | `fcb035d` | Feature 3 — Biggest Stories tab |
 | 4 | `1b67b62` | tests for features 1–3 + vitest config fix |
 | 5 | `54f4aea` | audit fixes |
+| 6 | `1b99854` | this changelog |
+| 7 | `195f6ef` | follow-up: deep link to a player not on the board |
 
 ---
 
@@ -237,3 +239,28 @@ Out of scope for this session; listed so they aren't lost.
 8. **`buildOutlook` still can't distinguish "injured" from "out for the season"** now that
    the injury gate has proper tiers — it takes a boolean. Passing the tier through would
    make the team-page outlook as precise as the steals board note.
+
+---
+
+## 6. Deep link to a player who isn't on the board — `195f6ef`
+
+**Found during final end-to-end testing, not by the audit.** Clicking Pittsburgh's QB1
+(Drew Allar) opened the Steals board on `pos=QB&team=PIT` and rendered "Showing 0 of 0
+QBs · PIT only / No players match." — with no indication of why.
+
+**Cause, not a bug in the link.** The Steals board only ranks players rostered in at least
+1% of leagues. A team's genuine starter can sit below that line, so the two surfaces
+disagreed by design and the UI didn't say so. Lowering the threshold would have polluted
+the board with undrafted players to paper over the message.
+
+**What changed.** When a deep-linked player isn't in the results, the board names them and
+explains the absence — "Drew Allar isn't on the Steals board. The board only ranks players
+rostered in at least 1% of leagues, so a listed starter can still be absent — that's a
+signal in itself, not a missing record." — with a link to the unfiltered position view.
+The player's name rides along in the link as `?name=`, so the message can name them without
+an extra lookup.
+
+**Files:** `src/app/fantasy/[sport]/page.tsx`, `src/components/FantasyWidget.tsx`,
+`src/app/fantasy/[sport]/steals.module.css` (`.notice`)
+
+**Revert:** `git revert 195f6ef` — returns to the unexplained empty list.
