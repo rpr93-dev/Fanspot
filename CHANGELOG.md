@@ -416,3 +416,59 @@ three new files are self-contained; nothing in snake mode depends on them.
     to valuePerDollar…" under steal math) — that section now describes only part of the
     picture and should be updated alongside the fantasy-pipeline staleness already noted
     in suggestion 3.
+
+---
+
+## 10. Missing-player notice would not go away — `2341284`
+
+**What changed.** Clicking "Show the whole league" (or anything else that drops `?player=`)
+left the "That player isn't on the Steals board…" notice on screen.
+
+**Why.** The deep-link effect opened with
+`if (!targetPlayerId || loading || scrolledTo.current === targetPlayerId) return`. Once the
+id went away the effect bailed on the first clause and never reached `setMissingTarget(false)`,
+so the flag stayed true with nothing left to refer to. The `targetName` had also been
+dropped from the URL by then, which is why it degraded to the generic "That player".
+Clearing the target is now handled before the early return.
+
+**Files:** `src/app/fantasy/[sport]/page.tsx`
+
+**Revert:** `git revert 2341284`
+
+---
+
+## 11. Mobile fixes — `c191fce`
+
+Audited every route at 375px (iPhone SE width) in a real browser rather than by reading CSS.
+
+**Verified as NOT problems** (checked before changing anything):
+- **Viewport meta is present.** Next.js App Router emits
+  `<meta name="viewport" content="width=device-width, initial-scale=1"/>` by default even
+  though `layout.tsx` exports no `viewport` object. Confirmed in the served HTML.
+- **No horizontal overflow anywhere.** `document.documentElement.scrollWidth` measured 365–375
+  against a 375px viewport on `/`, `/nfl`, `/nfl/pit`, `/fantasy` and `/fantasy/nfl`, with zero
+  elements extending past the right edge.
+- `.search` already went `width: 100%` under 640px.
+- The steals row grid already collapsed to a stacked layout under 640px.
+
+**Actual problems found and fixed:**
+
+| Problem | Cause | Fix |
+|---|---|---|
+| Row text visibly showing **through** the sticky control bar | `.stickybar` background is `linear-gradient(180deg, var(--bg) 78%, transparent)`. On desktop the bar is one row tall so the transparent tail reads as a soft edge; on a phone it wraps to ~180px, putting a ~40px transparent strip over the content. | Solid `var(--bg)` under 640px. |
+| Sticky bar ate ~180px of an 812px screen | Position tabs wrapped to 3 rows, each select on its own row. | Tabs scroll horizontally on one row; selects share rows at `flex: 1 1 45%`; the flex `.spacer` is hidden. |
+| Rank labels (`#3 #5`) landing on the note text | `.field .lbl` is `top: -14px`, fine in its own desktop grid column but the field stacks directly under the note on mobile. | `margin-top: 14px` on `.field` under 640px. |
+| Auction rows double height | `RB · BAL · 253 proj` wrapped in a ~130px name column. | Tighter mobile columns + `nowrap`/ellipsis on the meta line. |
+| Last 5 Games read `Houston T…`, `Detroit Lio…` | Full `displayName` in a 3-column grid at ~97px per card. | `getOpponent` now also returns the abbreviation; phones show `HOU`, 640px+ shows the full name. |
+| AI-nalyst button covering the last card | It is `position: fixed` with no bottom clearance on the page. | `pb-28 sm:pb-10` on the team dashboard; button itself moves to `bottom-4 right-4` on phones. |
+
+**Files:** `src/app/fantasy/[sport]/steals.module.css` (mobile block),
+`src/app/[sport]/[team]/page.tsx` (`getOpponent` abbr, `lastFive` type, bottom padding),
+`src/components/AiNalyst.tsx` (button inset)
+
+**Revert:** `git revert c191fce` — layout returns to desktop-tuned values. Nothing outside
+the 640px media query and the two component tweaks is affected.
+
+**Not addressed.** Tap-target sizes were not audited against the 44px guideline, and the
+box-score panel and roster modal were not checked at 375px — neither was reachable without
+live game data at the time of testing.
