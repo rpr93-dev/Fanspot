@@ -60,22 +60,50 @@ export function detectSevereLanguage(text: string | undefined): string | null {
 }
 
 function tierFromDesignation(status: string | undefined): InjuryTier {
-  const s = (status ?? '').toUpperCase().replace(/[\s-]+/g, '_')
-  if (s === '' || s === 'ACTIVE' || s === 'NORMAL' || s === 'HEALTHY') return 'healthy'
+  const s = normalize(status)
+  if (CLEAN_DESIGNATIONS.has(s)) return 'healthy'
   if (s === 'PROBABLE' || s === 'DAY_TO_DAY' || s === 'DTD') return 'probable'
   if (s === 'QUESTIONABLE') return 'questionable'
   if (s === 'DOUBTFUL') return 'doubtful'
   if (s === 'OUT') return 'out'
-  if (s.includes('IR') || s.includes('INJURY_RESERVE') || s === 'PUP' || s === 'NFI' || s.includes('SEASON')) {
+  if (
+    s === 'IR' ||
+    s.includes('INJURY_RESERVE') ||
+    s.includes('INJURED_RESERVE') ||
+    s === 'PUP' ||
+    s.includes('PHYSICALLY_UNABLE') ||
+    s === 'NFI' ||
+    s.includes('NON_FOOTBALL_INJURY') ||
+    s.includes('SEASON')
+  ) {
     return 'severe'
   }
   return 'healthy'
 }
 
-/** ESPN sends a literal `unknown` for some players; that is an absent report, not a clearance. */
+function normalize(status: string | undefined): string {
+  return (status ?? '').trim().toUpperCase().replace(/[\s-]+/g, '_')
+}
+
+/** The only values that actually mean "reported, and reported clean". */
+const CLEAN_DESIGNATIONS = new Set(['', 'ACTIVE', 'NORMAL', 'HEALTHY'])
+
+const SUSPENSION_CODES = new Set(['SUSPENDED', 'SUSP', 'SUS', 'SUSPENSION'])
+
+function isSuspension(status: string | undefined): boolean {
+  return SUSPENSION_CODES.has(normalize(status))
+}
+
+/**
+ * True when a provider gave a designation we can actually interpret. An empty field,
+ * ESPN's literal `unknown`, or a code we do not recognise all mean we know nothing —
+ * none of them is a clearance.
+ */
 function isRealDesignation(status: string | undefined): boolean {
-  const s = (status ?? '').trim().toUpperCase()
-  return s !== '' && s !== 'UNKNOWN' && s !== 'N/A'
+  const s = normalize(status)
+  if (s === '' || s === 'UNKNOWN' || s === 'N/A') return false
+  if (CLEAN_DESIGNATIONS.has(s) || SUSPENSION_CODES.has(s)) return true
+  return tierFromDesignation(s) !== 'healthy'
 }
 
 export interface InjurySignals {
@@ -83,6 +111,11 @@ export interface InjurySignals {
   espnStatus?: string
   espnInjured?: boolean
   sleeperStatus?: string
+  /**
+   * Sleeper's roster status (`Active`, `Suspended`, `Injured Reserve`, `PUP`…). Separate
+   * from `injury_status` and often the only field carrying a suspension or an IR placement.
+   */
+  rosterStatus?: string
   /** Sleeper's structured detail, e.g. `Knee - ACL`. */
   bodyPart?: string
   /** Sleeper's free-text note, e.g. `Surgery`. */
@@ -99,6 +132,8 @@ export interface ResolvedInjury {
    * "nothing was reported", which is not the same as a clean bill of health.
    */
   designationKnown: boolean
+  /** A suspension keeps a healthy player off the field, so it is tracked separately. */
+  suspended: boolean
 }
 
 /**
@@ -109,6 +144,9 @@ export interface ResolvedInjury {
 export function resolveInjuryTier(signals: InjurySignals): ResolvedInjury {
   const espnTier = tierFromDesignation(signals.espnStatus)
   let tier = moreSevere(espnTier, tierFromDesignation(signals.sleeperStatus))
+  // Sleeper's roster status is the only field that carries an IR placement for players
+  // ESPN still lists as ACTIVE, so it is folded in rather than read on its own.
+  tier = moreSevere(tier, tierFromDesignation(signals.rosterStatus))
   let source: ResolvedInjury['source'] = tier === 'healthy' ? 'none' : 'espn'
 
   if (tier === 'healthy' && signals.espnInjured) {
@@ -127,7 +165,14 @@ export function resolveInjuryTier(signals: InjurySignals): ResolvedInjury {
     tier,
     detail: tier === 'healthy' ? '' : detailText,
     source,
-    designationKnown: isRealDesignation(signals.espnStatus) || isRealDesignation(signals.sleeperStatus),
+    designationKnown:
+      isRealDesignation(signals.espnStatus) ||
+      isRealDesignation(signals.sleeperStatus) ||
+      isRealDesignation(signals.rosterStatus),
+    suspended:
+      isSuspension(signals.espnStatus) ||
+      isSuspension(signals.sleeperStatus) ||
+      isSuspension(signals.rosterStatus),
   }
 }
 
@@ -155,7 +200,9 @@ export async function applyInjuryGate(ranked: StealRow[], opts: GateOptions): Pr
 
   const crossCheckTop = opts.crossCheckTop ?? DEFAULT_CROSS_CHECK_TOP
   if (opts.fetchHeadlines) {
-    const candidates = rows.slice(0, crossCheckTop).filter((r) => r.injuryTier !== 'severe')
+    const candidates = rows
+      .slice(0, crossCheckTop)
+      .filter((r) => r.injuryTier !== 'severe' && !r.suspended)
     await Promise.all(
       candidates.map(async (row) => {
         let headlines: string[]
@@ -184,9 +231,9 @@ export async function applyInjuryGate(ranked: StealRow[], opts: GateOptions): Pr
   const demoted: StealRow[] = []
 
   for (const row of rows) {
-    if (row.injuryTier === 'severe') {
+    if (row.suspended || row.injuryTier === 'severe') {
       row.gateApplied = true
-      row.gateReason = 'severe-injury'
+      row.gateReason = row.suspended ? 'suspended' : 'severe-injury'
       injuryWatch.push(row)
     } else if (row.injuryTier === 'doubtful' && board.length < DOUBTFUL_RANK_FLOOR) {
       row.gateApplied = true
@@ -227,12 +274,17 @@ function healthClause(row: StealRow): string {
   return 'listed active, though recent headlines were not checked'
 }
 
-/** Composed from whatever actually drove the outcome: injury > ADP gap > confidence. */
+/** Composed from whatever actually drove the outcome: availability > ADP gap > confidence. */
 export function composeNote(row: StealRow): string {
   const detail = row.injuryDetail ? ` (${row.injuryDetail})` : ''
 
+  // A suspension is checked first and worded separately: the player may be perfectly
+  // healthy, so calling it an injury would be wrong.
+  if (row.suspended) {
+    return `Suspended — unavailable regardless of health, so held off the main board.`
+  }
   if (row.injuryTier === 'severe') {
-    return `Severe injury${detail} — excluded from main board, moved to Injury Watch.`
+    return `Severe injury${detail} — excluded from main board, moved to the watch list.`
   }
   if (row.injuryTier === 'doubtful') {
     const rank = row.rankByGap ? `Ranked #${row.rankByGap} by ADP-gap, but ` : ''

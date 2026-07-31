@@ -174,6 +174,21 @@ describe('buildAuctionBoard', () => {
     expect(injuryWatch.find((r) => r.name === 'RB1')!.value).toBeGreaterThan(1)
   })
 
+  it('holds suspended players out of the ranking even though they are healthy', () => {
+    const players = fullLeague()
+    const star = players.find((p) => p.player.fullName === 'RB1')!
+    // Sleeper's roster status is the field that carries a suspension.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(star as any).sleeper = { status: 'Suspended' }
+    const { rows, injuryWatch } = buildAuctionBoard(players, DEFAULT_AUCTION_SETTINGS)
+    expect(rows.some((r) => r.name === 'RB1')).toBe(false)
+    const held = injuryWatch.find((r) => r.name === 'RB1')!
+    expect(held.suspended).toBe(true)
+    // Not an injury, so the tier must stay clean.
+    expect(held.injuryTier).toBe('healthy')
+    expect(held.value).toBeGreaterThan(1)
+  })
+
   it('prices kickers and defenses far below skill players at equal raw surplus', () => {
     const { rows } = buildAuctionBoard(fullLeague(), DEFAULT_AUCTION_SETTINGS)
     const topDst = rows.filter((r) => r.pos === 'D/ST').sort((a, b) => b.value - a.value)[0]

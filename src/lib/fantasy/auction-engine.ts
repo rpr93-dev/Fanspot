@@ -90,6 +90,7 @@ export interface AuctionRow {
   posRank: number
   injuryTier: InjuryTier
   injuryDetail?: string
+  suspended?: boolean
 }
 
 export interface AuctionAssumptions {
@@ -230,6 +231,7 @@ export function buildAuctionBoard(
       espnStatus: p.player.injuryStatus,
       espnInjured: p.player.injured,
       sleeperStatus: (p.sleeper as Record<string, unknown> | undefined)?.injury_status as string | undefined,
+      rosterStatus: (p.sleeper as Record<string, unknown> | undefined)?.status as string | undefined,
       bodyPart: (p.sleeper as Record<string, unknown> | undefined)?.injury_body_part as string | undefined,
       notes: (p.sleeper as Record<string, unknown> | undefined)?.injury_notes as string | undefined,
     })
@@ -246,14 +248,18 @@ export function buildAuctionBoard(
       posRank: 0,
       injuryTier: injury.tier,
       injuryDetail: injury.detail,
+      suspended: injury.suspended,
     }
   })
 
   // A severe injury is exactly why the market price collapsed, so leaving these in
-  // would rank the worst available buys as the best bargains. They keep their numbers
-  // but move to a separate list instead of being silently dropped.
-  const healthy = rows.filter((r) => r.injuryTier !== 'severe' && r.injuryTier !== 'out')
-  const injuryWatch = rows.filter((r) => r.injuryTier === 'severe' || r.injuryTier === 'out')
+  // would rank the worst available buys as the best bargains. A suspension does the same
+  // to a perfectly healthy player. They keep their numbers but move to a separate list
+  // instead of being silently dropped.
+  const unavailable = (r: AuctionRow) =>
+    r.suspended || r.injuryTier === 'severe' || r.injuryTier === 'out'
+  const healthy = rows.filter((r) => !unavailable(r))
+  const injuryWatch = rows.filter(unavailable)
 
   // Rank within position by surplus, so a $3 bargain kicker is not compared to a $40 RB.
   const byPos = new Map<string, AuctionRow[]>()

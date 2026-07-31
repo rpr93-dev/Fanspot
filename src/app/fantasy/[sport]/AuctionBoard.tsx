@@ -17,6 +17,7 @@ interface AuctionRow {
   posRank: number
   injuryTier: string
   injuryDetail?: string
+  suspended?: boolean
 }
 
 interface Assumptions {
@@ -325,17 +326,17 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
 
       {!loading && data && data.injuryWatch.length > 0 && (
         <section className={styles.injurySection}>
-          <h2 className={styles.newsHead}>Injury watch</h2>
+          <h2 className={styles.newsHead}>Availability watch</h2>
           <p className={styles.assumptionLine}>
-            Priced, but held out of the ranking above: a collapsed market price on an injured player reads as a
-            bargain when it is the opposite.
+            Priced, but held out of the ranking above: a collapsed market price on an injured or suspended player
+            reads as a bargain when it is the opposite.
           </p>
           <div className={styles.auctionTable}>
             {data.injuryWatch.map((r) => (
               <Row
                 key={r.playerId}
                 row={r}
-                meta={r.injuryDetail ?? r.injuryTier}
+                meta={r.suspended ? 'suspended' : (r.injuryDetail ?? r.injuryTier)}
                 open={openPlayer === r.playerId}
                 detail={details[r.playerId]}
                 onToggle={() => togglePlayer(r.playerId)}

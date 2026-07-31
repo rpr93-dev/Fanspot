@@ -31,8 +31,9 @@ interface StealRow {
   injuryStatus: string
   injuryDetail?: string
   gateApplied: boolean
-  gateReason?: 'severe-injury' | 'doubtful-rank-floor'
+  gateReason?: 'severe-injury' | 'suspended' | 'doubtful-rank-floor'
   rankByGap?: number
+  suspended?: boolean
 }
 
 const INJURY_BADGES: Partial<Record<InjuryTier, { label: string; warn?: boolean }>> = {
@@ -42,7 +43,6 @@ const INJURY_BADGES: Partial<Record<InjuryTier, { label: string; warn?: boolean 
   out: { label: 'OUT' },
   severe: { label: 'INJURY WATCH' },
 }
-
 interface BoardResponse {
   rows: StealRow[]
   injuryWatch: StealRow[]
@@ -104,7 +104,8 @@ function Row({
   target?: boolean
 }) {
   const isValue = row.gap > 0
-  const badge = INJURY_BADGES[row.injuryTier]
+  // A suspension outranks any injury tag: it is why the player is unavailable.
+  const badge = row.suspended ? { label: 'SUSPENDED', warn: false } : INJURY_BADGES[row.injuryTier]
   return (
     <>
       <div
@@ -523,10 +524,11 @@ export default function FantasySportPage() {
 
         {!loading && !error && injuryWatch.length > 0 && (
           <>
-            <h2 className={styles.watchHead}>Injury Watch</h2>
+            <h2 className={styles.watchHead}>Availability Watch</h2>
             <p className={styles.watchSub}>
-              Held off the main board by the injury gate, not by their ADP gap. Ranked by the same
-              value math — they just aren&apos;t steals while the return timeline is open.
+              Held off the main board because they are unavailable — a long-term injury or a
+              suspension — not because of their ADP gap. Ranked by the same value math — they
+              just aren&apos;t steals while the return timeline is open.
             </p>
             {injuryWatch.map((row, i) => (
               <Row

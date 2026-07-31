@@ -190,9 +190,11 @@ export interface StealRow {
   injuryDesignationKnown?: boolean
   /** True only when the headline cross-check ran and came back clean. */
   injuryChecked?: boolean
+  /** Suspended players are unavailable regardless of health, so this is tracked apart. */
+  suspended?: boolean
   /** True when the injury gate moved this row off its earned rank. */
   gateApplied: boolean
-  gateReason?: 'severe-injury' | 'doubtful-rank-floor'
+  gateReason?: 'severe-injury' | 'suspended' | 'doubtful-rank-floor'
   /** Rank by the requested sort before the gate ran, for the note text. */
   rankByGap?: number
   /** The prior-production fact behind `conf`, used when composing the note. */
@@ -271,6 +273,7 @@ export function buildStealBoard(
         espnStatus: e.player.player.injuryStatus,
         espnInjured: e.player.player.injured,
         sleeperStatus: typeof sleeper?.injury_status === 'string' ? sleeper.injury_status : undefined,
+        rosterStatus: typeof sleeper?.status === 'string' ? sleeper.status : undefined,
         bodyPart: typeof sleeper?.injury_body_part === 'string' ? sleeper.injury_body_part : undefined,
         notes: typeof sleeper?.injury_notes === 'string' ? sleeper.injury_notes : undefined,
       })
@@ -296,6 +299,7 @@ export function buildStealBoard(
         injurySource: injury.source,
         injuryDesignationKnown: injury.designationKnown,
         injuryChecked: false,
+        suspended: injury.suspended,
         gateApplied: false,
         confidenceDriver: buildConfidenceDriver(e.player),
       }

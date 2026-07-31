@@ -67,6 +67,36 @@ describe('resolveInjuryTier', () => {
     expect(resolveInjuryTier({ espnStatus: 'unknown' }).designationKnown).toBe(false)
     expect(resolveInjuryTier({ espnStatus: 'unknown' }).tier).toBe('healthy')
   })
+
+  it('flags a suspension from any provider without calling it an injury', () => {
+    for (const s of [
+      { espnStatus: 'SUSPENDED' },
+      { sleeperStatus: 'Sus' },
+      { rosterStatus: 'Suspended' },
+    ]) {
+      const r = resolveInjuryTier(s)
+      expect(r.suspended).toBe(true)
+      // A suspended player is often perfectly healthy, so the tier must not move.
+      expect(r.tier).toBe('healthy')
+      expect(r.designationKnown).toBe(true)
+    }
+    expect(resolveInjuryTier({ espnStatus: 'ACTIVE' }).suspended).toBe(false)
+  })
+
+  it('catches an IR placement that only Sleeper roster status knows about', () => {
+    // The live feed carries players ESPN still lists ACTIVE with no injury_status at all.
+    const r = resolveInjuryTier({
+      espnStatus: 'ACTIVE',
+      sleeperStatus: undefined,
+      rosterStatus: 'Injured Reserve',
+    })
+    expect(r.tier).toBe('severe')
+  })
+
+  it('does not treat an uninterpretable code as a clearance', () => {
+    expect(resolveInjuryTier({ espnStatus: 'DNR' }).designationKnown).toBe(false)
+    expect(resolveInjuryTier({ sleeperStatus: 'NA' }).designationKnown).toBe(false)
+  })
 })
 
 describe('detectSevereLanguage', () => {
@@ -131,6 +161,31 @@ describe('applyInjuryGate', () => {
     expect(injuryWatch[0].injurySource).toBe('headlines')
   })
 
+  it('holds a suspended player off the board however large the gap', async () => {
+    const ranked = [
+      row({ playerId: 1, name: 'Banned', gap: 99, suspended: true }),
+      row({ playerId: 2, name: 'Fine', gap: 10 }),
+    ]
+
+    const { board, injuryWatch } = await applyInjuryGate(ranked, { sport: 'nfl' })
+
+    expect(board.map((r) => r.playerId)).toEqual([2])
+    expect(injuryWatch[0].playerId).toBe(1)
+    expect(injuryWatch[0].gateReason).toBe('suspended')
+  })
+
+  it('does not spend a headline lookup on a suspended player', async () => {
+    const checked: string[] = []
+    await applyInjuryGate([row({ playerId: 1, name: 'Banned', suspended: true })], {
+      sport: 'nfl',
+      fetchHeadlines: async (name) => {
+        checked.push(name)
+        return []
+      },
+    })
+    expect(checked).toEqual([])
+  })
+
   it('only cross-checks the top of the leaderboard', async () => {
     const checked: string[] = []
     const ranked = Array.from({ length: 40 }, (_, i) => row({ playerId: i, name: `P${i}`, gap: 40 - i }))
@@ -171,7 +226,7 @@ describe('applyInjuryGate', () => {
 describe('composeNote', () => {
   it('leads with a severe injury', () => {
     const note = composeNote(row({ injuryTier: 'severe', injuryDetail: 'Knee - ACL', gap: 92 }))
-    expect(note).toBe('Severe injury (Knee - ACL) — excluded from main board, moved to Injury Watch.')
+    expect(note).toBe('Severe injury (Knee - ACL) — excluded from main board, moved to the watch list.')
   })
 
   it('leads with doubtful over the ADP gap', () => {
@@ -182,7 +237,20 @@ describe('composeNote', () => {
   it('frames out as week-specific rather than season-long', () => {
     const note = composeNote(row({ injuryTier: 'out', rankByGap: 5 }))
     expect(note).toContain('week-specific')
-    expect(note).not.toContain('Injury Watch')
+    expect(note).not.toContain('watch list')
+  })
+
+  it('describes a suspension as an availability problem, not an injury', () => {
+    const note = composeNote(row({ suspended: true, gap: 30 }))
+    expect(note).toContain('Suspended')
+    expect(note).not.toContain('injury')
+    expect(note).not.toContain('Injury')
+  })
+
+  it('leads with a suspension even when the player is otherwise healthy', () => {
+    const note = composeNote(row({ suspended: true, injuryTier: 'healthy', gap: 12 }))
+    expect(note).not.toContain('listed active')
+    expect(note).not.toContain('projection at')
   })
 
   it('falls back to gap direction then confidence driver when healthy', () => {

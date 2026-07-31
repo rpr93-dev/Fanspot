@@ -10,7 +10,7 @@ const SORTS = ['gap', 'adp', 'proj'] as const
 type SortKey = (typeof SORTS)[number]
 
 const METHODOLOGY =
-  'Gap = ADP rank − projected rank, computed within position over every player the platform treats as draftable at that position. Positive = falling past its projected value; negative = going ahead of projection. Conf is a 0-100 projection-confidence score from prior-season production, experience, role certainty, injury status and roster share. An injury gate runs after ranking: severe or long-term injuries are moved to Injury Watch rather than penalised inside the score, and Doubtful players are held out of the top 10.'
+  'Gap = ADP rank − projected rank, computed within position over every player the platform treats as draftable at that position. Positive = falling past its projected value; negative = going ahead of projection. Conf is a 0-100 projection-confidence score from prior-season production, experience, role certainty, injury status and roster share. An availability gate runs after ranking: severe or long-term injuries and suspensions are moved to the Availability Watch rather than penalised inside the score, and Doubtful players are held out of the top 10. Headlines are only cross-checked for the top 30 rows of the first page; every other row reports only what the providers designate.'
 
 export async function GET(
   req: NextRequest,
