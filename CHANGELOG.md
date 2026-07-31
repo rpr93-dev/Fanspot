@@ -27,6 +27,7 @@ separable from it. To discard **everything** from this session: `git reset --har
 | 13 | `c191fce` | mobile pass across all routes |
 | 14 | `e753ad3` | refactor: extract the shared player detail panel |
 | 15 | `028675f` | Feature 6 — click an auction row for player detail |
+| 16 | `11d40e1` | fix: notes claimed "no injury concerns" without checking |
 
 ---
 
@@ -535,3 +536,53 @@ board are untouched.
 there is no new pure logic to assert, and the repo has no component-test harness (vitest runs
 with `environment: 'node'`, no jsdom or Testing Library). Adding one would mean introducing
 that harness, which is outside the scope of this request. Logged here rather than done.
+
+---
+
+## 14. Steals notes claimed "no injury concerns" without checking — `11d40e1`
+
+**What.** Every healthy row read `… at WR74 price with no injury concerns.` That phrase is
+gone. Rows now report what was actually established:
+
+| Situation | Note now reads |
+|---|---|
+| Headline cross-check ran and came back clean | `listed active, and recent headlines are clear` |
+| No cross-check ran (most rows) | `listed active, though recent headlines were not checked` |
+| No provider gave any designation | `no injury status reported either way` |
+
+**Why.** Two separate overclaims, both measured against the live feed rather than assumed:
+
+1. `healthy` is the **fallback tier**, returned whenever nothing is flagged — including for
+   ESPN's literal `unknown` status. It means "no injury designation", not "verified healthy".
+   ESPN's `ACTIVE` is also the offseason default; there is no injury report in late July, so
+   a player rehabbing a tear still reads `ACTIVE`.
+2. The headline cross-check (`DEFAULT_CROSS_CHECK_TOP = 30`) only runs on the **top 30 rows
+   of page one**. Measured on the live board: **28 of 200 rows** were actually checked. The
+   other 172 asserted a conclusion from a lookup that never ran.
+
+**Changes:** `ResolvedInjury` gained `designationKnown` (false when no provider reported
+anything, so a `healthy` tier can be told apart from an absent report). `StealRow` gained
+`injuryDesignationKnown` and `injuryChecked`; the latter is set only when the headline fetch
+**completes** — a thrown request leaves it false, because a failed lookup is not a clean
+result. `applyInjuryGate` defaults the flag itself rather than trusting callers, so an
+undefined value can never read as "clear". Also removed `injuryStatus: … ?? 'ACTIVE'` from
+the engine, which invented a clean status for players who had none; it now falls back to
+`UNKNOWN`.
+
+**Files:** `src/lib/fantasy/injury-gate.ts`, `src/lib/fantasy/steal-engine.ts`,
+`src/lib/fantasy/__tests__/injury-gate.test.ts`
+
+**Tests:** 6 added/updated (94 total, all passing) — that no branch can emit "no injury
+concerns"; that "headlines are clear" appears only when the check ran; that a failed fetch
+does not count as checked; that rows past the cutoff say so; that `designationKnown`
+separates a reported `ACTIVE` from an empty or `unknown` status.
+
+**Verified live:** 0 of 200 rows claim "no injury concerns" (was 200); 28 report a clean
+headline check, matching the 28 that were actually fetched.
+
+**Revert:** `git revert 11d40e1` — restores the old wording and drops both row flags.
+
+**Suggestion — logged, not acted on (11).** The honest fix makes it obvious that 86% of the
+board gets no injury verification. Raising `DEFAULT_CROSS_CHECK_TOP`, or running the check
+on whichever page is being viewed rather than only page one, would shrink that gap — but it
+costs one network call per row, so it is a real performance trade-off and your call to make.
