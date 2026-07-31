@@ -25,6 +25,8 @@ separable from it. To discard **everything** from this session: `git reset --har
 | 11 | `5ee06ee` | Feature 5 — auction draft values |
 | 12 | `2341284` | fix: missing-player notice would not clear |
 | 13 | `c191fce` | mobile pass across all routes |
+| 14 | `e753ad3` | refactor: extract the shared player detail panel |
+| 15 | `028675f` | Feature 6 — click an auction row for player detail |
 
 ---
 
@@ -474,3 +476,62 @@ the 640px media query and the two component tweaks is affected.
 **Not addressed.** Tap-target sizes were not audited against the 44px guideline, and the
 box-score panel and roster modal were not checked at 375px — neither was reachable without
 live game data at the time of testing.
+
+---
+
+## 12. Shared player detail panel — `e753ad3`
+
+**What.** Moved `PlayerNews`, `PlayerDetail`, `DetailState`, `Stat` and `DetailPanel` out of
+the steals page into a new `PlayerDetailPanel.tsx`. The component gained two optional props:
+`extra` (a slot rendered above the stat grid) and `hideAuctionStat`.
+
+**Why.** Section 13 needed the identical panel on the auction board. This is a **move made in
+service of that feature**, not an unprompted refactor — flagging it here per the no-silent-
+refactor rule. The code is otherwise verbatim; the snake board's behaviour is unchanged.
+
+**Files:** `src/app/fantasy/[sport]/PlayerDetailPanel.tsx` (new),
+`src/app/fantasy/[sport]/page.tsx` (definitions removed, import added)
+
+**Revert:** `git revert e753ad3` — but this must be reverted *after* `028675f`, since the
+auction board imports from the new file.
+
+---
+
+## 13. Feature 6 — click an auction row for player detail — `028675f`
+
+**What.** Auction rows are now clickable (and keyboard-operable via Enter/Space, with
+`role="button"` and `aria-expanded`). Opening one fetches
+`/api/fantasy/player/{sport}/{playerId}` — the same endpoint the steals board uses — and
+renders the same panel: age, experience, height/weight, college, depth-chart slot, injury
+status, rostered/started percentages, team implied total, the projection line, and recent
+news. Injury-watch rows expand too. Details are cached per player for the session, so
+reopening a row does not refetch.
+
+**Why.** Requested: parity with the snake board. A price with no context is hard to act on —
+`$62 vs $42` means very little until you can see that it is an RB1 who is healthy, 32 years
+old, and projected for 253 points.
+
+**One judgement call.** The shared panel shows ESPN's raw published auction average as an
+`AUCTION` stat. On the auction board that same figure already appears in the `GOING FOR`
+column, rescaled to the user's budget — so the panel would have shown `$35` directly beneath
+a row reading `$42`, two different numbers for one thing. The raw stat is hidden in auction
+mode and the `extra` line now states plainly where the price comes from: *"Going for $42 —
+ESPN's average winning bid, rescaled to your league's money."* Nothing is dropped silently;
+the number is explained rather than shown twice.
+
+**Files:** `src/app/fantasy/[sport]/AuctionBoard.tsx` (new `Row` component, `openPlayer` /
+`details` state, `togglePlayer`), `src/app/fantasy/[sport]/steals.module.css`
+(`.auctionRow.clickable`, `.auctionRow.open`, `.auctionTable .detail` — the shared panel is
+shaped to sit under a free-standing row, so inside the table it drops its own rounding)
+
+**Verified.** Desktop and 375px on `/fantasy/nfl?mode=auction`: panel opens, loads, and
+collapses; `scrollWidth` 365 against a 375 viewport with zero elements past the edge; an
+injury-watch row expands correctly. 90 unit tests pass, no `src/` type errors.
+
+**Revert:** `git revert 028675f` — rows become static again; the shared panel and the snake
+board are untouched.
+
+**No tests added.** This is presentation wiring over an endpoint that already has coverage —
+there is no new pure logic to assert, and the repo has no component-test harness (vitest runs
+with `environment: 'node'`, no jsdom or Testing Library). Adding one would mean introducing
+that harness, which is outside the scope of this request. Logged here rather than done.
