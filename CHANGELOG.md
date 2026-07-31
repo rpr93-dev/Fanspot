@@ -23,6 +23,8 @@ separable from it. To discard **everything** from this session: `git reset --har
 | 9 | `fab1005` | fix: retirement filter was purging active starters (Aaron Rodgers) |
 | 10 | `701b8bb` | Feature 4 — team defenses (D/ST) |
 | 11 | `5ee06ee` | Feature 5 — auction draft values |
+| 12 | `2341284` | fix: missing-player notice would not clear |
+| 13 | `c191fce` | mobile pass across all routes |
 
 ---
 
