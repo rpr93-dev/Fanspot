@@ -19,6 +19,10 @@ separable from it. To discard **everything** from this session: `git reset --har
 | 5 | `54f4aea` | audit fixes |
 | 6 | `1b99854` | this changelog |
 | 7 | `195f6ef` | follow-up: deep link to a player not on the board |
+| 8 | `d757457` | changelog entry for #7 |
+| 9 | `fab1005` | fix: retirement filter was purging active starters (Aaron Rodgers) |
+| 10 | `701b8bb` | Feature 4 — team defenses (D/ST) |
+| 11 | `5ee06ee` | Feature 5 — auction draft values |
 
 ---
 
@@ -264,3 +268,151 @@ an extra lookup.
 `src/app/fantasy/[sport]/steals.module.css` (`.notice`)
 
 **Revert:** `git revert 195f6ef` — returns to the unexplained empty list.
+
+---
+
+## 7. Retirement filter was purging active starters — `fab1005`
+
+**What changed.** The Steelers' Fantasy Outlook named Drew Allar as QB1. Aaron Rodgers is
+the starter and the one who actually gets drafted. Rodgers was absent from the pipeline
+entirely, so the panel picked the best of what was left.
+
+**Why.** `likelyRetired()` in the Sleeper ingest had a rule
+`if (yearsExp >= 18 && age >= 39) return true` that was **not** gated on the player being
+teamless, unlike every other rule in the function. Rodgers (21 years, 42) matched it and
+was dropped. The function's own doc comment said Rodgers should be kept — the code
+contradicted it.
+
+The rule exists for a real reason: Sleeper still lists Ben Roethlisberger at `team: "PIT"`
+though he is retired. So the rule could not simply be deleted. `status` is no help —
+Sleeper reports `"Active"` for Rodgers, Roethlisberger, Brady, Brees and Newton alike.
+`depth_chart_order` is the discriminator: of the 24 players matching `exp>=18 && age>=39`,
+only Rodgers (PIT, 1), Flacco (CIN, 2), Josh Johnson (CIN, 3), Nick Folk (ATL, 1) and
+Calais Campbell (BAL, 2) hold a depth slot. Roethlisberger, Brady, Brees, Rivers,
+Vinatieri and Witten hold none. The rule now additionally requires `depth_chart_order`
+to be absent.
+
+**Side effect (intended).** Flacco, Josh Johnson, Nick Folk and Calais Campbell were being
+purged by the same rule and are now retained.
+
+**Files:** `src/lib/fantasy/sleeper-master.ts` (`likelyRetired`),
+`src/lib/fantasy/__tests__/sleeper-retirement.test.ts` (new, 6 tests)
+
+**Verified.** PIT QB1 → Aaron Rodgers, 218 proj, depth 1, settled. Cross-checked CIN→Burrow,
+ATL→Tua, LAR→Stafford, KC→Mahomes, NYG→Dart — all depth 1, all settled.
+
+**Revert:** `git revert fab1005` — Rodgers disappears again and Allar returns as QB1.
+
+---
+
+## 8. Team defenses (D/ST) — `701b8bb`
+
+**What changed.** D/ST is now a draftable position on the Steals board, in the position
+tabs, and in each team's Fantasy Outlook panel. All 32 defenses carry projections, ADP and
+ownership.
+
+**Why.** Defenses are drafted in every standard league and the board had none — position
+counts were WR 1341, RB 665, TE 631, QB 334, K 139, D/ST 0.
+
+**Two separate gates were blocking them.**
+
+1. Sleeper stores defenses as `{ position: 'DEF', first_name: 'Houston', last_name:
+   'Texans', team: 'HOU' }` — no `full_name`, no `espn_id`, no age or experience. The
+   person-shaped validation in `sleeperToCanonical` requires `full_name`, so all 32 were
+   rejected before reaching anything else. A `DEF` branch now handles them ahead of the
+   person checks and the retirement heuristic, both of which are meaningless for a unit.
+2. Once past that, defenses still had `proj=0, adp=999` because the ESPN join never fired.
+   `buildMasterPlayerList` indexed on `espnId != null && espnId > 0`, and ESPN gives every
+   defense a **negative** id: `-16000 - proTeamId` (Falcons proTeamId 1 → `-16001`). The
+   guard now rejects only `0`/absent.
+
+The negative id is derived rather than name-matched because the two systems never agree on
+the name — "Pittsburgh Steelers" vs "Steelers D/ST" — and fuzzy matching would mispair
+defenses.
+
+**Starter selection.** A team fields exactly one defense, so there is no starter to choose.
+`buildTeamStarters` returns it with a new `sole-unit` evidence type, `contender: null` and
+`unsettled: false`, rather than running the usual scoring and inventing a competitor.
+
+**Files:** `src/lib/fantasy/sleeper-master.ts` (DEF branch, `espnDstId`, index guard),
+`src/lib/fantasy/validation.ts` (same guard), `src/lib/fantasy/steal-engine.ts`
+(`BOARD_POSITIONS`), `src/lib/fantasy/team-starters.ts` (`STARTER_POSITIONS`,
+`sole-unit`), `src/app/fantasy/[sport]/page.tsx` (`POSITIONS`),
+`src/components/FantasyWidget.tsx` (`slotLabel` — a defense has no "1" suffix),
+`src/lib/fantasy/__tests__/team-starters.test.ts` (+2 tests)
+
+**Verified.** All 32 D/ST with projections; `/api/fantasy/steals/nfl?pos=D%2FST` returns 30
+ranked; PIT outlook shows Pittsburgh Steelers D/ST 94 proj, `evidence=sole-unit`.
+
+**Revert:** `git revert 701b8bb` — defenses vanish from the board and the outlook panel.
+
+---
+
+## 9. Auction draft values — `5ee06ee`
+
+**What changed.** The draft board has a Snake / Auction toggle. Auction mode asks for your
+budget, team count and roster size, then prices every player in dollars and compares that
+to what the market actually pays.
+
+**How the number is calculated.** Value over replacement, in four steps:
+
+1. **Replacement level** — for each position, the projection of the last player the league
+   will actually start, given your team count and the starter slots
+   (QB1/RB2/WR3/TE1/K1/DST1 + 1 FLEX). The flex spot is split RB .4 / WR .5 / TE .1,
+   reflecting which positions actually get flexed.
+2. **VORP** — projection minus that line. Players at or below it earn nothing, because
+   they are replaceable for free.
+3. **The money** — `budget × teams`, minus `$1 × every roster slot` (every player costs at
+   least a dollar). What remains is the discretionary pool, divided by total VORP to get a
+   dollars-per-point rate.
+4. **Price** — `$1 + VORP × rate`, floored at $1.
+
+**Two corrections applied on top of the raw math**, both reusing stances the codebase
+already had rather than inventing new ones:
+
+- Kickers and defenses swing as widely in raw points as skill players, but far less
+  predictably. Unweighted, the model bid the top defense to $21 against a $4 market. VORP
+  is now scaled by the steals board's existing per-position reliability multipliers, which
+  puts K and D/ST back to roughly $1–3.
+- A severe injury is *why* a market price collapsed, so injured players ranked as the best
+  bargains on the board — Tyreek Hill topped it at a $0.10 market price. Severe/out
+  players are now priced but moved to a separate Injury Watch list, matching how the
+  Steals board already handles them.
+
+**Market comparison.** ESPN publishes an average winning bid per player but does not state
+the budget or team count behind it, so the whole published set is treated as a distribution
+and rescaled by your league's total money rather than assuming a format. Where ESPN
+publishes nothing, `market` and `surplus` are `null` and render as `—` rather than `$0`.
+
+**These are modelled figures, not quoted prices.** The assumptions — team count, budget,
+roster size, dollars-per-point, replacement level per position — are returned by the API
+in `assumptions` and stated in the UI, so the numbers are legible as a model.
+
+**Files:** `src/lib/fantasy/auction-engine.ts` (new, pure),
+`src/app/api/fantasy/auction/[sport]/route.ts` (new),
+`src/app/fantasy/[sport]/AuctionBoard.tsx` (new),
+`src/app/fantasy/[sport]/page.tsx` (mode toggle, mode-aware heading/footer),
+`src/app/fantasy/[sport]/steals.module.css` (auction styles),
+`src/lib/fantasy/__tests__/auction-engine.test.ts` (new, 16 tests)
+
+**Known limitations / judgement calls.**
+- Default starter slots are hardcoded QB1/RB2/WR3/TE1/K1/DST1/FLEX1. Only budget, teams
+  and roster size are user-settable; a league with 2 QBs or 2 flexes will be mispriced.
+- The flex split (RB .4 / WR .5 / TE .1) is a judgement call, not derived from data.
+- Keeper/dynasty costs, positional inflation as a draft progresses, and your own roster
+  needs mid-draft are all out of scope. This prices a full pool at the start.
+
+**Revert:** `git revert 5ee06ee` — the toggle disappears and the board is snake-only. The
+three new files are self-contained; nothing in snake mode depends on them.
+
+---
+
+## Suggestions from this round — logged, not acted on
+
+9. Snake mode still issues its `/api/fantasy/steals` fetch while Auction mode is displayed
+   (one wasted request per view). Gating the effect on `mode` was left alone to avoid
+   touching working snake logic.
+10. `AGENTS.md` describes the auction section as not yet built ("Auction: values converted
+    to valuePerDollar…" under steal math) — that section now describes only part of the
+    picture and should be updated alongside the fantasy-pipeline staleness already noted
+    in suggestion 3.
