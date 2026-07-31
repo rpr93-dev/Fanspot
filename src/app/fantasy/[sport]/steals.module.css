@@ -741,6 +741,25 @@
 .auctionRow:last-child {
   border-bottom: 0;
 }
+.auctionRow.clickable {
+  cursor: pointer;
+}
+.auctionRow.clickable:hover {
+  background: var(--panel);
+}
+.auctionRow.open {
+  background: var(--panel);
+  border-bottom-color: var(--accent);
+}
+
+/* The shared detail panel is shaped to sit under a free-standing row; inside the
+   auction table it is one band among many, so it drops its own rounding and gap. */
+.auctionTable .detail {
+  border-left: none;
+  border-right: none;
+  border-radius: 0;
+  margin-bottom: 0;
+}
 .auctionName {
   display: flex;
   flex-direction: column;

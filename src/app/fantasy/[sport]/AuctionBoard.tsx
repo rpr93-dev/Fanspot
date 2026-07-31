@@ -1,6 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useState } from 'react'
+import { DetailPanel, type DetailState, type PlayerDetail } from './PlayerDetailPanel'
 import styles from './steals.module.css'
 
 interface AuctionRow {
@@ -44,6 +45,73 @@ function money(n: number | null): string {
   return n == null ? '—' : `$${n.toFixed(0)}`
 }
 
+function Row({
+  row,
+  open,
+  detail,
+  onToggle,
+  meta,
+}: {
+  row: AuctionRow
+  open: boolean
+  detail?: DetailState
+  onToggle: () => void
+  meta?: string
+}) {
+  return (
+    <>
+      <div
+        id={`auction-${row.playerId}`}
+        className={`${styles.auctionRow} ${styles.clickable} ${open ? styles.open : ''}`}
+        onClick={onToggle}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault()
+            onToggle()
+          }
+        }}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+      >
+        <span className={styles.auctionName}>
+          <b>{row.name}</b>
+          <em>
+            {row.pos} · {row.team} · {meta ?? `${row.projectedPoints} proj`}
+          </em>
+        </span>
+        <span className={styles.auctionValue}>{money(row.value)}</span>
+        <span className={styles.auctionMarket}>{money(row.market)}</span>
+        <span
+          className={
+            row.surplus == null ? styles.auctionFlat : row.surplus > 0 ? styles.auctionUp : styles.auctionDown
+          }
+        >
+          {row.surplus == null ? '—' : `${row.surplus > 0 ? '+' : ''}$${Math.abs(row.surplus).toFixed(0)}`}
+        </span>
+      </div>
+
+      {open && detail && (
+        <DetailPanel
+          state={detail}
+          hideAuctionStat
+          extra={
+            <p className={styles.detailLine}>
+              Worth <b>{money(row.value)}</b> here — {row.vorp.toFixed(0)} points above the last startable{' '}
+              {row.pos}.{' '}
+              {row.market == null
+                ? 'No market price published, so there is nothing to compare it against.'
+                : `Going for ${money(row.market)} — ESPN's average winning bid, rescaled to your league's money — so the model expects ${
+                    (row.surplus ?? 0) > 0 ? 'a discount' : 'a premium'
+                  } of $${Math.abs(row.surplus ?? 0).toFixed(0)}.`}
+            </p>
+          }
+        />
+      )}
+    </>
+  )
+}
+
 export default function AuctionBoard({ sport, teamFilter }: { sport: string; teamFilter: string | null }) {
   const [budget, setBudget] = useState(200)
   const [teams, setTeams] = useState(12)
@@ -57,6 +125,8 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [openPlayer, setOpenPlayer] = useState<number | null>(null)
+  const [details, setDetails] = useState<Record<number, DetailState>>({})
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 250)
@@ -114,6 +184,33 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
       if (r.ok) setRows((prev) => [...prev, ...json.rows])
     } finally {
       setLoadingMore(false)
+    }
+  }
+
+  async function togglePlayer(playerId: number) {
+    if (openPlayer === playerId) {
+      setOpenPlayer(null)
+      return
+    }
+    setOpenPlayer(playerId)
+    if (details[playerId]?.status === 'ready') return
+
+    setDetails((prev) => ({ ...prev, [playerId]: { status: 'loading' } }))
+    try {
+      const res = await fetch(`/api/fantasy/player/${sport}/${playerId}`, {
+        signal: AbortSignal.timeout(30000),
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}))
+        throw new Error(body.message || body.error || `HTTP ${res.status}`)
+      }
+      const detail: PlayerDetail = await res.json()
+      setDetails((prev) => ({ ...prev, [playerId]: { status: 'ready', data: detail } }))
+    } catch (err) {
+      setDetails((prev) => ({
+        ...prev,
+        [playerId]: { status: 'error', message: err instanceof Error ? err.message : 'unknown error' },
+      }))
     }
   }
 
@@ -209,23 +306,13 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
             <span>Edge</span>
           </div>
           {rows.map((r) => (
-            <div key={r.playerId} className={styles.auctionRow}>
-              <span className={styles.auctionName}>
-                <b>{r.name}</b>
-                <em>
-                  {r.pos} · {r.team} · {r.projectedPoints} proj
-                </em>
-              </span>
-              <span className={styles.auctionValue}>{money(r.value)}</span>
-              <span className={styles.auctionMarket}>{money(r.market)}</span>
-              <span
-                className={
-                  r.surplus == null ? styles.auctionFlat : r.surplus > 0 ? styles.auctionUp : styles.auctionDown
-                }
-              >
-                {r.surplus == null ? '—' : `${r.surplus > 0 ? '+' : ''}$${Math.abs(r.surplus).toFixed(0)}`}
-              </span>
-            </div>
+            <Row
+              key={r.playerId}
+              row={r}
+              open={openPlayer === r.playerId}
+              detail={details[r.playerId]}
+              onToggle={() => togglePlayer(r.playerId)}
+            />
           ))}
         </div>
       )}
@@ -243,19 +330,18 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
             Priced, but held out of the ranking above: a collapsed market price on an injured player reads as a
             bargain when it is the opposite.
           </p>
-          {data.injuryWatch.map((r) => (
-            <div key={r.playerId} className={styles.auctionRow}>
-              <span className={styles.auctionName}>
-                <b>{r.name}</b>
-                <em>
-                  {r.pos} · {r.team} · {r.injuryDetail ?? r.injuryTier}
-                </em>
-              </span>
-              <span className={styles.auctionValue}>{money(r.value)}</span>
-              <span className={styles.auctionMarket}>{money(r.market)}</span>
-              <span className={styles.auctionFlat}>—</span>
-            </div>
-          ))}
+          <div className={styles.auctionTable}>
+            {data.injuryWatch.map((r) => (
+              <Row
+                key={r.playerId}
+                row={r}
+                meta={r.injuryDetail ?? r.injuryTier}
+                open={openPlayer === r.playerId}
+                detail={details[r.playerId]}
+                onToggle={() => togglePlayer(r.playerId)}
+              />
+            ))}
+          </div>
         </section>
       )}
 
