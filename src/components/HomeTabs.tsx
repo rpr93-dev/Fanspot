@@ -1,0 +1,73 @@
+'use client'
+
+import { useState } from 'react'
+import Link from 'next/link'
+import BiggestStories from './BiggestStories'
+
+interface League {
+  id: string
+  name: string
+  fullName: string
+  color: string
+}
+
+export default function HomeTabs({ leagues }: { leagues: League[] }) {
+  const [tab, setTab] = useState<'leagues' | 'stories'>('leagues')
+
+  return (
+    <div>
+      <div className="flex justify-center gap-2 mb-8">
+        {(['leagues', 'stories'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`px-4 py-2 rounded-lg text-xs font-semibold tracking-widest uppercase transition ${
+              tab === t ? 'bg-white/90 text-slate-900' : 'bg-white/5 text-gray-400 hover:text-white'
+            }`}
+            style={{ fontFamily: 'var(--font-mono-data), monospace' }}
+          >
+            {t === 'leagues' ? 'Leagues' : 'Biggest Stories'}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'leagues' ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {leagues.map((league) => (
+            <Link
+              key={league.id}
+              href={`/${league.id}`}
+              className="league-card group relative rounded-2xl p-8 text-center transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.03] active:scale-[0.98]"
+              style={{
+                backgroundColor: `${league.color}18`,
+                border: `1px solid ${league.color}30`,
+                boxShadow: `0 2px 12px ${league.color}08`,
+                '--glow-color': `${league.color}60`,
+                transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+              } as React.CSSProperties}
+            >
+              <div className="w-20 h-20 mx-auto mb-5 flex items-center justify-center">
+                <img
+                  src={`https://a.espncdn.com/i/teamlogos/leagues/500/${league.id}.png`}
+                  alt={league.name}
+                  className="w-full h-full object-contain"
+                  loading="lazy"
+                />
+              </div>
+              <h2 className="text-lg font-medium text-white/90 mb-1">{league.name}</h2>
+              <p className="text-xs text-gray-500 leading-relaxed">{league.fullName}</p>
+            </Link>
+          ))}
+        </div>
+      ) : (
+        <BiggestStories />
+      )}
+
+      {tab === 'leagues' && (
+        <p className="text-center mt-16 text-xs text-gray-600">
+          Select a league to browse teams and dashboards
+        </p>
+      )}
+    </div>
+  )
+}
