@@ -50,7 +50,27 @@ function player(over: {
 describe('pickTeamStarters', () => {
   it('returns one entry per position, in order', () => {
     const picks = pickTeamStarters([player({ name: 'A', pos: 'QB', team: 'KC' })], 'KC')
-    expect(picks.map((p) => p.pos)).toEqual(['QB', 'RB', 'WR', 'TE'])
+    expect(picks.map((p) => p.pos)).toEqual(['QB', 'RB', 'WR', 'TE', 'D/ST'])
+  })
+
+  it('reports a team defense as the sole unit rather than picking a starter', () => {
+    const picks = pickTeamStarters(
+      [player({ name: 'Pittsburgh Steelers', pos: 'D/ST', team: 'PIT', projectedPoints: 94 })],
+      'PIT',
+    )
+    const dst = picks.find((p) => p.pos === 'D/ST')!
+    expect(dst.player?.name).toBe('Pittsburgh Steelers')
+    expect(dst.evidence).toBe('sole-unit')
+    // A team fields one defense, so there is nobody to compete with and nothing unsettled.
+    expect(dst.contender).toBeNull()
+    expect(dst.unsettled).toBe(false)
+  })
+
+  it('reports a missing defense rather than borrowing another position', () => {
+    const picks = pickTeamStarters([player({ name: 'A', pos: 'QB', team: 'KC' })], 'KC')
+    const dst = picks.find((p) => p.pos === 'D/ST')!
+    expect(dst.player).toBeNull()
+    expect(dst.reason).toContain('D/ST')
   })
 
   it('uses depth chart order rather than list order', () => {

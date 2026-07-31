@@ -1,10 +1,10 @@
 import type { FantasyPlayerEnriched } from '@/lib/fantasy-types'
 
 /** Positions the team outlook panel reports a starter for. */
-export const STARTER_POSITIONS = ['QB', 'RB', 'WR', 'TE'] as const
+export const STARTER_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'D/ST'] as const
 export type StarterPosition = (typeof STARTER_POSITIONS)[number]
 
-export type StarterEvidence = 'depth-chart' | 'usage' | 'projection'
+export type StarterEvidence = 'depth-chart' | 'usage' | 'projection' | 'sole-unit'
 
 export interface StarterCandidate {
   playerId: number
@@ -107,6 +107,20 @@ export function pickTeamStarters(
         unsettled: false,
         evidence: 'projection' as StarterEvidence,
         reason: `No ${pos} on the roster in the current data.`,
+      }
+    }
+
+    // A team fields exactly one defense, so there is no starter to choose and no
+    // competition to report — the usual scoring would invent a contender.
+    if (pos === 'D/ST') {
+      const unit = toCandidate(group[0])
+      return {
+        pos,
+        player: unit,
+        contender: null,
+        unsettled: false,
+        evidence: 'sole-unit' as StarterEvidence,
+        reason: '',
       }
     }
 

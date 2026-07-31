@@ -86,7 +86,7 @@ type DetailState =
   | { status: 'ready'; data: PlayerDetail }
 
 const SPORT_NAMES: Record<string, string> = { nfl: 'NFL', nba: 'NBA', mlb: 'MLB', nhl: 'NHL' }
-const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K']
+const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'D/ST']
 const PAGE_SIZE = 40
 
 const SCORING_OPTIONS = [

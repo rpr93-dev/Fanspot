@@ -1,9 +1,27 @@
 import type { CanonicalPlayer, IntegrationLog } from './player-types'
 import { FANTASY_POSITIONS_NFL } from './player-types'
+import { PRO_TEAM_MAPPER } from '../fantasy-types'
 import { SLEEPER_BASE, SLEEPER_PLAYERS_TTL_MS } from '../providers/fantasy-constants'
 import { fetchOrCache, getCached, setCached } from '../cache/cacheService'
 
 const SLEEPER_MASTER_CACHE_KEY = 'sleeper:master:nfl'
+
+/**
+ * ESPN gives every team defense a deterministic negative id: -16000 minus the pro team
+ * id. Sleeper's DEF records carry no `espn_id`, and the two names never agree
+ * ("Pittsburgh Steelers" vs "Steelers D/ST"), so deriving the id is the only exact
+ * join available — name matching would fall through to fuzzy and mispair defenses.
+ */
+const ESPN_DST_ID_BASE = -16000
+
+const PRO_TEAM_ID_BY_ABBR = new Map<string, number>(
+  Object.entries(PRO_TEAM_MAPPER.nfl).map(([id, abbr]) => [abbr, Number(id)]),
+)
+
+function espnDstId(team: string): number | undefined {
+  const proTeamId = PRO_TEAM_ID_BY_ABBR.get(team.toUpperCase())
+  return proTeamId != null && proTeamId > 0 ? ESPN_DST_ID_BASE - proTeamId : undefined
+}
 
 const logs: IntegrationLog[] = []
 
@@ -88,9 +106,29 @@ export function sleeperToCanonical(sleeperId: string, raw: Record<string, unknow
   const active = (raw.active as boolean) ?? true
   const yearsExp = (raw.years_exp as number) ?? 0
 
-  if (!fullName || !firstName || !lastName) return null
   if (sport !== 'nfl') return null
   if (!active) return null
+
+  // Team defenses are a fantasy position but not a person: Sleeper stores them with a
+  // city/mascot split and no `full_name`, no age and no experience, so the person-shaped
+  // validation and the retirement heuristic below both reject them outright.
+  if (position === 'DEF') {
+    if (!team || !firstName || !lastName) return null
+    return {
+      sleeperId,
+      espnId: espnDstId(team),
+      fullName: `${firstName} ${lastName}`,
+      firstName,
+      lastName,
+      position: 'D/ST',
+      team,
+      yearsExp: 0,
+      rookie: false,
+      active: true,
+    }
+  }
+
+  if (!fullName || !firstName || !lastName) return null
   if (likelyRetired(raw)) {
     log('info', 'sleeper', `Skipping likely retired player: ${fullName} (years_exp=${yearsExp}, team=${team || 'FA'}, age=${raw.age})`)
     return null
@@ -156,7 +194,9 @@ export async function buildMasterPlayerList(): Promise<MasterPlayerList> {
     bySleeperId.set(id, canonical)
     rawBySleeperId.set(id, rawPlayer)
 
-    if (canonical.espnId != null && canonical.espnId > 0) {
+    // ESPN ids for team defenses are negative (-16000 - proTeamId), so this guard
+    // rejects only the 0/absent case rather than everything below zero.
+    if (canonical.espnId != null && canonical.espnId !== 0) {
       byEspnId.set(canonical.espnId, canonical)
     }
     if (canonical.gsisId) {

@@ -160,7 +160,7 @@ function getPosKey(p: FantasyPlayerEnriched): string {
   return p.normalizedPosition ?? ''
 }
 
-export const BOARD_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K'] as const
+export const BOARD_POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'D/ST'] as const
 export type BoardPosition = (typeof BOARD_POSITIONS)[number]
 
 export interface StealRow {

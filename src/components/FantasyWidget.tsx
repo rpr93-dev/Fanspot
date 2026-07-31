@@ -34,6 +34,11 @@ const INJURY_LABEL: Partial<Record<InjuryTier, string>> = {
   severe: 'INJ WATCH',
 }
 
+/** A team fields one defense, so it has no depth number the way a QB1 does. */
+function slotLabel(pos: string): string {
+  return pos === 'D/ST' ? 'D/ST' : `${pos}1`
+}
+
 export default function FantasyWidget({
   sport,
   teamAbbr,
@@ -112,7 +117,7 @@ export default function FantasyWidget({
             >
               <div className="flex items-baseline justify-between gap-2">
                 <div className="flex items-baseline gap-2 min-w-0">
-                  <span className="text-[10px] font-bold tracking-wider text-gray-500 shrink-0">{s.pos}1</span>
+                  <span className="text-[10px] font-bold tracking-wider text-gray-500 shrink-0">{slotLabel(s.pos)}</span>
                   <span className="text-sm font-medium text-white/85 truncate">
                     {s.player ? s.player.name : '—'}
                   </span>

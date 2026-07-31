@@ -43,7 +43,7 @@ export function validateUnifiedDatabase(players: UnifiedPlayer[]): ValidationRep
     }
     sleeperIds.set(c.sleeperId, p)
 
-    if (c.espnId != null && c.espnId > 0) {
+    if (c.espnId != null && c.espnId !== 0) {
       if (espnIds.has(c.espnId)) {
         const existing = espnIds.get(c.espnId)!
         issues.push(`DUPLICATE ESPN ID ${c.espnId}: ${existing.canonical.fullName} vs ${c.fullName}`)
