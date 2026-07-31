@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation'
 import { getTeamSchedule, getTeamNews, getEspnAbbr } from '@/lib/sports-api'
 import StandingsBox from './StandingsBox'
 import AiNalyst from '@/components/AiNalyst'
+import FantasyWidget from '@/components/FantasyWidget'
 import type { EspnEvent } from '@/lib/sports-api'
 
 function useTeamDashboard(sport: string, teamId: string, teamName: string, teamAbbreviation: string) {
@@ -642,6 +643,12 @@ export default function TeamDashboard() {
                 )}
               </div>
             </div>
+
+            {!loading && team && (
+              <div className="mt-5">
+                <FantasyWidget sport={team.sport} teamAbbr={team.abbreviation} teamColor={team.colors.primary} />
+              </div>
+            )}
           </>
         )}
 

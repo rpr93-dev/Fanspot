@@ -8,3 +8,10 @@ AUTONOMOUS_OPTIMIZATION_LOG.md
 tsconfig.tsbuildinfo
 *.tsbuildinfo
 docs/data-flow.md
+# build/test artifacts
+playwright-report/
+test-results/
+.playwright-mcp/
+.playwright-tests/
+server.log
+*.json.tmp
