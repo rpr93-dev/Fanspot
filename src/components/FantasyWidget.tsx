@@ -76,7 +76,10 @@ export default function FantasyWidget({
   // and the board reskinned to this team's colors.
   function stealsHref(s: Starter): string {
     const q = new URLSearchParams({ pos: s.pos, team: teamAbbr, theme: teamAbbr })
-    if (s.player) q.set('player', String(s.player.playerId))
+    if (s.player) {
+    q.set('player', String(s.player.playerId))
+    q.set('name', s.player.name)
+  }
     return `/fantasy/${sport.toLowerCase()}?${q.toString()}`
   }
 

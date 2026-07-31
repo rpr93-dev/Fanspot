@@ -281,6 +281,7 @@ export default function FantasySportPage() {
 
   const teamFilter = searchParams.get('team')
   const targetPlayerId = Number(searchParams.get('player')) || null
+  const targetName = searchParams.get('name')
   // Themed only when arriving from a team page; a direct visit keeps the neutral palette.
   const theme = resolveTeamTheme(sport, searchParams.get('theme'))
 
@@ -303,6 +304,7 @@ export default function FantasySportPage() {
   const [error, setError] = useState<string | null>(null)
   const [openPlayer, setOpenPlayer] = useState<number | null>(null)
   const [details, setDetails] = useState<Record<number, DetailState>>({})
+  const [missingTarget, setMissingTarget] = useState(false)
 
   const requestId = useRef(0)
   const scrolledTo = useRef<number | null>(null)
@@ -371,7 +373,14 @@ export default function FantasySportPage() {
     const present =
       rows.some((r) => r.playerId === targetPlayerId) ||
       injuryWatch.some((r) => r.playerId === targetPlayerId)
-    if (!present) return
+    if (!present) {
+      // The board only tracks players rostered in at least 1% of leagues, so a
+      // deep-linked starter can legitimately be absent. Say so instead of leaving
+      // an unexplained empty list.
+      setMissingTarget(true)
+      return
+    }
+    setMissingTarget(false)
     scrolledTo.current = targetPlayerId
     setOpenPlayer(targetPlayerId)
     void loadDetail(targetPlayerId)
@@ -530,7 +539,16 @@ export default function FantasySportPage() {
           </div>
         )}
 
-        {!loading && !error && rows.length === 0 && (
+        {!loading && !error && missingTarget && (
+          <p className={styles.notice}>
+            {targetName ? `${targetName} isn't` : "That player isn't"} on the Steals board.
+            The board only ranks players rostered in at least 1% of leagues, so a listed
+            starter can still be absent — that's a signal in itself, not a missing record.
+            <Link href={`/fantasy/${sport}?pos=${pos}`}>See every {pos} instead</Link>
+          </p>
+        )}
+
+        {!loading && !error && rows.length === 0 && !missingTarget && (
           <p className={styles.empty}>No players match.</p>
         )}
 

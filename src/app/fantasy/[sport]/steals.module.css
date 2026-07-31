@@ -552,6 +552,31 @@
   padding: 20px 4px;
 }
 
+/* Shown when a deep-linked starter isn't on the board. Explains the absence rather
+   than leaving an unexplained empty list. */
+.notice {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 620px;
+  padding: 16px 18px;
+  margin: 12px 0 0;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.notice a {
+  display: block;
+  margin-top: 8px;
+  color: var(--accent);
+  font-family: var(--font-mono-data), monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .footer {
   max-width: 1040px;
   margin: 26px auto 0;
