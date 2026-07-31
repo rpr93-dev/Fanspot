@@ -543,15 +543,23 @@ function computeLeagueWinnerPct(player: FantasyPlayerEnriched, allPlayers: Fanta
   return Math.round(Math.min(100, Math.max(0, score * 100)))
 }
 
-function buildOutlook(
-  confidence: number,
-  adpDiscount: number,
-  leagueWinnerPct: number,
-  injured: boolean,
-  age: number | undefined,
-  missedSeason: boolean,
-): string {
-  if (missedSeason) return 'Missed 2024 season - major red flag. Worth only a last-round flier.'
+export interface OutlookInputs {
+  confidence: number
+  adpDiscount: number
+  leagueWinnerPct: number
+  injured: boolean
+  age?: number
+  missedSeason: boolean
+  /** Season the missed-year line should name. Omitted when the pipeline didn't report one. */
+  missedSeasonYear?: number
+}
+
+export function buildOutlook(i: OutlookInputs): string {
+  const { confidence, adpDiscount, leagueWinnerPct, injured, age, missedSeason } = i
+  if (missedSeason) {
+    const season = i.missedSeasonYear != null ? `the ${i.missedSeasonYear} season` : 'the most recent season'
+    return `Missed ${season} - major red flag. Worth only a last-round flier.`
+  }
   if (injured) return 'Currently injured - monitor preseason. Elite value if healthy by Week 1.'
   if (confidence >= 70 && leagueWinnerPct >= 80) return 'Proven producer with league-winning upside. One of the safest value picks in the draft.'
   if (confidence >= 60 && adpDiscount >= 40) return 'Strong track record at a significant ADP discount. High-confidence value target.'
@@ -560,6 +568,30 @@ function buildOutlook(
   if (confidence < 40) return 'Significant uncertainty in projection. Volume or role questions limit conviction.'
   if (age && age > 30) return 'Veteran with proven production. Age caps ceiling but consistent value at this ADP.'
   return 'Solid value at current ADP. Projection and ADP align for a dependable contributor.'
+}
+
+/**
+ * Outlook for a single player, assembled from the same inputs the steals board uses so
+ * the team dashboard and the board can never disagree about a player.
+ */
+export function buildPlayerOutlook(
+  player: FantasyPlayerEnriched,
+  allPlayers: FantasyPlayerEnriched[],
+  config: BoardConfig = { scoringFormat: 'ppr' },
+): string {
+  const expectedRanks = computeExpectedRankings(allPlayers)
+  const expectedRank = expectedRanks.get(player.id) ?? allPlayers.length
+  const { adp } = getPlatformAdp(player, config)
+
+  return buildOutlook({
+    confidence: computeConfidence(player),
+    adpDiscount: computeAdpDiscount(adp ?? MAX_ADP, expectedRank),
+    leagueWinnerPct: computeLeagueWinnerPct(player, allPlayers),
+    injured: player.player.injured,
+    age: player.sleeper?.age,
+    missedSeason: missedRecentSeason(player),
+    missedSeasonYear: player.seasonActualsYear,
+  })
 }
 
 // ESPN projection stat ids. Ids 5-14 and 44-51 are yardage-milestone bucket counts,
@@ -646,7 +678,15 @@ export function buildTop10Detail(
   lines.push(bioParts.join(' | '))
 
   const missed = missedRecentSeason(p)
-  const outlook = buildOutlook(s.confidence ?? 0, s.adpDiscount ?? 0, s.leagueWinnerPct ?? 0, injured, age, missed)
+  const outlook = buildOutlook({
+    confidence: s.confidence ?? 0,
+    adpDiscount: s.adpDiscount ?? 0,
+    leagueWinnerPct: s.leagueWinnerPct ?? 0,
+    injured,
+    age,
+    missedSeason: missed,
+    missedSeasonYear: p.seasonActualsYear,
+  })
   lines.push(outlook)
 
   return lines.join('\n')

@@ -3,15 +3,35 @@
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
 
-interface WidgetSteal {
+type InjuryTier = 'healthy' | 'probable' | 'questionable' | 'doubtful' | 'out' | 'severe'
+
+interface StarterPlayer {
   playerId: number
   name: string
+  projectedPoints: number
+  statLine: string
+  depthChartOrder?: number
+  percentStarted: number
+  injuryTier: InjuryTier
+  injuryDetail?: string
+  outlook: string
+}
+
+interface Starter {
   pos: string
-  team: string
-  posRank: number
-  adpRank: number
-  gap: number
-  conf: number
+  player: StarterPlayer | null
+  contender: { playerId: number; name: string } | null
+  unsettled: boolean
+  evidence?: 'depth-chart' | 'usage' | 'projection'
+  reason: string
+}
+
+const INJURY_LABEL: Partial<Record<InjuryTier, string>> = {
+  probable: 'PROB',
+  questionable: 'QUES',
+  doubtful: 'DOUBT',
+  out: 'OUT',
+  severe: 'INJ WATCH',
 }
 
 export default function FantasyWidget({
@@ -23,87 +43,105 @@ export default function FantasyWidget({
   teamAbbr: string
   teamColor: string
 }) {
-  const [steals, setSteals] = useState<WidgetSteal[]>([])
+  const [starters, setStarters] = useState<Starter[]>([])
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
     async function load() {
+      setLoading(true)
+      setError(null)
       try {
         const res = await fetch(
-          `/api/fantasy/steals/${sport.toLowerCase()}?pos=ALL&sort=gap&scoring=ppr&limit=3`,
-          { signal: AbortSignal.timeout(15000) },
+          `/api/fantasy/team-outlook/${sport.toLowerCase()}/${teamAbbr.toLowerCase()}`,
+          { signal: AbortSignal.timeout(60000) },
         )
-        if (!res.ok) throw new Error('Failed')
-        const data = await res.json()
-        if (!cancelled) setSteals(data.rows || [])
-      } catch {
-        if (!cancelled) setError(true)
+        const body = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`)
+        if (!cancelled) setStarters(body.starters ?? [])
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load')
       } finally {
         if (!cancelled) setLoading(false)
       }
     }
     load()
-    return () => { cancelled = true }
-  }, [sport])
+    return () => {
+      cancelled = true
+    }
+  }, [sport, teamAbbr])
+
+  // Lands on the player's own position tab, filtered to this team, with the row opened
+  // and the board reskinned to this team's colors.
+  function stealsHref(s: Starter): string {
+    const q = new URLSearchParams({ pos: s.pos, team: teamAbbr, theme: teamAbbr })
+    if (s.player) q.set('player', String(s.player.playerId))
+    return `/fantasy/${sport.toLowerCase()}?${q.toString()}`
+  }
 
   return (
     <div
       className="rounded-xl p-6 flex flex-col"
       style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}15` }}
     >
-      <h2 className="text-xs font-medium tracking-wider uppercase mb-4 text-gray-400">Fantasy Outlook</h2>
+      <h2 className="text-xs font-medium tracking-wider uppercase mb-1 text-gray-400">Fantasy Outlook</h2>
+      <p className="text-[10px] text-gray-600 mb-4">Current starter at each position</p>
+
       {loading && (
         <div className="animate-pulse space-y-3 flex-1">
-          {[...Array(3)].map((_, i) => (
-            <div key={i} className="h-10 rounded" style={{ backgroundColor: `${teamColor}15` }} />
+          {[...Array(4)].map((_, i) => (
+            <div key={i} className="h-14 rounded" style={{ backgroundColor: `${teamColor}15` }} />
           ))}
         </div>
       )}
-      {error && (
-        <p className="text-sm text-gray-500 flex-1 flex items-center justify-center">No data</p>
-      )}
-      {!loading && !error && steals.length === 0 && (
-        <p className="text-sm text-gray-500 flex-1 flex items-center justify-center">No steals found</p>
-      )}
-      {steals.length > 0 && (
+
+      {error && <p className="text-sm text-gray-500 flex-1 flex items-center justify-center">{error}</p>}
+
+      {!loading && !error && (
         <div className="space-y-2 flex-1">
-          {steals.map((s) => (
-            <div
-              key={s.playerId}
-              className="flex items-center justify-between rounded-lg p-3"
-              style={{ backgroundColor: `${teamColor}0a`, border: `1px solid ${teamColor}08` }}
+          {starters.map((s) => (
+            <Link
+              key={s.pos}
+              href={stealsHref(s)}
+              className="block rounded-lg p-3 transition hover:brightness-125"
+              style={{ backgroundColor: `${teamColor}0a`, border: `1px solid ${teamColor}12` }}
             >
-              <div>
-                <span className="text-sm font-medium text-white/80">{s.name}</span>
-                <span className="text-xs text-gray-500 ml-2">{s.pos}</span>
-                <span className={`text-xs ml-1.5 ${s.team === teamAbbr ? 'text-white font-medium' : 'text-gray-600'}`}>
-                  {s.team}
-                </span>
-              </div>
-              <div className="text-right">
-                <span
-                  className="text-xs text-gray-500"
-                  title={`Projected ${s.pos}${s.posRank} · drafted as ${s.pos}${s.adpRank}`}
-                >
-                  {s.pos}{s.adpRank} → {s.pos}{s.posRank}
-                </span>
-                <div className="flex items-center gap-1 justify-end">
-                  <span className={`text-xs font-bold ${s.gap > 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {s.gap > 0 ? '+' : ''}{s.gap}
+              <div className="flex items-baseline justify-between gap-2">
+                <div className="flex items-baseline gap-2 min-w-0">
+                  <span className="text-[10px] font-bold tracking-wider text-gray-500 shrink-0">{s.pos}1</span>
+                  <span className="text-sm font-medium text-white/85 truncate">
+                    {s.player ? s.player.name : '—'}
                   </span>
-                  <span className="text-[10px] text-gray-600">spots</span>
+                  {s.player && INJURY_LABEL[s.player.injuryTier] && (
+                    <span
+                      className="text-[9px] font-bold px-1 py-px rounded shrink-0 text-red-300 bg-red-500/15"
+                      title={s.player.injuryDetail}
+                    >
+                      {INJURY_LABEL[s.player.injuryTier]}
+                    </span>
+                  )}
                 </div>
+                {s.player && s.player.projectedPoints > 0 && (
+                  <span className="text-xs text-gray-500 shrink-0 tabular-nums">
+                    {s.player.projectedPoints} FP
+                  </span>
+                )}
               </div>
-            </div>
+
+              {s.unsettled ? (
+                <p className="text-[11px] text-amber-400/80 mt-1 leading-snug">{s.reason}</p>
+              ) : s.player ? (
+                <p className="text-[11px] text-gray-500 mt-1 leading-snug line-clamp-2">{s.player.outlook}</p>
+              ) : (
+                <p className="text-[11px] text-gray-600 mt-1 leading-snug">{s.reason}</p>
+              )}
+            </Link>
           ))}
-          <Link
-            href={`/fantasy/${sport.toLowerCase()}?team=${teamAbbr}`}
-            className="block text-xs text-center text-gray-500 hover:text-white mt-2 transition"
-          >
-            View all steals →
-          </Link>
+
+          {starters.length === 0 && (
+            <p className="text-sm text-gray-500 flex-1 flex items-center justify-center">No outlook data</p>
+          )}
         </div>
       )}
     </div>
