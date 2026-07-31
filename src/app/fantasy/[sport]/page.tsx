@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { isFantasySportLive } from '@/lib/providers/fantasy-constants'
 import { resolveTeamTheme, themeVars } from '@/lib/fantasy/team-theme'
 import AuctionBoard from './AuctionBoard'
+import { DetailPanel, type DetailState, type PlayerDetail } from './PlayerDetailPanel'
 import styles from './steals.module.css'
 
 type InjuryTier = 'healthy' | 'probable' | 'questionable' | 'doubtful' | 'out' | 'severe'
@@ -52,40 +53,6 @@ interface BoardResponse {
   generatedAt: string
 }
 
-interface PlayerNews {
-  title: string
-  url: string
-  source: string
-  snippet: string
-}
-
-interface PlayerDetail {
-  playerId: number
-  name: string
-  pos: string
-  team: string
-  bio: {
-    age?: number
-    yearsExp?: number
-    height?: string
-    weight?: string
-    college?: string
-    jersey?: string
-    depthChartOrder?: number
-  }
-  injury: { injured: boolean; status: string }
-  projection: { points: number; line: string } | null
-  lastSeason: { year?: number; points: number } | null
-  market: { adpRank?: number; ownedPct: number; startedPct: number; auctionValue: number }
-  vegas: { teamImpliedPoints: number } | null
-  news: PlayerNews[]
-}
-
-type DetailState =
-  | { status: 'loading' }
-  | { status: 'error'; message: string }
-  | { status: 'ready'; data: PlayerDetail }
-
 const SPORT_NAMES: Record<string, string> = { nfl: 'NFL', nba: 'NBA', mlb: 'MLB', nhl: 'NHL' }
 const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'D/ST']
 const PAGE_SIZE = 40
@@ -115,65 +82,6 @@ function FieldBar({ row }: { row: StealRow }) {
       />
       <div className={`${styles.tick} ${styles.proj}`} style={{ left: `${pj}%` }} />
       <div className={`${styles.tick} ${styles.adp}`} style={{ left: `${ad}%` }} />
-    </div>
-  )
-}
-
-function Stat({ label, value, alert }: { label: string; value: string; alert?: boolean }) {
-  return (
-    <div className={styles.detailStat}>
-      <span className={styles.lab}>{label}</span>
-      <span className={`${styles.val} ${alert ? styles.injured : ''}`}>{value}</span>
-    </div>
-  )
-}
-
-function DetailPanel({ state }: { state: DetailState }) {
-  if (state.status === 'loading') {
-    return <div className={styles.detail}><p className={styles.detailNote}>Loading player info…</p></div>
-  }
-  if (state.status === 'error') {
-    return <div className={styles.detail}><p className={styles.detailNote}>Couldn&apos;t load player info: {state.message}</p></div>
-  }
-
-  const d = state.data
-  const b = d.bio
-  return (
-    <div className={styles.detail}>
-      <div className={styles.detailGrid}>
-        {b.age != null && <Stat label="Age" value={String(b.age)} />}
-        {b.yearsExp != null && <Stat label="Exp" value={b.yearsExp === 0 ? 'Rookie' : `${b.yearsExp} yr`} />}
-        {b.height && <Stat label="Ht" value={b.height} />}
-        {b.weight && <Stat label="Wt" value={`${b.weight} lb`} />}
-        {b.jersey && <Stat label="No." value={`#${b.jersey}`} />}
-        {b.college && <Stat label="College" value={b.college} />}
-        {b.depthChartOrder != null && <Stat label="Depth" value={`${d.pos}${b.depthChartOrder}`} />}
-        <Stat label="Status" value={d.injury.status} alert={d.injury.injured || d.injury.status !== 'ACTIVE'} />
-        <Stat label="Rostered" value={`${d.market.ownedPct}%`} />
-        <Stat label="Started" value={`${d.market.startedPct}%`} />
-        {d.market.auctionValue > 0 && <Stat label="Auction" value={`$${d.market.auctionValue}`} />}
-        {d.vegas && <Stat label="Team total" value={d.vegas.teamImpliedPoints.toFixed(1)} />}
-      </div>
-
-      {d.projection && (
-        <p className={styles.detailLine}>
-          Projected <b>{d.projection.points} FP</b>
-          {d.projection.line ? ` — ${d.projection.line}` : ''}
-          {d.lastSeason ? ` · ${d.lastSeason.points} FP in ${d.lastSeason.year ?? 'the last completed season'}` : ''}
-        </p>
-      )}
-
-      <p className={styles.newsHead}>Latest news</p>
-      {d.news.length === 0 ? (
-        <p className={styles.detailNote}>No recent coverage found.</p>
-      ) : (
-        d.news.map((n) => (
-          <a key={n.url} className={styles.newsItem} href={n.url} target="_blank" rel="noopener noreferrer">
-            <span className={styles.newsTitle}>{n.title}</span>
-            <span className={styles.newsMeta}>{n.source}</span>
-          </a>
-        ))
-      )}
     </div>
   )
 }
