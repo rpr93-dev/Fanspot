@@ -19,8 +19,8 @@ export default function TeamCard({ team, sport }: { team: Team; sport: string })
   return (
     <Link
       href={`/${sport}/${team.id}`}
-      className="group hover-card rounded-xl p-5 animate-fade-in"
-      style={{ backgroundColor: `${team.colors.primary}15`, border: `1px solid ${team.colors.primary}20`, '--card-color': team.colors.primary } as React.CSSProperties}
+      className="group hover-card fs-panel rounded-xl p-5 animate-fade-in"
+      style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}30`, '--card-color': team.colors.primary } as React.CSSProperties}
     >
       <div className="flex flex-col items-center text-center">
         <div className="w-14 h-14 mb-3 flex items-center justify-center">
@@ -38,8 +38,8 @@ export default function TeamCard({ team, sport }: { team: Team; sport: string })
             />
           )}
         </div>
-        <h2 className="text-sm font-medium text-white/90 leading-tight">{team.name}</h2>
-        <p className="text-xs text-gray-500 mt-1">{team.conference?.substring(0, 3)} &middot; {team.division}</p>
+        <h2 className="fs-title text-base text-white/90 leading-tight">{team.name}</h2>
+        <p className="fs-meta mt-1.5">{team.conference?.substring(0, 3)} &middot; {team.division}</p>
       </div>
     </Link>
   )

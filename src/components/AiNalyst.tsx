@@ -164,18 +164,18 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
           <div
             className="relative w-full max-w-lg rounded-2xl shadow-2xl animate-fade-in-up overflow-hidden"
-            style={{ backgroundColor: '#0f0f1a', border: `1px solid ${teamColor}25` }}
+            style={{ backgroundColor: 'var(--color-fs-panel-2)', border: `1px solid ${teamColor}25` }}
           >
-            <div className="flex items-center justify-between p-4 sm:p-5 border-b" style={{ borderColor: `${teamColor}15` }}>
-              <h2 className="text-sm font-medium tracking-wider text-white/80">
+            <div className="flex items-center justify-between p-4 sm:p-5 border-b" style={{ borderColor: `${teamColor}18` }}>
+              <h2 className="text-sm font-medium tracking-wider text-fs-text/85">
                 {pageType === 'team' ? 'Team Analysis' : pageType === 'next-game' ? 'Game Preview' : 'Game Recap'}
               </h2>
-              <button onClick={() => setOpen(false)} className="text-gray-500 hover:text-white text-lg leading-none">&times;</button>
+              <button onClick={() => setOpen(false)} className="text-fs-muted hover:text-fs-text text-lg leading-none">&times;</button>
             </div>
 
             <div className="p-4 sm:p-5 space-y-4">
               <div>
-                <p className="text-xs text-gray-500 mb-2">Style</p>
+                <p className="fs-meta mb-2">Style</p>
                 <div className="flex flex-wrap gap-1.5">
                   {STYLES.map(style => {
                     const isActive = selectedStyle === style
@@ -199,7 +199,7 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
 
               <div>
                 <div className="flex items-center justify-between mb-2">
-                  <p className="text-xs text-gray-500">Focus areas</p>
+                  <p className="fs-meta">Focus areas</p>
                   <button
                     onClick={toggleAll}
                     className="text-[11px] px-2 py-0.5 rounded-full transition-colors"
@@ -234,13 +234,14 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
               </div>
 
               <div>
-                <p className="text-xs text-gray-500 mb-2">Or ask your own question</p>
+                <p className="fs-meta mb-2">Or ask your own question</p>
                 <input
                   type="text"
                   value={customQuestion}
                   onChange={e => setCustomQuestion(e.target.value)}
                   placeholder="e.g. What's the biggest weakness of this team?"
-                  className="w-full text-xs px-3 py-2 rounded-xl bg-white/5 border border-white/10 text-white/80 placeholder:text-gray-600 outline-none focus:border-white/25 transition-colors"
+                  className="fs-input"
+                  style={{ '--tint': teamColor } as React.CSSProperties}
                 />
               </div>
 
@@ -272,8 +273,8 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
               {output && (
                 <div
                   ref={outputRef}
-                  className="rounded-xl p-4 text-sm leading-relaxed text-white/80 max-h-80 overflow-y-auto prose prose-invert prose-sm"
-                  style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}15` }}
+                  className="rounded-xl p-4 text-sm leading-relaxed text-fs-text/85 max-h-80 overflow-y-auto prose prose-invert prose-sm"
+                  style={{ backgroundColor: 'var(--color-fs-panel)', border: `1px solid ${teamColor}20` }}
                 >
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {output}

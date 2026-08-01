@@ -90,21 +90,21 @@ export default function FantasyWidget({
 
   return (
     <div
-      className="rounded-xl p-6 flex flex-col"
-      style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}15` }}
+      className="fs-panel p-6 flex flex-col"
+      style={{ '--tint': teamColor, '--tint-border': `${teamColor}20` } as React.CSSProperties}
     >
-      <h2 className="text-xs font-medium tracking-wider uppercase mb-1 text-gray-400">Fantasy Outlook</h2>
-      <p className="text-[10px] text-gray-600 mb-4">Current starter at each position</p>
+      <h2 className="fs-eyebrow mb-1" style={{ '--tint': teamColor } as React.CSSProperties}>Fantasy Outlook</h2>
+      <p className="fs-meta mb-4">Current starter at each position</p>
 
       {loading && (
         <div className="animate-pulse space-y-3 flex-1">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-14 rounded" style={{ backgroundColor: `${teamColor}15` }} />
+            <div key={i} className="fs-skeleton h-14" style={{ backgroundColor: `${teamColor}18` }} />
           ))}
         </div>
       )}
 
-      {error && <p className="text-sm text-gray-500 flex-1 flex items-center justify-center">{error}</p>}
+      {error && <p className="text-sm text-fs-muted flex-1 flex items-center justify-center">{error}</p>}
 
       {!loading && !error && (
         <div className="space-y-2 flex-1">
@@ -113,17 +113,17 @@ export default function FantasyWidget({
               key={s.pos}
               href={stealsHref(s)}
               className="block rounded-lg p-3 transition hover:brightness-125"
-              style={{ backgroundColor: `${teamColor}0a`, border: `1px solid ${teamColor}12` }}
+              style={{ backgroundColor: `${teamColor}0c`, border: `1px solid ${teamColor}14` }}
             >
               <div className="flex items-baseline justify-between gap-2">
                 <div className="flex items-baseline gap-2 min-w-0">
-                  <span className="text-[10px] font-bold tracking-wider text-gray-500 shrink-0">{slotLabel(s.pos)}</span>
-                  <span className="text-sm font-medium text-white/85 truncate">
+                  <span className="fs-meta shrink-0">{slotLabel(s.pos)}</span>
+                  <span className="text-sm font-medium text-fs-text/85 truncate">
                     {s.player ? s.player.name : '—'}
                   </span>
                   {s.player && INJURY_LABEL[s.player.injuryTier] && (
                     <span
-                      className="text-[9px] font-bold px-1 py-px rounded shrink-0 text-red-300 bg-red-500/15"
+                      className="text-[9px] font-bold px-1 py-px rounded shrink-0 text-fs-red bg-fs-red/15"
                       title={s.player.injuryDetail}
                     >
                       {INJURY_LABEL[s.player.injuryTier]}
@@ -131,24 +131,24 @@ export default function FantasyWidget({
                   )}
                 </div>
                 {s.player && s.player.projectedPoints > 0 && (
-                  <span className="text-xs text-gray-500 shrink-0 tabular-nums">
+                  <span className="text-xs text-fs-muted shrink-0 tabular-nums fs-mono">
                     {s.player.projectedPoints} FP
                   </span>
                 )}
               </div>
 
               {s.unsettled ? (
-                <p className="text-[11px] text-amber-400/80 mt-1 leading-snug">{s.reason}</p>
+                <p className="text-[11px] text-fs-gold/90 mt-1 leading-snug">{s.reason}</p>
               ) : s.player ? (
-                <p className="text-[11px] text-gray-500 mt-1 leading-snug line-clamp-2">{s.player.outlook}</p>
+                <p className="text-[11px] text-fs-muted mt-1 leading-snug line-clamp-2">{s.player.outlook}</p>
               ) : (
-                <p className="text-[11px] text-gray-600 mt-1 leading-snug">{s.reason}</p>
+                <p className="text-[11px] text-fs-muted-2 mt-1 leading-snug">{s.reason}</p>
               )}
             </Link>
           ))}
 
           {starters.length === 0 && (
-            <p className="text-sm text-gray-500 flex-1 flex items-center justify-center">No outlook data</p>
+            <p className="text-sm text-fs-muted flex-1 flex items-center justify-center">No outlook data</p>
           )}
         </div>
       )}

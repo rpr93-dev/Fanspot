@@ -65,17 +65,12 @@ export default function StandingsBox({ standings, teamId, teamAbbr, teamConferen
   const c = compact
 
   return (
-    <div className="rounded-xl p-6 flex flex-col" style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}15` }}>
+    <div className="fs-panel p-6 flex flex-col" style={{ '--tint': teamColor, '--tint-border': `${teamColor}20` } as React.CSSProperties}>
       <div className="flex items-center justify-between mb-4 shrink-0">
-        <h2 className="text-xs font-medium tracking-wider uppercase text-gray-400">Standings</h2>
+        <h2 className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Standings</h2>
         {hasMultipleConferences && (
           <button onClick={() => setShowAll((v) => !v)}
-            className="hover-bright text-xs px-2.5 py-1 rounded-full text-gray-400 shrink-0"
-            style={{
-              backgroundColor: showAll ? `${teamColor}25` : `${teamColor}10`,
-              border: `1px solid ${teamColor}20`,
-              '--card-color': teamColor,
-            } as React.CSSProperties}>
+            className={`fs-chip ${showAll ? 'fs-chip-active' : ''}`}>
             {showAll ? 'Filtered' : 'All'}
           </button>
         )}
@@ -83,22 +78,22 @@ export default function StandingsBox({ standings, teamId, teamAbbr, teamConferen
       {loading ? (
         <div className="animate-pulse space-y-3 flex-1">
           {[...Array(8)].map((_, i) => (
-            <div key={i} className="h-8 rounded-lg" style={{ backgroundColor: `${teamColor}12` }} />
+            <div key={i} className="fs-skeleton h-8" style={{ backgroundColor: `${teamColor}14` }} />
           ))}
         </div>
       ) : standingsMessage ? (
-        <p className="text-sm text-gray-500 animate-fade-in-up flex-1 flex items-center justify-center">{standingsMessage}</p>
+        <p className="text-sm text-fs-muted animate-fade-in-up flex-1 flex items-center justify-center">{standingsMessage}</p>
       ) : filteredStandings.length === 0 ? (
-        <p className="text-sm text-gray-500 animate-fade-in flex-1 flex items-center justify-center">Standings unavailable</p>
+        <p className="text-sm text-fs-muted animate-fade-in flex-1 flex items-center justify-center">Standings unavailable</p>
       ) : (
         <div ref={listRef} className="overflow-y-auto min-h-0" style={{ scrollbarWidth: 'thin' }}>
           <div className="animate-fade-in-up space-y-3" style={{ animationDelay: '100ms' }}>
             {filteredStandings.map((conf) => (
               <div key={conf.name}>
-                <p className={`font-medium mb-2 uppercase tracking-wider text-gray-400 ${c ? 'text-[11px]' : 'text-xs'}`}>{conf.name}</p>
+                <p className={`fs-meta mb-2 ${c ? 'text-[11px]' : ''}`}>{conf.name}</p>
                 {conf.divisions.map((div) => (
                   <div key={div.name} className={c ? 'mb-1.5' : 'mb-2.5'}>
-                    <p className={`mb-1 ml-1 text-gray-500 ${c ? 'text-[11px]' : 'text-xs'}`}>{div.name}</p>
+                    <p className={`mb-1 ml-1 text-fs-muted-2 ${c ? 'text-[11px]' : 'text-xs'}`}>{div.name}</p>
                     <div className="space-y-px">
                       {div.teams.map((entry, i) => {
                         const isMyTeam = entry.abbr === getEspnAbbr(teamId, teamAbbr)
@@ -109,10 +104,10 @@ export default function StandingsBox({ standings, teamId, teamAbbr, teamConferen
                               backgroundColor: isMyTeam ? `${teamColor}18` : 'transparent',
                               '--card-color': teamColor,
                             } as React.CSSProperties}>
-                            <span className={`w-4 text-right text-gray-600 font-mono ${c ? 'text-[11px]' : 'text-xs'}`}>{i + 1}</span>
+                            <span className={`w-4 text-right text-fs-muted-2 font-mono ${c ? 'text-[11px]' : 'text-xs'}`}>{i + 1}</span>
                             <img src={entry.logo} alt="" className="w-3.5 h-3.5 object-contain shrink-0" onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }} />
-                            <span className={`flex-1 truncate ${isMyTeam ? 'text-white/90' : 'text-white/60'} ${c ? 'text-[11px] leading-[14px]' : 'text-xs'}`}>{entry.name.replace(/^(Los Angeles|Las Vegas|New York|New England|San Francisco|San Diego|Tampa Bay|Green Bay|Kansas City|Oklahoma City|Golden State|New Orleans|Salt Lake City|St\. Louis|Portland|Oklahoma )/, '')}</span>
-                            {entry.record && <span className={`font-mono text-gray-400 shrink-0 ${c ? 'text-[11px]' : 'text-xs'}`}>{entry.record}</span>}
+                            <span className={`flex-1 truncate ${isMyTeam ? 'text-fs-text' : 'text-fs-text/60'} ${c ? 'text-[11px] leading-[14px]' : 'text-xs'}`}>{entry.name.replace(/^(Los Angeles|Las Vegas|New York|New England|San Francisco|San Diego|Tampa Bay|Green Bay|Kansas City|Oklahoma City|Golden State|New Orleans|Salt Lake City|St\. Louis|Portland|Oklahoma )/, '')}</span>
+                            {entry.record && <span className={`font-mono text-fs-muted shrink-0 ${c ? 'text-[11px]' : 'text-xs'}`}>{entry.record}</span>}
                           </Link>
                         )
                       })}

@@ -16,19 +16,18 @@ export default function HomeTabs({ leagues }: { leagues: League[] }) {
 
   return (
     <div>
-      <div className="flex justify-center gap-2 mb-8">
-        {(['leagues', 'stories'] as const).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold tracking-widest uppercase transition ${
-              tab === t ? 'bg-white/90 text-slate-900' : 'bg-white/5 text-gray-400 hover:text-white'
-            }`}
-            style={{ fontFamily: 'var(--font-mono-data), monospace' }}
-          >
-            {t === 'leagues' ? 'Leagues' : 'Biggest Stories'}
-          </button>
-        ))}
+      <div className="flex justify-center mb-10">
+        <div className="inline-flex gap-1 p-1 rounded-full border border-fs-line bg-fs-panel/60">
+          {(['leagues', 'stories'] as const).map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`fs-tab ${tab === t ? 'fs-tab-active' : ''}`}
+            >
+              {t === 'leagues' ? 'Leagues' : 'Biggest Stories'}
+            </button>
+          ))}
+        </div>
       </div>
 
       {tab === 'leagues' ? (
@@ -37,11 +36,10 @@ export default function HomeTabs({ leagues }: { leagues: League[] }) {
             <Link
               key={league.id}
               href={`/${league.id}`}
-              className="league-card group relative rounded-2xl p-8 text-center transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.03] active:scale-[0.98]"
+              className="league-card fs-panel group relative p-8 text-center transition-all duration-300 hover:-translate-y-1.5 hover:scale-[1.03] active:scale-[0.98]"
               style={{
-                backgroundColor: `${league.color}18`,
-                border: `1px solid ${league.color}30`,
-                boxShadow: `0 2px 12px ${league.color}08`,
+                '--tint': league.color,
+                '--tint-border': `${league.color}38`,
                 '--glow-color': `${league.color}60`,
                 transition: 'all 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
               } as React.CSSProperties}
@@ -54,8 +52,8 @@ export default function HomeTabs({ leagues }: { leagues: League[] }) {
                   loading="lazy"
                 />
               </div>
-              <h2 className="text-lg font-medium text-white/90 mb-1">{league.name}</h2>
-              <p className="text-xs text-gray-500 leading-relaxed">{league.fullName}</p>
+              <h2 className="fs-title text-xl text-white/90 mb-1">{league.name}</h2>
+              <p className="fs-meta leading-relaxed">{league.fullName}</p>
             </Link>
           ))}
         </div>
@@ -64,7 +62,7 @@ export default function HomeTabs({ leagues }: { leagues: League[] }) {
       )}
 
       {tab === 'leagues' && (
-        <p className="text-center mt-16 text-xs text-gray-600">
+        <p className="text-center mt-16 fs-meta">
           Select a league to browse teams and dashboards
         </p>
       )}

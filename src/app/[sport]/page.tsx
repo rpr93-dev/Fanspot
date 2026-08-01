@@ -25,13 +25,14 @@ export default async function SportPage({ params }: { params: Promise<{ sport: s
   const sportTeams = teams.filter((team) => team.sport === sportKey).sort((a, b) => a.name.localeCompare(b.name))
 
   return (
-    <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #0a0a0f, #1a1a2e)' }}>
+    <div className="min-h-screen fs-page" style={{ '--glow': `${config.color}22` } as React.CSSProperties}>
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
-        <Link href="/" className="text-sm text-gray-600 hover:text-white transition-colors inline-block mb-8">&larr; All Leagues</Link>
+        <Link href="/" className="fs-meta hover:text-fs-text inline-block mb-8 transition-colors">&larr; All Leagues</Link>
 
         <div className="mb-10">
-          <h1 className="text-4xl font-light tracking-tight text-white mb-2">{config.name}</h1>
-          <p className="text-sm text-gray-500">{sportTeams.length} teams</p>
+          <p className="fs-eyebrow mb-2" style={{ '--tint': config.color } as React.CSSProperties}>League Overview</p>
+          <h1 className="fs-title text-5xl sm:text-6xl mb-3">{config.name}</h1>
+          <p className="fs-meta">{sportTeams.length} teams</p>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">

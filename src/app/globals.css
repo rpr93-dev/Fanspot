@@ -5,6 +5,22 @@
   --animate-fade-in: fade-in 0.45s ease-out both;
   --animate-fade-in-up: fade-in-up 0.5s ease-out both;
   --animate-wigolo-progress: wigolo-progress 2s ease-in-out infinite;
+
+  --color-fs-bg: #0b0f0d;
+  --color-fs-panel: #111712;
+  --color-fs-panel-2: #151c16;
+  --color-fs-line: rgba(242, 245, 241, 0.08);
+  --color-fs-line-strong: rgba(242, 245, 241, 0.16);
+  --color-fs-text: #f2f5f1;
+  --color-fs-muted: #8a9990;
+  --color-fs-muted-2: #5e6c63;
+  --color-fs-turf: #8bc53f;
+  --color-fs-red: #e85d4c;
+  --color-fs-gold: #e8b94c;
+}
+
+body {
+  font-family: var(--font-body), system-ui, -apple-system, sans-serif;
 }
 
 @keyframes fade-in {
@@ -109,4 +125,159 @@
   background-color: color-mix(in srgb, var(--card-color, rgba(255,255,255,0.2)) 35%, transparent) !important;
   border-color: color-mix(in srgb, var(--card-color, rgba(255,255,255,0.3)) 50%, transparent) !important;
   transform: translateY(-1px) !important;
+}
+
+@layer components {
+  /* Site-wide design language, ported from the fantasy Steals Board mockup.
+     Team-tinted surfaces: set --tint (color) and --tint-border (1px border color)
+     on the element itself or any ancestor. */
+
+  .fs-page {
+    min-height: 100vh;
+    background-color: var(--color-fs-bg);
+    background-image: radial-gradient(1200px 600px at 15% -10%, var(--glow, rgba(139, 197, 63, 0.07)), transparent 60%);
+  }
+
+  .fs-panel {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--tint, transparent) 12%, var(--color-fs-panel)), var(--color-fs-panel));
+    border: 1px solid var(--tint-border, var(--color-fs-line));
+    border-radius: 12px;
+  }
+
+  .fs-panel-2 {
+    background: var(--color-fs-panel-2);
+    border: 1px solid var(--color-fs-line);
+    border-radius: 12px;
+  }
+
+  .fs-eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-family: var(--font-mono-data), monospace;
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--color-fs-muted);
+  }
+
+  .fs-eyebrow::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 1px;
+    background: var(--tint, var(--color-fs-turf));
+    flex-shrink: 0;
+  }
+
+  .fs-title {
+    font-family: var(--font-display), sans-serif;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    color: var(--color-fs-text);
+  }
+
+  .fs-meta {
+    font-family: var(--font-mono-data), monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--color-fs-muted-2);
+  }
+
+  .fs-mono {
+    font-family: var(--font-mono-data), monospace;
+  }
+
+  .fs-btn {
+    font-family: var(--font-mono-data), monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--color-fs-line-strong);
+    background: var(--color-fs-panel-2);
+    color: var(--color-fs-muted);
+    transition: all 0.2s ease;
+  }
+
+  .fs-btn:hover {
+    color: var(--color-fs-text);
+    border-color: color-mix(in srgb, var(--tint, var(--color-fs-turf)) 45%, var(--color-fs-line-strong));
+  }
+
+  .fs-chip {
+    font-family: var(--font-mono-data), monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    padding: 4px 11px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--color-fs-muted-2);
+    transition: all 0.15s ease;
+    cursor: pointer;
+  }
+
+  .fs-chip:hover {
+    color: var(--color-fs-text);
+  }
+
+  .fs-chip-active {
+    background: var(--color-fs-panel-2);
+    border-color: var(--color-fs-line-strong);
+    color: var(--color-fs-text);
+  }
+
+  .fs-tab {
+    font-family: var(--font-mono-data), monospace;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    padding: 8px 18px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    color: var(--color-fs-muted);
+    transition: all 0.2s ease;
+    cursor: pointer;
+  }
+
+  .fs-tab:hover {
+    color: var(--color-fs-text);
+  }
+
+  .fs-tab-active {
+    background: var(--color-fs-text);
+    color: var(--color-fs-bg);
+  }
+
+  .fs-skeleton {
+    background: var(--color-fs-panel-2);
+    border-radius: 8px;
+    animation: pulse 1.6s ease-in-out infinite;
+  }
+
+  .fs-input {
+    width: 100%;
+    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: 10px;
+    background: var(--color-fs-panel-2);
+    border: 1px solid var(--color-fs-line-strong);
+    color: var(--color-fs-text);
+    outline: none;
+    transition: border-color 0.2s ease;
+  }
+
+  .fs-input::placeholder {
+    color: var(--color-fs-muted-2);
+  }
+
+  .fs-input:focus {
+    border-color: color-mix(in srgb, var(--tint, var(--color-fs-turf)) 55%, var(--color-fs-line-strong));
+  }
 }

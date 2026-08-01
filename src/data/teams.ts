@@ -144,29 +144,33 @@ export const teams: Team[] = [
 
 export const sportPath: Record<string, string> = { NFL: 'nfl', NBA: 'nba', NHL: 'nhl', MLB: 'mlb' }
 
-export const sportConfig: Record<string, { name: string, abbreviation: string, emoji: string, gradient: string }> = {
+export const sportConfig: Record<string, { name: string, abbreviation: string, emoji: string, gradient: string, color: string }> = {
   NFL: {
     name: 'National Football League',
     abbreviation: 'NFL',
     emoji: '🏈',
-    gradient: 'from-red-600/20 to-blue-600/20'
+    gradient: 'from-red-600/20 to-blue-600/20',
+    color: '#013369',
   },
   NBA: {
     name: 'National Basketball Association',
     abbreviation: 'NBA',
     emoji: '🏀',
-    gradient: 'from-orange-600/20 to-blue-600/20'
+    gradient: 'from-orange-600/20 to-blue-600/20',
+    color: '#C9082A',
   },
   NHL: {
     name: 'National Hockey League',
     abbreviation: 'NHL',
     emoji: '🏒',
-    gradient: 'from-gray-600/20 to-blue-600/20'
+    gradient: 'from-gray-600/20 to-blue-600/20',
+    color: '#003E7E',
   },
   MLB: {
     name: 'Major League Baseball',
     abbreviation: 'MLB',
     emoji: '⚾',
-    gradient: 'from-red-600/20 to-blue-600/20'
-  }
+    gradient: 'from-red-600/20 to-blue-600/20',
+    color: '#002D72',
+  },
 }

@@ -11,15 +11,14 @@ const leagues = [
 
 export default function HomePage() {
   return (
-    <div
-      className={`min-h-screen ${fontVariables}`}
-      style={{ background: 'linear-gradient(135deg, #0a0a0f, #1a1a2e)' }}
-    >
+    <div className={`min-h-screen fs-page ${fontVariables}`}>
       <div className="max-w-5xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
-        <div className="text-center mb-10">
-          <h1 className="text-5xl font-light tracking-tight text-white mb-3">Fanspot</h1>
-          <p className="text-base text-gray-500 tracking-wide">Multi-sport team dashboards</p>
-          <p className="mt-3 text-xs text-gray-600 tracking-wide">v{version}</p>
+        <div className="text-center mb-12">
+          <p className="fs-eyebrow justify-center mb-3">Multi-sport team dashboards</p>
+          <h1 className="fs-title text-6xl sm:text-7xl mb-5">Fanspot</h1>
+          <span className="fs-meta inline-block px-2.5 py-1 rounded-full border border-fs-line-strong">
+            v{version}
+          </span>
         </div>
         <HomeTabs leagues={leagues} />
       </div>
