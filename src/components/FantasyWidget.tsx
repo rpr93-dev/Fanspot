@@ -57,6 +57,14 @@ export default function FantasyWidget({
     async function load() {
       setLoading(true)
       setError(null)
+      if (sport.toUpperCase() !== 'NFL') {
+        if (!cancelled) {
+          setStarters([])
+          setError(`Fantasy outlook for ${teamAbbr} is not available — the pipeline has no ${sport.toUpperCase()} projection data yet.`)
+          setLoading(false)
+        }
+        return
+      }
       try {
         const res = await fetch(
           `/api/fantasy/team-outlook/${sport.toLowerCase()}/${teamAbbr.toLowerCase()}`,

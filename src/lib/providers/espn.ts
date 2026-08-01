@@ -23,8 +23,8 @@ const espnTeamAbbr: Record<string, string> = {
   min_nba: 'MIN', min_nhl: 'MIN', min_mlb: 'MIN', mia_nba: 'MIA', mia_mlb: 'MIA',
   atl_nba: 'ATL', atl_mlb: 'ATL', bos_nhl: 'BOS', bos_mlb: 'BOS', buf_nhl: 'BUF',
   car_nhl: 'CAR', pit_nhl: 'PIT', phi_nhl: 'PHI', sea_nhl: 'SEA', sea_mlb: 'SEA',
-   ari_nhl: 'UTA', ari_mlb: 'ARI', hou_nba: 'HOU', hou_mlb: 'HOU', kc_mlb: 'KC',
-   laa: 'LAA', nyy: 'NYY', nym: 'NYM', chc: 'CHC', cws: 'CHW', sd: 'SD', oak: 'ATH',
+   ari_mlb: 'ARI', hou_nba: 'HOU', hou_mlb: 'HOU', kc_mlb: 'KC',
+   laa: 'LAA', nyy: 'NYY', nym: 'NYM', chc: 'CHC', cws: 'CHW', sd: 'SD',
   nyk: 'NY', gsw: 'GS', lak: 'LA', njd: 'NJ',
 }
 

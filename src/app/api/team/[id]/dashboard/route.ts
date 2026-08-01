@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { getTeamDashboard } from '@/lib/services/teamService'
+import { teams } from '@/data/teams'
 
 export async function GET(
   request: Request,
@@ -11,6 +12,11 @@ export async function GET(
 
   if (!sport) {
     return NextResponse.json({ error: 'Missing sport parameter' }, { status: 400 })
+  }
+
+  const teamExists = teams.some((t) => t.id === id && t.sport === sport.toUpperCase())
+  if (!teamExists) {
+    return NextResponse.json({ error: `Team not found: ${sport}/${id}` }, { status: 404 })
   }
 
   const eventId = searchParams.get('eventId') || undefined

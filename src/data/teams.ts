@@ -77,7 +77,7 @@ export const teams: Team[] = [
 
   // NHL Teams
   { id: 'ana', name: 'Anaheim Ducks', abbreviation: 'ANA', sport: 'NHL', colors: { primary: '#111111', secondary: '#F47A38' }, conference: 'Western', division: 'Pacific' },
-  { id: 'ari_nhl', name: 'Arizona Coyotes', abbreviation: 'ARI', sport: 'NHL', colors: { primary: '#8C2633', secondary: '#E2D6A5' }, conference: 'Western', division: 'Central' },
+  { id: 'uta_nhl', name: 'Utah Mammoth', abbreviation: 'UTA', sport: 'NHL', colors: { primary: '#014B8E', secondary: '#B9C4CC' }, conference: 'Western', division: 'Central' },
   { id: 'bos_nhl', name: 'Boston Bruins', abbreviation: 'BOS', sport: 'NHL', colors: { primary: '#FFB81C', secondary: '#000000' }, conference: 'Eastern', division: 'Atlantic' },
   { id: 'buf_nhl', name: 'Buffalo Sabres', abbreviation: 'BUF', sport: 'NHL', colors: { primary: '#002654', secondary: '#FCB514' }, conference: 'Eastern', division: 'Atlantic' },
   { id: 'cgy', name: 'Calgary Flames', abbreviation: 'CGY', sport: 'NHL', colors: { primary: '#CE1126', secondary: '#F3BC52' }, conference: 'Western', division: 'Pacific' },
@@ -129,7 +129,7 @@ export const teams: Team[] = [
   { id: 'min_mlb', name: 'Minnesota Twins', abbreviation: 'MIN', sport: 'MLB', colors: { primary: '#002B5C', secondary: '#D31145' }, conference: 'AL', division: 'Central' },
   { id: 'nym', name: 'New York Mets', abbreviation: 'NYM', sport: 'MLB', colors: { primary: '#002D72', secondary: '#FF5910' }, conference: 'NL', division: 'East' },
   { id: 'nyy', name: 'New York Yankees', abbreviation: 'NYY', sport: 'MLB', colors: { primary: '#003087', secondary: '#E4002C' }, conference: 'AL', division: 'East' },
-  { id: 'oak', name: 'Oakland Athletics', abbreviation: 'OAK', sport: 'MLB', colors: { primary: '#003831', secondary: '#EFB21E' }, conference: 'AL', division: 'West' },
+  { id: 'oak', name: 'Athletics', abbreviation: 'ATH', sport: 'MLB', colors: { primary: '#003831', secondary: '#EFB21E' }, conference: 'AL', division: 'West' },
   { id: 'phi_mlb', name: 'Philadelphia Phillies', abbreviation: 'PHI', sport: 'MLB', colors: { primary: '#E81828', secondary: '#002D72' }, conference: 'NL', division: 'East' },
   { id: 'pit_mlb', name: 'Pittsburgh Pirates', abbreviation: 'PIT', sport: 'MLB', colors: { primary: '#27251F', secondary: '#FDB827' }, conference: 'NL', division: 'Central' },
   { id: 'sd', name: 'San Diego Padres', abbreviation: 'SD', sport: 'MLB', colors: { primary: '#2F241D', secondary: '#FFC425' }, conference: 'NL', division: 'West' },

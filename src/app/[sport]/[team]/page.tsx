@@ -15,7 +15,7 @@ function useTeamDashboard(sport: string, teamId: string, teamName: string, teamA
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    if (!teamId) { setLoading(false); return }
+    if (!teamId || !teamName) { setLoading(false); return }
     let cancelled = false
     const abbr = getEspnAbbr(teamId, teamAbbreviation)
 
@@ -38,7 +38,7 @@ function useTeamDashboard(sport: string, teamId: string, teamName: string, teamA
 
     load()
     return () => { cancelled = true }
-  }, [teamId, sport])
+  }, [teamId, sport, teamName])
 
   return { dashboard: data, loading }
 }

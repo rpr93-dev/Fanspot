@@ -39,7 +39,7 @@ export default function TeamCard({ team, sport }: { team: Team; sport: string })
           )}
         </div>
         <h2 className="fs-title text-base text-white/90 leading-tight">{team.name}</h2>
-        <p className="fs-meta mt-1.5">{team.conference?.substring(0, 3)} &middot; {team.division}</p>
+        <p className="fs-meta mt-1.5">{team.conference} &middot; {team.division}</p>
       </div>
     </Link>
   )
