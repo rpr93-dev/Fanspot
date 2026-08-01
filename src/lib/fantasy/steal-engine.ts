@@ -1,13 +1,5 @@
-import type { AdpPlatform, AdpSource, DraftType, FantasyPlayerEnriched, FantasySport, ScoringFormat, StealScore } from '@/lib/fantasy-types'
+import type { AdpPlatform, AdpSource, FantasyPlayerEnriched, ScoringFormat } from '@/lib/fantasy-types'
 import { composeNote, resolveInjuryTier, type InjuryTier, type ResolvedInjury } from './injury-gate'
-
-export interface StealConfig {
-  draftType: DraftType
-  scoringFormat: ScoringFormat
-  adpPlatform?: AdpPlatform
-  rosterSize?: number
-  pickNumber?: number
-}
 
 const MAX_ADP = 500
 const PROJECTION_FLOOR = 50
@@ -19,18 +11,6 @@ const POSITION_MULTIPLIERS: Record<string, number> = {
   TE: 1.15,
   K: 0.01,
   'D/ST': 0.01,
-}
-
-// Schedule strength and market momentum used to contribute a hardcoded 50 for every
-// player, which shifted every score by a constant while pretending to be a signal.
-// They are omitted until real data backs them. Remaining weights are renormalized
-// per player over whichever components actually have data.
-const WEIGHTS = {
-  adpDiscount: 0.25,
-  confidence: 0.30,
-  opportunity: 0.15,
-  efficiency: 0.10,
-  offensiveEnvironment: 0.10,
 }
 
 function getPlatformAdp(
@@ -67,10 +47,6 @@ function computeExpectedRankings(
     ranks.set(withProj[i].id, i + 1)
   }
   return ranks
-}
-
-function hasPriorSeasonStats(player: FantasyPlayerEnriched): boolean {
-  return player.seasonActuals != null && (player.seasonActuals.points > 0 || Object.keys(player.seasonActuals.stats ?? {}).length > 0)
 }
 
 function missedRecentSeason(player: FantasyPlayerEnriched): boolean {
@@ -121,38 +97,6 @@ function computeOpportunityValue(player: FantasyPlayerEnriched): number {
   if (pos === 'QB') return (stats['0'] ?? 0) + (stats['23'] ?? 0)
   if (pos === 'RB') return (stats['23'] ?? 0) + (stats['47'] ?? 0)
   if (pos === 'WR' || pos === 'TE') return stats['47'] ?? 0
-  return 0
-}
-
-function computeEfficiencyValue(player: FantasyPlayerEnriched): number {
-  const pos = player.normalizedPosition
-  const stats = player.projection?.stats ?? {}
-  if (pos === 'RB') {
-    const att = stats['23'] ?? 0
-    const yds = stats['24'] ?? 0
-    return att > 0 ? yds / att : 0
-  }
-  if (pos === 'WR' || pos === 'TE') {
-    const tgt = stats['47'] ?? 0
-    const yds = stats['42'] ?? 0
-    return tgt > 0 ? yds / tgt : 0
-  }
-  if (pos === 'QB') {
-    const att = stats['0'] ?? 0
-    const yds = stats['3'] ?? 0
-    return att > 0 ? yds / att : 0
-  }
-  return 0
-}
-
-/** Vegas implied points per game for the player's team, or undefined when no odds are posted. */
-function computeOffensiveEnvironment(player: FantasyPlayerEnriched): number | undefined {
-  return player.vegas?.teamImpliedPoints
-}
-
-function computeInjuryBoost(player: FantasyPlayerEnriched): number {
-  if (player.player.injured) return -0.5
-  if (player.player.injuryStatus === 'ACTIVE') return 0.1
   return 0
 }
 
@@ -324,215 +268,6 @@ function buildConfidenceDriver(p: FantasyPlayerEnriched): string {
   return 'Limited prior-season data'
 }
 
-export function calcAllStealScores(
-  players: FantasyPlayerEnriched[],
-  config: StealConfig,
-  sport: FantasySport,
-): (StealScore & { player: FantasyPlayerEnriched })[] {
-  const expectedRanks = computeExpectedRankings(players)
-
-  const withProj = players
-    .filter((p) => p.projection?.points != null && p.projection.points >= PROJECTION_FLOOR && p.normalizedPosition)
-    .filter(isActivePlayer)
-    // A hashed stand-in ESPN id means the player never matched ESPN, so every
-    // downstream number (ADP, projection, ownership) is unanchored.
-    .filter((p) => p.syntheticEspnId !== true)
-
-  const totalPool = withProj.length
-  const posMaxOpp = new Map<string, number>()
-  const posMaxEff = new Map<string, number>()
-
-  for (const p of withProj) {
-    const pos = getPosKey(p)
-    posMaxOpp.set(pos, Math.max(posMaxOpp.get(pos) ?? 0, computeOpportunityValue(p)))
-    posMaxEff.set(pos, Math.max(posMaxEff.get(pos) ?? 0, computeEfficiencyValue(p)))
-  }
-
-  // Implied team totals cluster in a narrow band (~15-28), so they are scaled against
-  // the league's own spread rather than an absolute ceiling.
-  const impliedTotals = withProj
-    .map(computeOffensiveEnvironment)
-    .filter((v): v is number => v != null)
-  const minImplied = impliedTotals.length > 0 ? Math.min(...impliedTotals) : 0
-  const maxImplied = impliedTotals.length > 0 ? Math.max(...impliedTotals) : 0
-  const impliedRange = maxImplied - minImplied
-
-  const candidates: {
-    player: FantasyPlayerEnriched
-    expectedRank: number
-    platformAdp: number
-    adpValue: number
-    adpDiscount: number
-    confidence: number
-    opportunity: number
-    efficiency: number
-    offensiveEnvironment: number | undefined
-    impliedTeamTotal: number | undefined
-    injuryBoost: number
-    adpSource: AdpSource
-    rawScore: number
-  }[] = []
-
-  for (const p of withProj) {
-    const expectedRank = expectedRanks.get(p.id) ?? totalPool
-    const { adp, source: adpSource } = getPlatformAdp(p, config)
-    if (adp == null || adp === 0 || adp > MAX_ADP) continue
-
-    const adpValue = Math.max(0, adp - expectedRank)
-    if (adpValue <= 0) continue
-
-    const pos = getPosKey(p)
-    const confidence = computeConfidence(p)
-    const adpDiscount = missedRecentSeason(p)
-      ? Math.round(computeAdpDiscount(adp, expectedRank) * 0.5)
-      : computeAdpDiscount(adp, expectedRank)
-    const opp = computeOpportunityValue(p)
-    const eff = computeEfficiencyValue(p)
-    const impliedTotal = computeOffensiveEnvironment(p)
-
-    const oppNorm = (posMaxOpp.get(pos) ?? 1) > 0 ? (opp / (posMaxOpp.get(pos) ?? 1)) * 100 : 0
-    const effNorm = (posMaxEff.get(pos) ?? 1) > 0 ? (eff / (posMaxEff.get(pos) ?? 1)) * 100 : 0
-    const offEnvNorm = impliedTotal != null && impliedRange > 0
-      ? ((impliedTotal - minImplied) / impliedRange) * 100
-      : undefined
-
-    const components: { weight: number; value: number }[] = [
-      { weight: WEIGHTS.adpDiscount, value: adpDiscount },
-      { weight: WEIGHTS.confidence, value: confidence },
-      { weight: WEIGHTS.opportunity, value: oppNorm },
-      { weight: WEIGHTS.efficiency, value: effNorm },
-    ]
-    if (offEnvNorm != null) {
-      components.push({ weight: WEIGHTS.offensiveEnvironment, value: offEnvNorm })
-    }
-
-    const weightSum = components.reduce((s, c) => s + c.weight, 0)
-    const rawScore = components.reduce((s, c) => s + c.weight * c.value, 0) / weightSum
-
-    candidates.push({
-      player: p,
-      expectedRank,
-      platformAdp: adp,
-      adpValue,
-      adpDiscount,
-      confidence,
-      opportunity: opp,
-      efficiency: eff,
-      offensiveEnvironment: offEnvNorm,
-      impliedTeamTotal: impliedTotal,
-      injuryBoost: computeInjuryBoost(p),
-      adpSource,
-      rawScore,
-    })
-  }
-
-  if (candidates.length === 0) return []
-
-  const rawScores = candidates.map((c) => c.rawScore)
-  const mean = rawScores.reduce((s, v) => s + v, 0) / rawScores.length
-  const std = Math.sqrt(rawScores.reduce((s, v) => s + (v - mean) ** 2, 0) / rawScores.length) || 1
-
-  function sigmoid(x: number): number {
-    return 100 / (1 + Math.exp(-1.0 * (x - mean) / std))
-  }
-
-  let results: (StealScore & { player: FantasyPlayerEnriched })[] = candidates
-    .map((c) => {
-      const rawIndex = sigmoid(c.rawScore)
-      const posMult = POSITION_MULTIPLIERS[c.player.normalizedPosition ?? ''] ?? 1
-      const finalIndex = Math.max(0, Math.min(100, Math.round(rawIndex * posMult)))
-      const leagueWinner = computeLeagueWinnerPct(c.player, withProj)
-      return {
-        playerId: c.player.id,
-        playerName: c.player.player.fullName,
-        projectionRank: computeProjRank(c.player.projection?.points ?? 0, withProj),
-        platformAdp: c.platformAdp,
-        stealScore: finalIndex / 100,
-        stealIndex: finalIndex,
-        stealPercentile: 0,
-        draftType: config.draftType,
-        scoringFormat: config.scoringFormat,
-        sport,
-        position: c.player.normalizedPosition ?? '',
-        expectedRank: c.expectedRank,
-        adpValue: c.adpValue,
-        adpDiscount: c.adpDiscount,
-        confidence: c.confidence,
-        opportunity: c.opportunity,
-        efficiency: c.efficiency,
-        offensiveEnvironment: c.offensiveEnvironment,
-        impliedTeamTotal: c.impliedTeamTotal,
-        injuryBoost: c.injuryBoost,
-        projectedPoints: c.player.projection?.points,
-        positionGroupSize: posGroupSize(c.player.normalizedPosition ?? '', withProj),
-        reasoning: buildPlayerSummary(c, leagueWinner),
-        adpPlatform: config.adpPlatform ?? 'espn',
-        adpSource: c.adpSource,
-        player: c.player,
-        leagueWinnerPct: leagueWinner,
-      }
-    })
-
-  results.sort((a, b) => b.stealScore - a.stealScore)
-
-  const total = results.length
-  results.forEach((r, i) => {
-    r.stealPercentile = total > 1 ? ((total - i - 1) / (total - 1)) * 100 : 100
-  })
-
-  return results
-}
-
-function computeProjRank(points: number, all: FantasyPlayerEnriched[]): number {
-  let rank = 1
-  for (const p of all) {
-    if ((p.projection?.points ?? 0) > points) rank++
-  }
-  return rank
-}
-
-function posGroupSize(pos: string, all: FantasyPlayerEnriched[]): number {
-  return all.filter((p) => p.normalizedPosition === pos).length
-}
-
-function buildPlayerSummary(c: {
-  player: FantasyPlayerEnriched
-  expectedRank: number
-  platformAdp: number
-  adpDiscount: number
-  confidence: number
-  opportunity: number
-  efficiency: number
-}, leagueWinnerPct: number): string {
-  const pts = c.player.seasonActuals?.points
-  const proj = c.player.projection?.points
-  const age = c.player.sleeper?.age
-  const exp = c.player.sleeper?.years_exp
-  const injured = c.player.player.injured
-  const injuryStatus = c.player.player.injuryStatus
-  const owned = c.player.player.ownership?.percentOwned ?? 0
-
-  const parts: string[] = []
-
-  if (pts && pts > 0) parts.push(`${pts.toFixed(0)} FP (prior yr)`)
-  if (proj && proj > 0) parts.push(`Proj ${proj.toFixed(0)} FP`)
-
-  parts.push(`ADP ${c.platformAdp} / R${c.expectedRank ?? '?'} (D${c.adpDiscount})`)
-  parts.push(`Conf ${c.confidence} | LW ${leagueWinnerPct}%`)
-
-  if (age || exp) {
-    const bio: string[] = []
-    if (age) bio.push(`${age}yo`)
-    if (exp) bio.push(`Y${exp}`)
-    parts.push(bio.join(' '))
-  }
-
-  if (injured) parts.push(`Inj: ${injuryStatus || 'INJURED'}`)
-  if (owned > 5) parts.push(`${owned.toFixed(0)}% owned`)
-
-  return parts.join(' | ').substring(0, 300)
-}
-
 function computeLeagueWinnerPct(player: FantasyPlayerEnriched, allPlayers: FantasyPlayerEnriched[]): number {
   const pos = player.normalizedPosition ?? ''
   const pts = player.projection?.points ?? 0
@@ -649,57 +384,6 @@ export function formatProjStats(player: FantasyPlayerEnriched): string {
     return s
   }
   return `${Math.round(pts)} FP`
-}
-
-export function buildTop10Detail(
-  s: StealScore & { player: FantasyPlayerEnriched }
-): string {
-  const p = s.player
-  const projPts = p.projection?.points
-  const adpGap = Math.max(0, (s.platformAdp ?? 0) - (s.expectedRank ?? 0))
-  const age = p.sleeper?.age
-  const exp = p.sleeper?.years_exp
-  const injured = p.player.injured
-
-  const lines: string[] = []
-
-  const statLine = formatProjStats(p)
-  if (statLine) {
-    lines.push(`Proj ${projPts?.toFixed(0) ?? '?'} FP | ${statLine}`)
-  } else if (projPts && projPts > 0) {
-    lines.push(`Proj ${projPts.toFixed(0)} FP`)
-  }
-
-  const posPlural = s.position === 'RB' ? 'RB' : s.position === 'WR' ? 'WR' : s.position === 'TE' ? 'TE' : s.position === 'QB' ? 'QB' : 'POS'
-  const roundDesc = s.platformAdp > 150 ? 'late-round flier' : s.platformAdp > 80 ? 'mid-round pick' : 'early-round pick'
-  const gapDesc = adpGap > 0 ? `${adpGap}-spot discount` : 'at ADP'
-  const label = s.adpPlatform === 'sleeper' ? 'Sleeper' : 'ESPN'
-  lines.push(`${label} ADP ${s.platformAdp} / R${s.expectedRank ?? '?'} (${gapDesc})`)
-  if (s.positionGroupSize && s.positionGroupSize > 1) {
-    lines.push(`${posPlural}: proj #${s.expectedRank ?? '?'} of ${s.positionGroupSize}, ${roundDesc}`)
-  }
-
-  const ownedPct = Math.round(s.player.player.ownership?.percentOwned ?? 0)
-  const bioParts: string[] = [`Conf ${s.confidence}/100`, `LW ${s.leagueWinnerPct ?? 0}%`]
-  if (age && exp) bioParts.push(`${age}yo Y${exp}`)
-  else if (age) bioParts.push(`${age}yo`)
-  else if (exp) bioParts.push(`Y${exp}`)
-  if (ownedPct > 0) bioParts.push(`${ownedPct}% owned`)
-  lines.push(bioParts.join(' | '))
-
-  const missed = missedRecentSeason(p)
-  const outlook = buildOutlook({
-    confidence: s.confidence ?? 0,
-    adpDiscount: s.adpDiscount ?? 0,
-    leagueWinnerPct: s.leagueWinnerPct ?? 0,
-    injured,
-    age,
-    missedSeason: missed,
-    missedSeasonYear: p.seasonActualsYear,
-  })
-  lines.push(outlook)
-
-  return lines.join('\n')
 }
 
 export function getPositionMultipliers(): Record<string, number> {

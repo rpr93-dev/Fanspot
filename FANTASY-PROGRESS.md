@@ -103,14 +103,14 @@
 
 ### 3.1 Core fetcher
 
-- [ ] Create `src/lib/providers/fantasy.ts`
-- [ ] `espnFantasyCache` Map
-- [ ] `fetchEspnFantasySport(sport, season)`
-- [ ] `normalizeEspnPlayer(raw, sport)`
+- [x] Replaced by the unified pipeline — the old `src/lib/providers/fantasy.ts` was deleted
+- [x] Build cache with 2-min TTL (`UNIFIED_DB_TTL_MS` in `src/lib/fantasy/unified-db.ts`)
+- [x] ESPN kona_player_info fetch + `X-Fantasy-Filter` pagination in `src/lib/fantasy/enrichers/espn-enricher.ts`
+- [x] Player normalization + joins in `src/lib/fantasy/unified-db.ts`
 
 ### 3.2 Enrichment join
 
-- [ ] `enrichWithSleeper(player, sport)`
+- [x] Sleeper join handled by `src/lib/fantasy/sleeper-master.ts` + `src/lib/fantasy/player-matching-engine.ts`
 
 ### 3.3 API route
 
@@ -153,9 +153,8 @@
 
 ### 5.1 Unified cache service
 
-- [ ] Create `src/lib/cache/fantasy-cache.ts`
-- [ ] `getStats()`, `invalidateSport(sport)`
-- [ ] Refactor Phase 2+3 to use service
+- [x] Service is `src/lib/cache/cacheService.ts` (`fetchOrCache`, `swr`, `invalidate`; no per-sport stats — the old `src/lib/cache/fantasy-cache.ts` was deleted)
+- [x] Sleeper dump + unified DB build go through it
 
 ### 5.2 Cache warming
 

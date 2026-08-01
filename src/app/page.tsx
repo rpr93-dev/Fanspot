@@ -1,5 +1,6 @@
 ﻿import HomeTabs from '@/components/HomeTabs'
 import { fontVariables } from './fonts'
+import { version } from '../../package.json'
 
 const leagues = [
   { id: 'nfl', name: 'NFL', fullName: 'National Football League', color: '#013369' },
@@ -18,6 +19,7 @@ export default function HomePage() {
         <div className="text-center mb-10">
           <h1 className="text-5xl font-light tracking-tight text-white mb-3">Fanspot</h1>
           <p className="text-base text-gray-500 tracking-wide">Multi-sport team dashboards</p>
+          <p className="mt-3 text-xs text-gray-600 tracking-wide">v{version}</p>
         </div>
         <HomeTabs leagues={leagues} />
       </div>
