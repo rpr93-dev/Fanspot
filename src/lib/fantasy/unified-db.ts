@@ -295,7 +295,7 @@ export function unifiedToFantasyPlayerEnriched(
       jersey: '',
     },
     normalizedPosition: unified.normalizedPosition ?? unified.canonical.position,
-    proTeamAbbr: unified.proTeamAbbr ?? unified.canonical.team,
+    proTeamAbbr: unified.proTeamAbbr || unified.canonical.team,
     pprRank,
     adpSource,
     syntheticEspnId,

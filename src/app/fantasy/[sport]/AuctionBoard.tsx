@@ -42,6 +42,12 @@ interface AuctionResponse {
 const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'D/ST']
 const PAGE_SIZE = 40
 
+const SCORING_OPTIONS = [
+  { value: 'ppr', label: 'Scoring: PPR' },
+  { value: 'half-ppr', label: 'Scoring: Half-PPR' },
+  { value: 'standard', label: 'Scoring: Standard' },
+]
+
 function money(n: number | null): string {
   return n == null ? '—' : `$${n.toFixed(0)}`
 }
@@ -117,6 +123,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
   const [budget, setBudget] = useState(200)
   const [teams, setTeams] = useState(12)
   const [rosterSize, setRosterSize] = useState(16)
+  const [scoring, setScoring] = useState('ppr')
   const [pos, setPos] = useState('ALL')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -140,6 +147,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
         budget: String(budget),
         teams: String(teams),
         rosterSize: String(rosterSize),
+        scoring,
         pos,
         limit: String(PAGE_SIZE),
         offset: String(offset),
@@ -148,7 +156,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
       if (debouncedSearch) q.set('search', debouncedSearch)
       return `/api/fantasy/auction/${sport}?${q.toString()}`
     },
-    [sport, budget, teams, rosterSize, pos, teamFilter, debouncedSearch],
+    [sport, budget, teams, rosterSize, scoring, pos, teamFilter, debouncedSearch],
   )
 
   useEffect(() => {
@@ -235,6 +243,11 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
             onChange={(e) => setSearch(e.target.value)}
           />
           <div className={styles.spacer} />
+          <select className={styles.select} value={scoring} onChange={(e) => setScoring(e.target.value)}>
+            {SCORING_OPTIONS.map((s) => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
           <label className={styles.numField}>
             Budget
             <input

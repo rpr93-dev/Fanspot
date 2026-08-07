@@ -2,7 +2,7 @@ import { XMLParser } from 'fast-xml-parser'
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' })
 
-interface NewsArticle {
+export interface NewsArticle {
   title: string
   snippet: string
   source: string
@@ -44,7 +44,8 @@ function analyzeSentiment(title: string, snippet: string): number {
   return score
 }
 
-async function fetchGoogleNews(query: string): Promise<NewsArticle[]> {
+/** Shared Google News RSS lookup, reused by the scheme-change narrative builder. */
+export async function fetchNewsArticles(query: string): Promise<NewsArticle[]> {
   try {
     const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
@@ -68,7 +69,7 @@ export async function getPlayerMomentum(
   sport: string,
 ): Promise<PlayerMomentum> {
   async function tryQuery(query: string): Promise<PlayerMomentum> {
-    const results = await fetchGoogleNews(query)
+    const results = await fetchNewsArticles(query)
     const seen = new Set<string>()
     const articles = results.filter((a) => {
       if (seen.has(a.title)) return false

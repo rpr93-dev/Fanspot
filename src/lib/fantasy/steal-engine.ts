@@ -1,8 +1,44 @@
 import type { AdpPlatform, AdpSource, FantasyPlayerEnriched, ScoringFormat } from '@/lib/fantasy-types'
 import { composeNote, resolveInjuryTier, type InjuryTier, type ResolvedInjury } from './injury-gate'
+import { environmentScoreFor, envSignalFor, isSkillPosition, type EnvironmentSignal, type TeamEnvironment } from './environment'
+import type { SchemeSignal } from './scheme-news'
 
 const MAX_ADP = 500
 const PROJECTION_FLOOR = 50
+
+/**
+ * ESPN's kona projection (`appliedTotal`) is Standard scoring — receptions are worth
+ * zero. The only scoring-rule difference between NFL Standard / Half-PPR / PPR on ESPN
+ * is the receptions-per-point value (0 / 0.5 / 1.0); all yardage, TD and INT values are
+ * identical across the three presets. So a per-format projection is the Standard
+ * baseline plus the reception bonus, exactly — no re-fetch, no double-count.
+ */
+function receptionRate(fmt: ScoringFormat | undefined): number {
+  if (fmt === 'ppr') return 1
+  if (fmt === 'half-ppr') return 0.5
+  return 0
+}
+
+export function formatPointsFromStats(
+  points: number,
+  stats: Record<string, number> | undefined,
+  fmt: ScoringFormat | undefined,
+): number {
+  const rec = stats?.['53'] ?? 0
+  return points + rec * receptionRate(fmt)
+}
+
+/** Per-format projection for a player, applied wherever the board ranks by points. */
+export function formatPoints(player: FantasyPlayerEnriched, fmt: ScoringFormat | undefined): number {
+  return formatPointsFromStats(player.projection?.points ?? 0, player.projection?.stats, fmt)
+}
+
+/** Per-format prior-season points, used by the confidence score so a PPR-stud's track
+ *  record earns more credit under PPR than Standard. Absent actuals -> 0. */
+function formatPriorPoints(player: FantasyPlayerEnriched, fmt: ScoringFormat | undefined): number {
+  if (!player.seasonActuals) return 0
+  return formatPointsFromStats(player.seasonActuals.points, player.seasonActuals.stats, fmt)
+}
 
 const POSITION_MULTIPLIERS: Record<string, number> = {
   QB: 0.85,
@@ -37,11 +73,12 @@ function isActivePlayer(p: FantasyPlayerEnriched): boolean {
 
 function computeExpectedRankings(
   players: FantasyPlayerEnriched[],
+  fmt: ScoringFormat | undefined = 'ppr',
 ): Map<number, number> {
   const withProj = players
-    .filter((p) => p.projection?.points != null && p.projection.points >= PROJECTION_FLOOR && p.normalizedPosition)
+    .filter((p) => p.projection?.points != null && formatPoints(p, fmt) >= PROJECTION_FLOOR && p.normalizedPosition)
     .filter(isActivePlayer)
-  withProj.sort((a, b) => (b.projection?.points ?? 0) - (a.projection?.points ?? 0))
+  withProj.sort((a, b) => formatPoints(b, fmt) - formatPoints(a, fmt))
   const ranks = new Map<number, number>()
   for (let i = 0; i < withProj.length; i++) {
     ranks.set(withProj[i].id, i + 1)
@@ -61,8 +98,10 @@ function missedRecentSeason(player: FantasyPlayerEnriched): boolean {
 
 function computeConfidence(
   player: FantasyPlayerEnriched,
+  envScore = 50,
+  fmt: ScoringFormat | undefined = 'ppr',
 ): number {
-  const priorPts = player.seasonActuals?.points ?? 0
+  const priorPts = formatPriorPoints(player, fmt)
   const hasPrior = priorPts > 0
   const exp = player.sleeper?.years_exp ?? 0
 
@@ -82,7 +121,9 @@ function computeConfidence(
   const owned = player.player.ownership?.percentOwned ?? 0
   const marketScore = owned > 80 ? 95 : owned > 50 ? 70 : owned > 20 ? 50 : owned > 5 ? 30 : 10
 
-  const score = modelAgreement * 0.40 + roleCertainty * 0.30 + injuryScore * 0.20 + marketScore * 0.10
+  // Env carries 20%: scheme/offense quality decides how much the projection can be
+  // believed, so it belongs beside the other trust signals, not inside the projection.
+  const score = modelAgreement * 0.30 + roleCertainty * 0.25 + injuryScore * 0.15 + marketScore * 0.10 + envScore * 0.20
   return Math.max(0, Math.min(100, Math.round(score)))
 }
 
@@ -143,6 +184,17 @@ export interface StealRow {
   rankByGap?: number
   /** The prior-production fact behind `conf`, used when composing the note. */
   confidenceDriver: string
+  /** 0-100 team offense environment (Vegas implied points, per-position weighted). */
+  envScore: number
+  envSignal: EnvironmentSignal
+  /** 1-based rank of the team's Vegas implied points, for the note/badge. */
+  envRank?: number
+  /** How many teams had odds, so `envRank` reads in context. */
+  envTeamCount?: number
+  /** Applied scheme narrative shift (positive = favorable), absent when none. */
+  schemeDelta?: number
+  /** First headline behind the scheme signal, for the tooltip. */
+  schemeHeadline?: string
 }
 
 export interface BoardConfig {
@@ -168,6 +220,8 @@ const ROSTER_RELEVANCE_PCT = 1
 export function buildStealBoard(
   players: FantasyPlayerEnriched[],
   config: BoardConfig,
+  environment?: Map<string, TeamEnvironment>,
+  schemeSignals?: Map<string, SchemeSignal>,
 ): StealRow[] {
   const boardPositions = new Set<string>(BOARD_POSITIONS)
 
@@ -177,7 +231,7 @@ export function buildStealBoard(
     if (p.syntheticEspnId === true) continue
     const pos = getPosKey(p)
     if (!boardPositions.has(pos)) continue
-    if ((p.projection?.points ?? 0) <= 0) continue
+    if (formatPoints(p, config.scoringFormat) <= 0) continue
     if ((p.player.ownership?.percentOwned ?? 0) < ROSTER_RELEVANCE_PCT) continue
 
     const { adp, source } = getPlatformAdp(p, config)
@@ -201,7 +255,7 @@ export function buildStealBoard(
 
     const posRanks = new Map<number, number>()
     ;[...group]
-      .sort((a, b) => (b.player.projection?.points ?? 0) - (a.player.projection?.points ?? 0))
+      .sort((a, b) => formatPoints(b.player, config.scoringFormat) - formatPoints(a.player, config.scoringFormat))
       .forEach((e, i) => posRanks.set(e.player.id, i + 1))
 
     const adpRanks = new Map<number, number>()
@@ -212,6 +266,13 @@ export function buildStealBoard(
     for (const e of group) {
       const posRank = posRanks.get(e.player.id) as number
       const adpRank = adpRanks.get(e.player.id) as number
+      const pos = getPosKey(e.player)
+      const team = e.player.proTeamAbbr || 'FA'
+      const env = environment?.get(team.toUpperCase())
+      const vegasEnv = environmentScoreFor(env, pos)
+      const scheme = isSkillPosition(pos) ? schemeSignals?.get(team.toUpperCase()) : undefined
+      const schemeDelta = scheme?.hasSignal ? scheme.delta : 0
+      const envScore = Math.max(0, Math.min(100, vegasEnv + schemeDelta))
       const sleeper = e.player.sleeper as Record<string, unknown> | undefined
       const injury = resolveInjuryTier({
         espnStatus: e.player.player.injuryStatus,
@@ -230,13 +291,19 @@ export function buildStealBoard(
         adpRank,
         gap: adpRank - posRank,
         adpSource: e.adpSource,
-        conf: computeConfidence(e.player),
+        conf: computeConfidence(e.player, envScore, config.scoringFormat),
         ownedPct: Math.round(e.player.player.ownership?.percentOwned ?? 0),
         note: '',
         posPoolSize,
-        projectedPoints: Math.round(e.player.projection?.points ?? 0),
+        projectedPoints: Math.round(formatPoints(e.player, config.scoringFormat)),
         overallAdp: e.adp,
         impliedTeamTotal: e.player.vegas?.teamImpliedPoints,
+        envScore,
+        envSignal: envSignalFor(envScore),
+        envRank: env?.envRank,
+        envTeamCount: env?.teamCount,
+        schemeDelta: schemeDelta !== 0 ? schemeDelta : undefined,
+        schemeHeadline: scheme?.hasSignal ? scheme.headlines[0] : undefined,
         injuryTier: injury.tier,
         injuryStatus: e.player.player.injuryStatus || 'UNKNOWN',
         injuryDetail: injury.detail || undefined,
@@ -252,7 +319,19 @@ export function buildStealBoard(
     }
   }
 
+  rows.sort((a, b) => b.gap - a.gap || b.projectedPoints - a.projectedPoints)
+
   return rows
+}
+
+/**
+ * The gap re-ranked by environment: a player on a top-tier offense is worth a little
+ * more than the raw market-vs-projection math says, one on a bottom-tier offense a
+ * little less. Range is ±5, so it re-orders borderline rows without letting scheme
+ * dwarf the actual value math. Used only by the `scheme` sort — `gap` stays pure.
+ */
+export function envAdjustedGap(row: StealRow): number {
+  return row.gap + Math.round((row.envScore - 50) / 10)
 }
 
 /** The prior-production fact behind the confidence score, phrased for the note. */
@@ -324,12 +403,12 @@ export function buildPlayerOutlook(
   allPlayers: FantasyPlayerEnriched[],
   config: BoardConfig = { scoringFormat: 'ppr' },
 ): string {
-  const expectedRanks = computeExpectedRankings(allPlayers)
+  const expectedRanks = computeExpectedRankings(allPlayers, config.scoringFormat)
   const expectedRank = expectedRanks.get(player.id) ?? allPlayers.length
   const { adp } = getPlatformAdp(player, config)
 
   return buildOutlook({
-    confidence: computeConfidence(player),
+    confidence: computeConfidence(player, 50, config.scoringFormat),
     adpDiscount: computeAdpDiscount(adp ?? MAX_ADP, expectedRank),
     leagueWinnerPct: computeLeagueWinnerPct(player, allPlayers),
     injured: player.player.injured,

@@ -43,6 +43,11 @@ export async function GET(
       budget: url.searchParams.get('budget') ?? undefined,
       teams: url.searchParams.get('teams') ?? undefined,
       rosterSize: url.searchParams.get('rosterSize') ?? undefined,
+      scoringFormat: (url.searchParams.get('scoring') ?? url.searchParams.get('scoringFormat') ?? undefined) as
+        | 'standard'
+        | 'ppr'
+        | 'half-ppr'
+        | undefined,
     })
 
     const posParam = (url.searchParams.get('pos') ?? 'ALL').toUpperCase()

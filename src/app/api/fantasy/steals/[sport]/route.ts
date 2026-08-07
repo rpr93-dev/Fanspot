@@ -1,16 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { SUPPORTED_SPORTS, SCORING_FORMATS, isFantasySportLive } from '@/lib/providers/fantasy-constants'
 import { buildUnifiedDatabase, unifiedToFantasyPlayerEnriched } from '@/lib/fantasy/unified-db'
-import { buildStealBoard, BOARD_POSITIONS, type StealRow } from '@/lib/fantasy/steal-engine'
+import { buildStealBoard, BOARD_POSITIONS, envAdjustedGap, type StealRow } from '@/lib/fantasy/steal-engine'
 import { applyInjuryGate, DEFAULT_CROSS_CHECK_TOP } from '@/lib/fantasy/injury-gate'
 import { getPlayerMomentum } from '@/lib/fantasy/news-momentum'
+import { buildTeamEnvironment } from '@/lib/fantasy/environment'
+import { getSchemeSignals } from '@/lib/fantasy/scheme-news'
 import type { FantasySport, ScoringFormat, FantasyPlayerEnriched, AdpPlatform } from '@/lib/fantasy-types'
 
-const SORTS = ['gap', 'adp', 'proj'] as const
+const SORTS = ['gap', 'adp', 'proj', 'scheme'] as const
 type SortKey = (typeof SORTS)[number]
 
 const METHODOLOGY =
-  'Gap = ADP rank − projected rank, computed within position over every player the platform treats as draftable at that position. Positive = falling past its projected value; negative = going ahead of projection. Conf is a 0-100 projection-confidence score from prior-season production, experience, role certainty, injury status and roster share. An availability gate runs after ranking: severe or long-term injuries and suspensions are moved to the Availability Watch rather than penalised inside the score, and Doubtful players are held out of the top 10. Headlines are only cross-checked for the top 30 rows of the first page; every other row reports only what the providers designate.'
+  'Gap = ADP rank − projected rank, computed within position over every player the platform treats as draftable at that position. Positive = falling past its projected value; negative = going ahead of projection. Conf is a 0-100 projection-confidence score from prior-season production, experience, role certainty, injury status, roster share and the team offensive environment. Environment is a 0-100 team offense score from Vegas implied points (per-position weighted: WR/TE full, RB 85%, QB full, K/D-ST neutral) plus an offseason scheme narrative shift of up to ±20 when coaching/coverage news points one way (a new coordinator, a pass-heavy system, or the opposite). Environment feeds confidence and the scheme sort — it never touches the raw gap. An availability gate runs after ranking: severe or long-term injuries and suspensions are moved to the Availability Watch rather than penalised inside the score, and Doubtful players are held out of the top 10. Headlines are only cross-checked for the top 30 rows of the first page; every other row reports only what the providers designate.'
 
 export async function GET(
   req: NextRequest,
@@ -68,7 +70,10 @@ export async function GET(
       (u) => unifiedToFantasyPlayerEnriched(u) as unknown as FantasyPlayerEnriched,
     )
 
-    const allRows = buildStealBoard(normalized, { scoringFormat, adpPlatform })
+    const environment = buildTeamEnvironment(normalized)
+    const schemeSignals = lowerSport === 'nfl' ? await getSchemeSignals() : undefined
+
+    const allRows = buildStealBoard(normalized, { scoringFormat, adpPlatform }, environment, schemeSignals)
 
     const counts: Record<string, number> = { ALL: allRows.length }
     for (const pos of BOARD_POSITIONS) {
@@ -129,5 +134,6 @@ export async function GET(
 function sortRows(rows: StealRow[], sort: SortKey): void {
   if (sort === 'gap') rows.sort((a, b) => b.gap - a.gap || a.posRank - b.posRank)
   else if (sort === 'adp') rows.sort((a, b) => a.adpRank - b.adpRank)
-  else rows.sort((a, b) => a.posRank - b.posRank)
+  else if (sort === 'proj') rows.sort((a, b) => a.posRank - b.posRank)
+  else rows.sort((a, b) => envAdjustedGap(b) - envAdjustedGap(a) || b.gap - a.gap)
 }

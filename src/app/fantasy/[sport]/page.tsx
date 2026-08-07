@@ -27,6 +27,12 @@ interface StealRow {
   projectedPoints: number
   overallAdp: number
   impliedTeamTotal?: number
+  envScore?: number
+  envSignal?: 'top-offense' | 'average' | 'poor-offense'
+  envRank?: number
+  envTeamCount?: number
+  schemeDelta?: number
+  schemeHeadline?: string
   injuryTier: InjuryTier
   injuryStatus: string
   injuryDetail?: string
@@ -149,6 +155,22 @@ function Row({
                 title="No platform draft rank for this player — this is search popularity, not ADP. Treat the gap as unreliable."
               >
                 POPULARITY, NOT ADP
+              </span>
+            )}
+            {row.envSignal === 'top-offense' && (
+              <span
+                className={styles.envTag}
+                title={`Team ranks #${row.envRank ?? '?'}/${row.envTeamCount ?? '?'} in Vegas implied points per game — a strong environment makes the gap more trustworthy.${row.schemeHeadline ? ` Scheme: ${row.schemeHeadline}` : ''}`}
+              >
+                TOP OFFENSE
+              </span>
+            )}
+            {row.envSignal === 'poor-offense' && (
+              <span
+                className={`${styles.envTag} ${styles.bad}`}
+                title={`Team ranks #${row.envRank ?? '?'}/${row.envTeamCount ?? '?'} in Vegas implied points per game — a weak environment caps how much the gap can be trusted.${row.schemeHeadline ? ` Scheme: ${row.schemeHeadline}` : ''}`}
+              >
+                BOTTOM OFFENSE
               </span>
             )}
           </div>
@@ -446,6 +468,7 @@ export default function FantasySportPage() {
             <div className={styles.spacer} />
             <select className={styles.select} value={sort} onChange={(e) => setSort(e.target.value)}>
               <option value="gap">Sort: Value gap</option>
+              <option value="scheme">Sort: Scheme value</option>
               <option value="adp">Sort: ADP rank</option>
               <option value="proj">Sort: Proj. rank</option>
             </select>

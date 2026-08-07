@@ -15,6 +15,7 @@ function player(
     name?: string
     pos?: string
     proj?: number
+    rec?: number
     auction?: number
     team?: string
     injuryStatus?: string
@@ -25,7 +26,7 @@ function player(
     id,
     proTeamAbbr: over.team ?? 'NE',
     normalizedPosition: over.pos ?? 'RB',
-    projection: { points: over.proj ?? 100 },
+    projection: { points: over.proj ?? 100, stats: { '53': over.rec ?? 0 } },
     player: {
       id,
       fullName: over.name ?? `Player ${id}`,
@@ -64,6 +65,7 @@ describe('clampSettings', () => {
       budget: 300,
       teams: 10,
       rosterSize: 15,
+      scoringFormat: 'ppr',
     })
   })
 
@@ -72,12 +74,20 @@ describe('clampSettings', () => {
       budget: 10,
       teams: 2,
       rosterSize: 1,
+      scoringFormat: 'ppr',
     })
     expect(clampSettings({ budget: 99999, teams: 500, rosterSize: 999 })).toEqual({
       budget: 1000,
       teams: 20,
       rosterSize: 40,
+      scoringFormat: 'ppr',
     })
+  })
+
+  it('passes through a valid scoring format and rejects an invalid one', () => {
+    expect(clampSettings({ scoringFormat: 'standard' }).scoringFormat).toBe('standard')
+    expect(clampSettings({ scoringFormat: 'half-ppr' }).scoringFormat).toBe('half-ppr')
+    expect(clampSettings({ scoringFormat: 'bogus' }).scoringFormat).toBe('ppr')
   })
 })
 
@@ -102,7 +112,12 @@ describe('computeReplacementLevels', () => {
 
 describe('buildAuctionBoard', () => {
   it('spends the whole budget: total value tracks the money in the room', () => {
-    const { rows, assumptions } = buildAuctionBoard(fullLeague(), { budget: 200, teams: 12, rosterSize: 16 })
+    const { rows, assumptions } = buildAuctionBoard(fullLeague(), {
+      budget: 200,
+      teams: 12,
+      rosterSize: 16,
+      scoringFormat: 'ppr',
+    })
     const spent = rows.reduce((s, r) => s + r.value, 0)
     // Only priced players above replacement carry value; the rest are $1 fillers.
     expect(spent).toBeLessThanOrEqual(assumptions.totalMoney)
@@ -110,8 +125,8 @@ describe('buildAuctionBoard', () => {
   })
 
   it('scales values with the budget the user enters', () => {
-    const cheap = buildAuctionBoard(fullLeague(), { budget: 100, teams: 12, rosterSize: 16 })
-    const rich = buildAuctionBoard(fullLeague(), { budget: 400, teams: 12, rosterSize: 16 })
+    const cheap = buildAuctionBoard(fullLeague(), { budget: 100, teams: 12, rosterSize: 16, scoringFormat: 'ppr' })
+    const rich = buildAuctionBoard(fullLeague(), { budget: 400, teams: 12, rosterSize: 16, scoringFormat: 'ppr' })
     const topCheap = cheap.rows[0]
     const topRich = rich.rows.find((r) => r.name === topCheap.name)!
     expect(topRich.value).toBeGreaterThan(topCheap.value * 2)
@@ -140,7 +155,12 @@ describe('buildAuctionBoard', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       ;(p.player as any).ownership = { auctionValueAverage: i < 100 ? 10 : 0 }
     })
-    const { rows, assumptions } = buildAuctionBoard(players, { budget: 200, teams: 12, rosterSize: 16 })
+    const { rows, assumptions } = buildAuctionBoard(players, {
+      budget: 200,
+      teams: 12,
+      rosterSize: 16,
+      scoringFormat: 'ppr',
+    })
     expect(assumptions.marketUnavailable).toBe(false)
     const priced = rows.filter((r) => r.market != null)
     expect(priced.length).toBeGreaterThan(0)
@@ -202,5 +222,23 @@ describe('buildAuctionBoard', () => {
     for (const pos of ['QB', 'RB', 'WR', 'TE', 'K', 'D/ST']) {
       expect(seen.has(pos)).toBe(true)
     }
+  })
+
+  it('values a catch-heavy player higher in PPR than Standard', () => {
+    const league = [
+      player({ name: 'CatchKing', pos: 'WR', proj: 130, rec: 40, team: 'NYG' }),
+      player({ name: 'YardGrinder', pos: 'WR', proj: 150, rec: 0, team: 'TEN' }),
+      player({ name: 'BenchWarmer', pos: 'WR', proj: 90, rec: 0, team: 'CHI' }),
+    ]
+    const std = buildAuctionBoard(league, { ...DEFAULT_AUCTION_SETTINGS, scoringFormat: 'standard' })
+    const ppr = buildAuctionBoard(league, { ...DEFAULT_AUCTION_SETTINGS, scoringFormat: 'ppr' })
+    const stdCatch = std.rows.find((r) => r.name === 'CatchKing')!
+    const pprCatch = ppr.rows.find((r) => r.name === 'CatchKing')!
+    const stdYard = std.rows.find((r) => r.name === 'YardGrinder')!
+    const pprYard = ppr.rows.find((r) => r.name === 'YardGrinder')!
+    // Standard: YardGrinder projects above CatchKing. PPR adds 40 points to CatchKing.
+    expect(stdYard.projectedPoints).toBeGreaterThan(stdCatch.projectedPoints)
+    expect(pprCatch.projectedPoints).toBeGreaterThan(pprYard.projectedPoints)
+    expect(pprCatch.value).toBeGreaterThan(stdCatch.value)
   })
 })

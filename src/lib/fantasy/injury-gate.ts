@@ -274,6 +274,22 @@ function healthClause(row: StealRow): string {
   return 'listed active, though recent headlines were not checked'
 }
 
+/** What the team's offensive environment does to the trustworthiness of the gap. */
+function environmentClause(row: StealRow): string {
+  const rank = row.envRank != null && row.envTeamCount != null ? ` (#${row.envRank}/${row.envTeamCount} in Vegas implied points)` : ''
+  const parts: string[] = []
+  if (row.envScore >= 75) parts.push(`top-tier Vegas offense${rank} — environment strengthens the gap`)
+  else if (row.envScore <= 25) parts.push(`bottom-tier Vegas offense${rank} — weak environment caps the gap's upside`)
+  if (row.schemeDelta != null) {
+    parts.push(
+      row.schemeDelta > 0
+        ? 'offseason scheme news is positive — a new system may not be priced in yet'
+        : 'offseason scheme news is negative — the market may know something projections do not',
+    )
+  }
+  return parts.length > 0 ? ` — ${parts.join('; ')}.` : ''
+}
+
 /** Composed from whatever actually drove the outcome: availability > ADP gap > confidence. */
 export function composeNote(row: StealRow): string {
   const detail = row.injuryDetail ? ` (${row.injuryDetail})` : ''
@@ -288,15 +304,15 @@ export function composeNote(row: StealRow): string {
   }
   if (row.injuryTier === 'doubtful') {
     const rank = row.rankByGap ? `Ranked #${row.rankByGap} by ADP-gap, but ` : ''
-    return `${rank}tagged Doubtful${detail} — treat as a hold, not a steal.`
+    return `${rank}tagged Doubtful${detail} — treat as a hold, not a steal.${environmentClause(row)}`
   }
   if (row.injuryTier === 'out') {
     const rank = row.rankByGap ? `Ranked #${row.rankByGap} by ADP-gap, but ` : ''
-    return `${rank}listed Out${detail} — a week-specific absence, not a season-long write-off.`
+    return `${rank}listed Out${detail} — a week-specific absence, not a season-long write-off.${environmentClause(row)}`
   }
   if (row.injuryTier === 'questionable' || row.injuryTier === 'probable') {
     const tag = row.injuryTier === 'questionable' ? 'Questionable' : 'Probable'
-    return `${gapClause(row)}, though tagged ${tag}${detail}.`
+    return `${gapClause(row)}, though tagged ${tag}${detail}.${environmentClause(row)}`
   }
-  return `${gapClause(row)} — ${healthClause(row)}. ${row.confidenceDriver}.`
+  return `${gapClause(row)} — ${healthClause(row)}. ${row.confidenceDriver}.${environmentClause(row)}`
 }

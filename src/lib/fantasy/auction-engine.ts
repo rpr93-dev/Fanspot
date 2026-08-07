@@ -1,6 +1,7 @@
-import type { FantasyPlayerEnriched } from '@/lib/fantasy-types'
-import { getPositionMultipliers } from './steal-engine'
+import type { FantasyPlayerEnriched, ScoringFormat } from '@/lib/fantasy-types'
+import { getPositionMultipliers, formatPoints } from './steal-engine'
 import { resolveInjuryTier, type InjuryTier } from './injury-gate'
+import { SCORING_FORMATS } from '@/lib/providers/fantasy-constants'
 
 /**
  * Auction valuation.
@@ -31,6 +32,8 @@ export interface AuctionSettings {
   teams: number
   /** Roster spots per team, including bench. Drives how many players hold value. */
   rosterSize: number
+  /** Scoring format; reception bonuses are added to ESPN's Standard projection. */
+  scoringFormat: ScoringFormat
 }
 
 export interface StarterSlots {
@@ -48,6 +51,7 @@ export const DEFAULT_AUCTION_SETTINGS: AuctionSettings = {
   budget: 200,
   teams: 12,
   rosterSize: 16,
+  scoringFormat: 'ppr',
 }
 
 export const DEFAULT_STARTERS: StarterSlots = {
@@ -120,10 +124,12 @@ export type AuctionSettingsInput = {
 
 export function clampSettings(s: AuctionSettingsInput): AuctionSettings {
   const d = DEFAULT_AUCTION_SETTINGS
+  const fmt = typeof s.scoringFormat === 'string' ? s.scoringFormat : d.scoringFormat
   return {
     budget: clampInt(s.budget, 10, 1000, d.budget),
     teams: clampInt(s.teams, 2, 20, d.teams),
     rosterSize: clampInt(s.rosterSize, 1, 40, d.rosterSize),
+    scoringFormat: (SCORING_FORMATS as readonly string[]).includes(fmt) ? (fmt as ScoringFormat) : d.scoringFormat,
   }
 }
 
@@ -137,8 +143,8 @@ function posOf(p: FantasyPlayerEnriched): string {
   return p.normalizedPosition ?? ''
 }
 
-function projOf(p: FantasyPlayerEnriched): number {
-  return p.projection?.points ?? 0
+function projOf(p: FantasyPlayerEnriched, fmt: ScoringFormat): number {
+  return formatPoints(p, fmt)
 }
 
 /**
@@ -154,8 +160,8 @@ export function computeReplacementLevels(
 
   for (const pos of AUCTION_POSITIONS) {
     const pool = players
-      .filter((p) => posOf(p) === pos && projOf(p) > 0)
-      .map(projOf)
+      .filter((p) => posOf(p) === pos && projOf(p, settings.scoringFormat) > 0)
+      .map((p) => projOf(p, settings.scoringFormat))
       .sort((a, b) => b - a)
 
     if (pool.length === 0) {
@@ -197,12 +203,14 @@ export function buildAuctionBoard(
   const replacementLevels = computeReplacementLevels(players, settings, starters)
 
   const eligible = players.filter(
-    (p) => AUCTION_POSITIONS.includes(posOf(p) as (typeof AUCTION_POSITIONS)[number]) && projOf(p) > 0,
+    (p) =>
+      AUCTION_POSITIONS.includes(posOf(p) as (typeof AUCTION_POSITIONS)[number]) &&
+      projOf(p, settings.scoringFormat) > 0,
   )
 
   const withVorp = eligible
     .map((p) => {
-      const raw = projOf(p) - (replacementLevels[posOf(p)] ?? 0)
+      const raw = projOf(p, settings.scoringFormat) - (replacementLevels[posOf(p)] ?? 0)
       // Kickers and defenses swing as widely as skill players in raw points, but that
       // spread is far less predictable, so pricing it at face value would bid a defense
       // up to WR money. The board already carries a per-position reliability weight;
@@ -239,8 +247,8 @@ export function buildAuctionBoard(
       playerId: p.id,
       name: p.player.fullName,
       pos: posOf(p),
-      team: p.proTeamAbbr ?? '',
-      projectedPoints: Math.round(projOf(p)),
+      team: p.proTeamAbbr || 'FA',
+      projectedPoints: Math.round(projOf(p, settings.scoringFormat)),
       vorp: Math.round(vorp * 10) / 10,
       value,
       market,

@@ -48,7 +48,7 @@
   border: 1px solid var(--line-strong);
   color: var(--text);
   font-family: var(--font-mono-data), monospace;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.04em;
   padding: 10px 22px;
@@ -66,14 +66,14 @@
 
 .countLine {
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-2);
   margin: 2px 2px 14px;
 }
 
 .eyebrow {
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--accent);
@@ -128,7 +128,7 @@
 }
 .postabs button {
   font-family: var(--font-mono-data), monospace;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.03em;
   background: transparent;
@@ -175,7 +175,7 @@
 
 .scaleNote {
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-2);
   display: flex;
   align-items: center;
@@ -247,7 +247,7 @@
 }
 .detailStat .lab {
   font-family: var(--font-mono-data), monospace;
-  font-size: 9.5px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted-2);
@@ -275,7 +275,7 @@
 
 .newsHead {
   font-family: var(--font-mono-data), monospace;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--accent);
@@ -299,14 +299,14 @@
 }
 .newsMeta {
   font-family: var(--font-mono-data), monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted-2);
   margin-top: 3px;
   display: block;
 }
 .detailNote {
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-2);
 }
 
@@ -336,7 +336,7 @@
 }
 .tag {
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--muted);
   letter-spacing: 0.03em;
@@ -347,24 +347,24 @@
 
 .popTag {
   font-family: var(--font-mono-data), monospace;
-  font-size: 9.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   color: var(--gold);
   border: 1px solid rgba(232, 185, 76, 0.3);
   background: rgba(232, 185, 76, 0.1);
   border-radius: 4px;
-  padding: 1px 5px;
+  padding: 2px 6px;
   cursor: default;
 }
 
 .injTag {
   font-family: var(--font-mono-data), monospace;
-  font-size: 9.5px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   border-radius: 4px;
-  padding: 1px 5px;
+  padding: 2px 6px;
   cursor: default;
   color: var(--red);
   border: 1px solid rgba(232, 93, 76, 0.35);
@@ -374,6 +374,24 @@
   color: var(--gold);
   border-color: rgba(232, 185, 76, 0.3);
   background: rgba(232, 185, 76, 0.1);
+}
+
+.envTag {
+  font-family: var(--font-mono-data), monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+  padding: 2px 6px;
+  cursor: default;
+  color: var(--turf);
+  border: 1px solid rgba(66, 176, 130, 0.35);
+  background: rgba(66, 176, 130, 0.1);
+}
+.envTag.bad {
+  color: var(--red);
+  border-color: rgba(232, 93, 76, 0.35);
+  background: rgba(232, 93, 76, 0.12);
 }
 
 .watchHead {
@@ -402,10 +420,10 @@
 }
 .targetTag {
   font-family: var(--font-mono-data), monospace;
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.08em;
-  padding: 2px 5px;
+  padding: 2px 6px;
   border-radius: 3px;
   color: var(--bg);
   background: var(--accent);
@@ -415,7 +433,7 @@
   align-items: center;
   gap: 8px;
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--accent);
@@ -440,7 +458,7 @@
 }
 .meta {
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted);
   display: flex;
   align-items: center;
@@ -461,7 +479,7 @@
   border: 1px solid var(--line-strong);
   color: var(--text);
   font-family: var(--font-body), sans-serif;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 500;
   padding: 6px 9px;
   border-radius: 6px;
@@ -510,9 +528,9 @@
 }
 .field .lbl {
   position: absolute;
-  top: -14px;
+  top: -16px;
   font-family: var(--font-mono-data), monospace;
-  font-size: 9.5px;
+  font-size: 11px;
   color: var(--muted-2);
   transform: translateX(-50%);
   white-space: nowrap;
@@ -538,7 +556,7 @@
 }
 .gap .lab {
   font-family: var(--font-mono-data), monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--muted-2);
   letter-spacing: 0.05em;
   text-transform: uppercase;
@@ -572,7 +590,7 @@
   margin-top: 8px;
   color: var(--accent);
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -581,7 +599,7 @@
   max-width: 1040px;
   margin: 26px auto 0;
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   color: var(--muted-2);
   display: flex;
   justify-content: space-between;
@@ -617,7 +635,7 @@
   border: none;
   color: var(--accent);
   font-family: var(--font-mono-data), monospace;
-  font-size: 12px;
+  font-size: 13px;
   cursor: pointer;
   text-decoration: underline;
 }
@@ -637,7 +655,7 @@
 }
 .soonTag {
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--muted-2);
@@ -657,7 +675,7 @@
 }
 .modeTabs button {
   font-family: var(--font-mono-data), monospace;
-  font-size: 11px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted);
@@ -680,7 +698,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono-data), monospace;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--muted-2);
@@ -702,7 +720,7 @@
 }
 
 .assumptionLine {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-2);
   line-height: 1.5;
   margin: 8px 0 0;
@@ -723,7 +741,7 @@
 }
 .auctionHead {
   font-family: var(--font-mono-data), monospace;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--muted-2);
@@ -774,7 +792,7 @@
 .auctionName em {
   font-style: normal;
   font-family: var(--font-mono-data), monospace;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted-2);
@@ -810,7 +828,7 @@
 }
 
 .methodology {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--muted-2);
   line-height: 1.6;
   margin: 24px 0 0;
@@ -861,7 +879,7 @@
     grid-column: 1 / -1;
     /* The rank labels hang 14px above the track. In the desktop column nothing sits
        above them; stacked on mobile they land on the note text without this. */
-    margin-top: 14px;
+    margin-top: 16px;
   }
   .gap {
     grid-column: 1 / -1;
