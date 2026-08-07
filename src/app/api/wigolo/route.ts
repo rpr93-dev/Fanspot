@@ -34,6 +34,16 @@ function getSourceName(item: any): string {
   return 'Web'
 }
 
+function cleanTitle(rawTitle: string | undefined, source: string): string {
+  if (!rawTitle) return ''
+  let title = rawTitle.replace(/^[^:]+:\s*/, '').trim()
+  if (source && source !== 'Web') {
+    const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    title = title.replace(new RegExp(`\\s*[-–—]\\s*${escaped}\\.?$`), '')
+  }
+  return title.replace(/\s+/g, ' ').trim()
+}
+
 async function fetchGoogleNews(query: string): Promise<WigoloArticle[]> {
   try {
     const url = `https://news.google.com/rss/search?q=${encodeURIComponent(query)}&hl=en-US&gl=US&ceid=US:en`
@@ -42,12 +52,17 @@ async function fetchGoogleNews(query: string): Promise<WigoloArticle[]> {
     const xml = await res.text()
     const data = parser.parse(xml)
     const items = data?.rss?.channel?.item ?? []
-    return (Array.isArray(items) ? items : []).slice(0, 8).map((item: any) => ({
-      title: item.title?.replace(/^[^:]+:\s*/, '') ?? '',
-      url: extractArticleUrl(item),
-      snippet: extractSnippet(item),
-      source: getSourceName(item),
-    }))
+    return (Array.isArray(items) ? items : []).slice(0, 8).map((item: any) => {
+      const source = getSourceName(item)
+      const title = cleanTitle(item.title, source)
+      const snippet = extractSnippet(item)
+      return {
+        title,
+        url: extractArticleUrl(item),
+        snippet: snippet === title ? '' : snippet,
+        source,
+      }
+    })
   } catch {
     return []
   }

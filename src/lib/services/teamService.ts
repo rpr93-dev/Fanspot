@@ -44,16 +44,10 @@ export async function getTeamDashboard(
   const abbr = getEspnAbbr(team.id, team.abbreviation)
   const origin = options?.origin
 
-  const schedule = await getSchedule(sport, team.id, team.abbreviation, origin)
-
+  // Fire the schedule and all independent fetches concurrently. Only odds depends
+  // on the schedule's upcoming game, so it is started after the schedule resolves.
+  const schedulePromise = getSchedule(sport, team.id, team.abbreviation, origin)
   const standingsPromise = getStandings(sport, abbr, origin)
-  let oddsPromise: Promise<any> = Promise.resolve(null)
-
-  if (schedule.upcomingEventId && schedule.upcomingDate) {
-    oddsPromise = getOdds(sport, abbr, schedule.upcomingEventId, schedule.upcomingDate, origin)
-  } else {
-    oddsPromise = getOdds(sport, abbr, undefined, undefined, origin)
-  }
 
   let newsPromise: Promise<any[]> = Promise.resolve([])
   if (options?.includeNews !== false) {
@@ -68,6 +62,14 @@ export async function getTeamDashboard(
   let boxScorePromise: Promise<any> = Promise.resolve(null)
   if (options?.includeBoxScore && options.eventId) {
     boxScorePromise = getBoxScore(sport, options.eventId, origin)
+  }
+
+  const schedule = await schedulePromise
+  let oddsPromise: Promise<any> = Promise.resolve(null)
+  if (schedule.upcomingEventId && schedule.upcomingDate) {
+    oddsPromise = getOdds(sport, abbr, schedule.upcomingEventId, schedule.upcomingDate, origin)
+  } else {
+    oddsPromise = getOdds(sport, abbr, undefined, undefined, origin)
   }
 
   const [standings, odds, news, roster, boxScore] = await Promise.all([

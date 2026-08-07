@@ -273,6 +273,12 @@ export async function GET(request: Request) {
     const oppProb = isHome ? normalized.away : normalized.home
     const ourRawProb = isHome ? normalized.homeRaw : normalized.awayRaw
 
+    // Favorite/underdog must be decided by vig-free probability, not by the sign of
+    // the moneyline. Two-sided books can show both sides negative (or both positive on
+    // a pick'em), so "ML < 0 means favorite" only holds in a perfectly balanced market.
+    // Vig-free prob > opponent's prob is the true definition; ~50/50 is a pick'em.
+    const isEven = Math.abs(ourProb - oppProb) < 0.5
+
     log(`Result: ${ourComp.team.abbreviation} ${ourML > 0 ? '+' : ''}${ourML} → ${ourProb}% (vig-free), provider=${provider}`)
     log(`Opponent: ${oppComp.team.abbreviation} ${oppML > 0 ? '+' : ''}${oppML} → ${oppProb}%`)
 
@@ -284,14 +290,14 @@ export async function GET(request: Request) {
           moneyline: ourML,
           rawProb: ourRawProb,
           prob: ourProb,
-          isFavorite: ourML < 0,
+          isFavorite: !isEven && ourProb > oppProb,
         },
         opponent: {
           name: oppComp.team.displayName,
           abbr: oppComp.team.abbreviation,
           moneyline: oppML,
           prob: oppProb,
-          isFavorite: oppML < 0,
+          isFavorite: !isEven && oppProb > ourProb,
         },
         sportsbook: provider,
         lastUpdated: sbEvent.date,

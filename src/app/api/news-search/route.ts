@@ -88,11 +88,16 @@ function extractArticleUrl(item: any): string {
   return item.link ?? '#'
 }
 
-function extractSnippet(item: any): string {
+function extractSnippet(item: any, source: string): string {
   const desc = item.description ?? ''
   const cleaned = desc.replace(/<[^>]+>/g, '').trim()
   const entities = cleaned.replace(/&amp;/g, '&').replace(/&nbsp;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-  return entities.replace(/\s+/g, ' ').trim()
+  let snippet = entities.replace(/\s+/g, ' ').trim()
+  if (source && source !== 'News') {
+    const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    snippet = snippet.replace(new RegExp(`\\s*[-–—]?\\s*${escaped}\\.?\\s*$`), '')
+  }
+  return snippet.trim()
 }
 
 function getSourceName(item: any): string {
@@ -100,6 +105,16 @@ function getSourceName(item: any): string {
   if (item.source?.['#text']) return item.source['#text'].trim()
   if (item['dc:creator']) return item['dc:creator'].trim()
   return 'News'
+}
+
+function cleanTitle(rawTitle: string | undefined, source: string): string {
+  if (!rawTitle) return ''
+  let title = rawTitle.replace(/^[^:]+:\s*/, '').trim()
+  if (source && source !== 'News') {
+    const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    title = title.replace(new RegExp(`\\s*[-–—]\\s*${escaped}\\.?$`), '')
+  }
+  return title.replace(/\s+/g, ' ').trim()
 }
 
 async function fetchGoogleNews(query: string): Promise<NewsItem[]> {
@@ -110,15 +125,20 @@ async function fetchGoogleNews(query: string): Promise<NewsItem[]> {
     const xml = await res.text()
     const data = parser.parse(xml)
     const items = data?.rss?.channel?.item ?? []
-    return (Array.isArray(items) ? items : []).map((item: any) => ({
-      title: item.title?.replace(/^[^:]+:\s*/, '') ?? '',
-      source: getSourceName(item),
+    return (Array.isArray(items) ? items : []).map((item: any) => {
+      const source = getSourceName(item)
+      const title = cleanTitle(item.title, source)
+      const snippet = extractSnippet(item, source)
+      return {
+      title,
+      source,
       sourceUrl: extractSourceUrl(item) ?? '',
       date: item.pubDate ?? '',
-      snippet: extractSnippet(item),
+      snippet: snippet === title ? '' : snippet,
       url: extractArticleUrl(item),
       score: 0,
-    }))
+      }
+    })
   } catch {
     return []
   }
