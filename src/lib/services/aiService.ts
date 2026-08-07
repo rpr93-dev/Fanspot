@@ -1,9 +1,12 @@
 import { TTL } from '@/lib/cache/ttl'
-import { fetchOrCache, setCached, getCached, invalidate } from '@/lib/cache/cacheService'
+import { setCached, getCached, isFresh } from '@/lib/cache/cacheService'
 
 // Set OLLAMA_BASE_URL in .env.local to move this off the checked-in tailnet address.
 const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || 'http://100.112.124.101:11434'
-const MODEL = 'llama3.1:70b-instruct-q4_K_M'
+// Smaller model than llama3.1:70b-instruct-q4_K_M for faster load + generation.
+// Qwen3.5 emits a reasoning preamble (data.thinking) before its response (data.response);
+// num_predict must be large enough to cover thinking + final answer together.
+const MODEL = process.env.OLLAMA_ANALYST_MODEL || 'qwen3.5:9b'
 
 const STYLE_PROMPTS: Record<string, string> = {
   Normal: '',
@@ -204,26 +207,34 @@ export async function generateAIAnalysis(
   style: string,
   customQuestion?: string,
 ): Promise<string> {
-  const cacheKey = `ai:${pageType}:${focusAreas.sort().join(',')}:${style}:${customQuestion || 'none'}`
+  // Include team + sport so analyses for different teams never collide in the cache —
+  // otherwise one team's write-up would be served to another.
+  const cacheKey = `ai:${context.sport}:${context.teamAbbr}:${pageType}:${[...focusAreas].sort().join(',')}:${style}:${customQuestion || 'none'}`
 
   const cached = getCached<string>(cacheKey)
-  if (cached) return cached.data
+  if (cached && isFresh(cached.ts, TTL.AI_RESPONSE)) return cached.data
 
   const systemPrompt = BASE_PROMPTS[pageType] ?? BASE_PROMPTS.team
   const userMessage = buildPrompt(pageType, focusAreas, context, customQuestion, style)
-  const fullPrompt = `${systemPrompt}\n\n${userMessage}`
 
-  const res = await fetch(`${OLLAMA_BASE}/api/generate`, {
+  const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     signal: AbortSignal.timeout(120000),
     body: JSON.stringify({
       model: MODEL,
-      prompt: fullPrompt,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage },
+      ],
       stream: false,
       options: {
         temperature: getTemperature(style),
+        // Qwen emits a long reasoning preamble (message.thinking) before its final
+        // answer (message.content). num_predict + num_ctx must cover BOTH or content
+        // comes back empty (the model otherwise hits its context cap mid-reasoning).
         num_predict: 8192,
+        num_ctx: 16384,
       },
     }),
   })
@@ -233,7 +244,9 @@ export async function generateAIAnalysis(
   }
 
   const data = await res.json()
-  let content = (data.response || data.thinking || data.reasoning || '')
+  // Qwen3.5 puts the reasoning trace in message.thinking and the final answer in
+  // message.content. NEVER surface the thinking trace as an analysis — only content.
+  let content = (data.message?.content || data.response || '')
 
   const analysisIdx = content.indexOf('[ANALYSIS]')
   if (analysisIdx !== -1) {

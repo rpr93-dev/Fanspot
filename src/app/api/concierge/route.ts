@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { buildConciergeContext } from '@/lib/concierge'
 import { generateAIAnalysis } from '@/lib/services/aiService'
-import { getCached, setCached } from '@/lib/cache/cacheService'
+import { getCached, setCached, isFresh } from '@/lib/cache/cacheService'
 import { TTL } from '@/lib/cache/ttl'
 
 export async function POST(request: Request) {
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
     const cacheKey = `concierge:${sport}:${teamId}:${pageType}:${resolvedFocus.sort().join(',')}:${resolvedStyle}:${customQuestion || 'none'}`
 
     const cached = getCached<string>(cacheKey)
-    if (cached) {
+    if (cached && isFresh(cached.ts, TTL.AI_RESPONSE)) {
       return NextResponse.json({ content: cached.data, fromCache: true }, {
         headers: { 'Cache-Control': 'public, s-maxage=300' },
       })
