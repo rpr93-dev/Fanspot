@@ -104,7 +104,7 @@ export default function BiggestStories() {
           >
             <div className="flex items-start gap-3">
               <span
-                className="text-[10px] font-bold tracking-widest px-1.5 py-0.5 rounded shrink-0 mt-0.5 fs-mono text-fs-muted border border-fs-line"
+                className="text-xs font-bold tracking-widest px-1.5 py-0.5 rounded shrink-0 mt-0.5 fs-mono text-fs-muted border border-fs-line"
               >
                 {s.league.toUpperCase()}
               </span>
@@ -119,7 +119,7 @@ export default function BiggestStories() {
                   <p className="text-xs text-fs-muted mt-1 line-clamp-2 leading-relaxed">{s.snippet}</p>
                 )}
                 <div
-                  className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-[10px] text-fs-muted-2 uppercase tracking-wider fs-mono"
+                  className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-fs-muted-2 uppercase tracking-wider fs-mono"
                 >
                   <span>{s.source}</span>
                   {relativeTime(s.publishedAt) && <span>{relativeTime(s.publishedAt)}</span>}

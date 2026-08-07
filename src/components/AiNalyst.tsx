@@ -183,7 +183,7 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
                       <button
                         key={style}
                         onClick={() => setSelectedStyle(style)}
-                        className="text-[11px] px-2.5 py-1 rounded-full transition-all duration-150"
+                        className="text-xs px-2.5 py-1 rounded-full transition-all duration-150"
                         style={{
                           backgroundColor: isActive ? `${teamColor}30` : `${teamColor}08`,
                           border: `1px solid ${isActive ? teamColor : `${teamColor}20`}`,
@@ -202,7 +202,7 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
                   <p className="fs-meta">Focus areas</p>
                   <button
                     onClick={toggleAll}
-                    className="text-[11px] px-2 py-0.5 rounded-full transition-colors"
+                    className="text-xs px-2 py-0.5 rounded-full transition-colors"
                     style={{
                       backgroundColor: `${teamColor}12`,
                       border: `1px solid ${teamColor}25`,

@@ -131,7 +131,7 @@ export default function FantasyWidget({
                   </span>
                   {s.player && INJURY_LABEL[s.player.injuryTier] && (
                     <span
-                      className="text-[9px] font-bold px-1 py-px rounded shrink-0 text-fs-red bg-fs-red/15"
+                      className="text-xs font-bold px-1.5 py-0.5 rounded shrink-0 text-fs-red bg-fs-red/15"
                       title={s.player.injuryDetail}
                     >
                       {INJURY_LABEL[s.player.injuryTier]}
@@ -146,11 +146,11 @@ export default function FantasyWidget({
               </div>
 
               {s.unsettled ? (
-                <p className="text-[11px] text-fs-gold/90 mt-1 leading-snug">{s.reason}</p>
+                <p className="text-xs text-fs-gold/90 mt-1 leading-snug">{s.reason}</p>
               ) : s.player ? (
-                <p className="text-[11px] text-fs-muted mt-1 leading-snug line-clamp-2">{s.player.outlook}</p>
+                <p className="text-xs text-fs-muted mt-1 leading-snug line-clamp-2">{s.player.outlook}</p>
               ) : (
-                <p className="text-[11px] text-fs-muted-2 mt-1 leading-snug">{s.reason}</p>
+                <p className="text-xs text-fs-muted-2 mt-1 leading-snug">{s.reason}</p>
               )}
             </Link>
           ))}

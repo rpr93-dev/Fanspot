@@ -412,12 +412,12 @@ export default function TeamDashboard() {
                   {data.upcoming.isLive ? (
                     <div className="mt-1">
                       <div className="flex items-center gap-2 mb-2 flex-wrap">
-                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wider bg-fs-red/15 text-fs-red">
+                        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-bold tracking-wider bg-fs-red/15 text-fs-red">
                           <span className="w-1.5 h-1.5 rounded-full bg-fs-red animate-pulse" />
                           LIVE
                         </span>
                         <span className="text-xs sm:text-sm text-fs-muted">{data.upcoming.statusDetail ?? 'Starting soon'}</span>
-                        <span className="text-[10px] text-fs-muted-2 ml-auto animate-pulse hidden sm:inline">auto-refreshing</span>
+                        <span className="text-xs text-fs-muted-2 ml-auto animate-pulse hidden sm:inline">auto-refreshing</span>
                       </div>
                       {data.upcoming.awayScore != null && data.upcoming.homeScore != null ? (
                         <div className="flex items-center gap-5 mt-1">
@@ -449,7 +449,9 @@ export default function TeamDashboard() {
                           <span className="text-fs-text font-medium">{data.oddsInfo.our.abbr}</span>
                           {data.oddsInfo.our.isFavorite
                             ? <span className="text-fs-turf ml-1">(Favorite)</span>
-                            : <span className="text-fs-red ml-1">(Underdog)</span>
+                            : data.oddsInfo.opponent.isFavorite
+                              ? <span className="text-fs-red ml-1">(Underdog)</span>
+                              : <span className="text-fs-muted-2 ml-1">(Even)</span>
                           }
                         </span>
                         <span className="font-mono text-fs-text">{data.oddsInfo.our.moneyline > 0 ? '+' : ''}{data.oddsInfo.our.moneyline}</span>
@@ -459,7 +461,9 @@ export default function TeamDashboard() {
                           <span className="text-fs-text font-medium">{data.oddsInfo.opponent.abbr}</span>
                           {data.oddsInfo.opponent.isFavorite
                             ? <span className="text-fs-turf ml-1">(Favorite)</span>
-                            : <span className="text-fs-red ml-1">(Underdog)</span>
+                            : data.oddsInfo.our.isFavorite
+                              ? <span className="text-fs-red ml-1">(Underdog)</span>
+                              : <span className="text-fs-muted-2 ml-1">(Even)</span>
                           }
                         </span>
                         <span className="font-mono text-fs-text">{data.oddsInfo.opponent.moneyline > 0 ? '+' : ''}{data.oddsInfo.opponent.moneyline}</span>
@@ -530,7 +534,7 @@ export default function TeamDashboard() {
                     {data.lastFive.map((game, i) => (
                       <div key={i} className="hover-card rounded-lg p-2 flex flex-col items-center text-center cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0d`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : `${team.colors.primary}18`}`, '--card-color': team.colors.primary } as React.CSSProperties}
                         onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}>
-                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-medium mb-0.5 ${
+                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-medium mb-0.5 ${
                           game.result === 'W' ? 'text-fs-turf' : 'text-fs-red'
                         }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(139,197,63,0.15)' : 'rgba(232,93,76,0.15)' }}>
                           {game.result}
@@ -538,10 +542,10 @@ export default function TeamDashboard() {
                         {game.opponentLogo && (
                           <img src={game.opponentLogo} alt="" className="w-5 h-5 object-contain mb-0.5" />
                         )}
-                        <span className="text-[11px] text-fs-text/80 truncate max-w-full">{game.opponent}</span>
-                        <span className="text-[11px] text-fs-muted">{game.score}</span>
-                        {game.isPreseason && <span className="text-[9px] text-fs-gold/80">Pre</span>}
-                        {!game.isPreseason && game.seasonTypeName && <span className="text-[9px] text-fs-gold/80">{game.seasonTypeName === 'Preseason' ? 'Pre' : game.seasonTypeName}</span>}
+                        <span className="text-xs text-fs-text/80 truncate max-w-full">{game.opponent}</span>
+                        <span className="text-xs text-fs-muted">{game.score}</span>
+                        {game.isPreseason && <span className="text-[11px] text-fs-gold/80">Pre</span>}
+                        {!game.isPreseason && game.seasonTypeName && <span className="text-[11px] text-fs-gold/80">{game.seasonTypeName === 'Preseason' ? 'Pre' : game.seasonTypeName}</span>}
                       </div>
                     ))}
                   </div>
@@ -593,9 +597,9 @@ export default function TeamDashboard() {
                         </span>
                         <span className="text-xs mt-0.5 text-fs-muted">{game.score}</span>
                         <div className="flex items-center gap-1 mt-0.5">
-                          <span className="text-[10px] text-fs-muted-2">{game.date}</span>
-                          {game.isPreseason && <span className="text-[10px] text-fs-gold/80">Pre</span>}
-                          {!game.isPreseason && game.seasonTypeName && <span className="text-[10px] text-fs-gold/80">{game.seasonTypeName === 'Preseason' ? 'Pre' : game.seasonTypeName}</span>}
+                          <span className="text-xs text-fs-muted-2">{game.date}</span>
+                          {game.isPreseason && <span className="text-[11px] text-fs-gold/80">Pre</span>}
+                          {!game.isPreseason && game.seasonTypeName && <span className="text-[11px] text-fs-gold/80">{game.seasonTypeName === 'Preseason' ? 'Pre' : game.seasonTypeName}</span>}
                         </div>
                       </div>
                     ))}
@@ -635,7 +639,9 @@ export default function TeamDashboard() {
                       <a key={i} href={item.url} target="_blank" rel="noopener noreferrer"
                          className="hover-bright block rounded-lg p-3.5" style={{ backgroundColor: `${team.colors.primary}0c`, border: `1px solid ${team.colors.primary}10`, '--card-color': team.colors.primary } as React.CSSProperties}>
                         <h3 className="text-sm font-medium text-fs-text/85 leading-snug mb-1.5 line-clamp-2">{item.title}</h3>
-                        <p className="text-xs mb-2 line-clamp-2 text-fs-muted">{item.snippet}</p>
+                        {item.snippet ? (
+                          <p className="text-xs mb-2 line-clamp-2 text-fs-muted">{item.snippet}</p>
+                        ) : null}
                         <div className="flex items-center gap-2 text-xs text-fs-muted-2 fs-mono">
                           <span>{item.source}</span>
                           <span className="text-fs-muted-2/70">&middot;</span>
@@ -781,7 +787,7 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
         <h3 className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Box Score</h3>
         <div className="flex items-center gap-2">
           {isLive && (
-            <span className="inline-flex items-center gap-1.5 text-[10px] text-fs-red font-medium mr-1">
+            <span className="inline-flex items-center gap-1.5 text-xs text-fs-red font-medium mr-1">
               <span className="relative flex w-2 h-2">
                 <span className="absolute w-full h-full rounded-full bg-fs-red animate-ping opacity-75" />
                 <span className="relative w-2 h-2 rounded-full bg-fs-red" />
@@ -814,11 +820,11 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-fs-muted-2">
-                    <th className="text-left pr-3 pb-1 font-medium tracking-wider text-[10px]" />
+                    <th className="text-left pr-3 pb-1 font-medium tracking-wider text-xs" />
                     {Array.from({ length: maxPeriods }, (_, i) => (
-                      <th key={i} className="text-center px-1.5 pb-1 font-medium text-[10px] tracking-wider">{getPeriodLabels(sport)[i]}</th>
+                      <th key={i} className="text-center px-1.5 pb-1 font-medium text-xs tracking-wider">{getPeriodLabels(sport)[i]}</th>
                     ))}
-                    <th className="text-center pl-2 pb-1 font-medium text-fs-text/60 text-[10px] tracking-wider">T</th>
+                    <th className="text-center pl-2 pb-1 font-medium text-fs-text/60 text-xs tracking-wider">T</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -849,9 +855,9 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-fs-muted-2">
-                        <th className="text-left pr-3 pb-1 font-medium tracking-wider uppercase text-[10px]" />
-                        <th className="text-right px-2 pb-1 font-medium tracking-wider uppercase text-[10px]" style={{ color: teamColor }}>{ourTeam?.abbreviation ?? 'Home'}</th>
-                        <th className="text-right pl-2 pb-1 font-medium tracking-wider uppercase text-[10px] text-fs-muted">{oppTeam?.abbreviation ?? 'Away'}</th>
+                        <th className="text-left pr-3 pb-1 font-medium tracking-wider uppercase text-xs" />
+                        <th className="text-right px-2 pb-1 font-medium tracking-wider uppercase text-xs" style={{ color: teamColor }}>{ourTeam?.abbreviation ?? 'Home'}</th>
+                        <th className="text-right pl-2 pb-1 font-medium tracking-wider uppercase text-xs text-fs-muted">{oppTeam?.abbreviation ?? 'Away'}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -885,7 +891,7 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
                         </p>
                         {team.categories.map((cat: any, ci: number) => (
                           <div key={ci} className="mb-3">
-                            <h5 className="text-[10px] font-medium text-fs-muted mb-1 uppercase tracking-wider">{cat.label}</h5>
+                            <h5 className="text-xs font-medium text-fs-muted mb-1 uppercase tracking-wider">{cat.label}</h5>
                             <div className="overflow-x-auto">
                               <table className="w-full text-xs">
                                 <thead>
@@ -893,7 +899,7 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
                                     <th className="text-left pr-2 pb-1 font-medium">#</th>
                                     <th className="text-left pr-2 pb-1 font-medium">Player</th>
                                     {cat.statNames.map((n: string, ni: number) => (
-                                      <th key={ni} className="text-right px-1 pb-1 font-medium text-fs-muted text-[10px] tracking-wider">{playerStatLabels[n] ?? prettifyName(n)}</th>
+                                      <th key={ni} className="text-right px-1 pb-1 font-medium text-fs-muted text-xs tracking-wider">{playerStatLabels[n] ?? prettifyName(n)}</th>
                                     ))}
                                   </tr>
                                 </thead>
@@ -926,7 +932,7 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
           )}
 
           {data?.status && (
-            <p className="text-[10px] text-fs-muted-2 mt-1">{data.status.shortDetail ?? data.status.description}</p>
+            <p className="text-xs text-fs-muted-2 mt-1">{data.status.shortDetail ?? data.status.description}</p>
           )}
         </>
       )}
@@ -1208,8 +1214,8 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
                             <div className="flex items-center gap-2 sm:gap-3 font-mono tabular-nums flex-shrink-0" style={{ fontVariantNumeric: 'tabular-nums' }}>
                               {nflSchema.map((s, si) => (
                                 <div key={s.key} className="text-right flex-shrink-0" style={{ minWidth: si < 2 ? '3.5rem' : '2.5rem' }}>
-                                  <span className="text-[9px] sm:text-[10px] text-fs-muted-2">{s.label}</span>
-                                  <span className="text-[10px] sm:text-[11px] text-fs-text/85 ml-0.5">{nflValues![si] ?? '—'}</span>
+                                  <span className="text-xs text-fs-muted-2">{s.label}</span>
+                                  <span className="text-xs text-fs-text/85 ml-0.5">{nflValues![si] ?? '—'}</span>
                                 </div>
                               ))}
                             </div>
@@ -1221,24 +1227,24 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
                                 if (v === undefined || v === null) return null
                                 return (
                                   <div key={s.key} className="text-right flex-shrink-0" style={{ minWidth: '2.5rem' }}>
-                                    <span className="text-[9px] sm:text-[10px] text-fs-muted-2">{s.label}</span>
-                                    <span className="text-[10px] sm:text-[11px] text-fs-text/85 ml-0.5">{v}</span>
+                                    <span className="text-xs text-fs-muted-2">{s.label}</span>
+                                    <span className="text-xs text-fs-text/85 ml-0.5">{v}</span>
                                   </div>
                                 )
                               })}
                             </div>
                           )}
                           {!hasStats && athlete.college?.name && (
-                            <span className="text-[10px] text-fs-muted-2 hidden lg:inline truncate max-w-20">{athlete.college.name}</span>
+                            <span className="text-xs text-fs-muted-2 hidden lg:inline truncate max-w-20">{athlete.college.name}</span>
                           )}
                           {!hasStats && !athlete.college?.name && athlete.experience?.displayValue && (
-                            <span className="text-[10px] text-fs-muted">{athlete.experience.displayValue}</span>
+                            <span className="text-xs text-fs-muted">{athlete.experience.displayValue}</span>
                           )}
                           {!hasStats && !athlete.college?.name && !athlete.experience?.displayValue && (
-                            <span className="text-[10px] text-fs-muted-2">No stats yet</span>
+                            <span className="text-xs text-fs-muted-2">No stats yet</span>
                           )}
                           {rookie && (
-                            <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[10px] font-bold" style={{ backgroundColor: `${team.colors.primary}40`, color: team.colors.secondary }}>R</span>
+                            <span className="inline-flex items-center justify-center w-5 h-5 rounded text-[11px] font-bold" style={{ backgroundColor: `${team.colors.primary}40`, color: team.colors.secondary }}>R</span>
                           )}
                         </div>
                       )
