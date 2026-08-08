@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { isFantasySportLive } from '@/lib/providers/fantasy-constants'
 import { resolveTeamTheme, themeVars } from '@/lib/fantasy/team-theme'
 import AuctionBoard from './AuctionBoard'
+import MockDraftRoom from './MockDraftRoom'
 import { DetailPanel, type DetailState, type PlayerDetail } from './PlayerDetailPanel'
 import styles from './steals.module.css'
 
@@ -219,8 +220,12 @@ export default function FantasySportPage() {
 
   const initialPos = (searchParams.get('pos') ?? 'QB').toUpperCase()
   const [pos, setPos] = useState(POSITIONS.includes(initialPos) ? initialPos : 'QB')
-  const [mode, setMode] = useState<'snake' | 'auction'>(
-    searchParams.get('mode') === 'auction' ? 'auction' : 'snake',
+  const [mode, setMode] = useState<'snake' | 'auction' | 'mock'>(
+    searchParams.get('mode') === 'auction'
+      ? 'auction'
+      : searchParams.get('mode') === 'mock'
+        ? 'mock'
+        : 'snake',
   )
   const [sort, setSort] = useState('gap')
   const [scoring, setScoring] = useState('ppr')
@@ -404,12 +409,20 @@ export default function FantasySportPage() {
     <div className={styles.board} style={themeVars(theme)}>
       <div className={styles.wrap}>
         <p className={styles.eyebrow}>Fanspot / {SPORT_NAMES[sport] ?? sport.toUpperCase()} / Draft Prep</p>
-        <h1 className={styles.title}>{mode === 'auction' ? 'Auction Values' : 'Steals Board'}</h1>
+        <h1 className={styles.title}>
+          {mode === 'auction' ? 'Auction Values' : mode === 'mock' ? 'Mock Draft Room' : 'Steals Board'}
+        </h1>
         <p className={styles.sub}>
           {mode === 'auction' ? (
             <>
               What each player is worth in <b>your</b> league, priced off the money and roster spots you
               enter. Compared against what the market pays for them.
+            </>
+          ) : mode === 'mock' ? (
+            <>
+              Run a snapshot draft against the <b>exact engine</b> that prices the Steals board — you
+              make the picks, nine to nineteen reasonable-manager bots fill in the rest, and the room
+              grades the result.
             </>
           ) : (
             <>
@@ -438,7 +451,15 @@ export default function FantasySportPage() {
           >
             Auction
           </button>
+          <button
+            className={mode === 'mock' ? styles.active : undefined}
+            onClick={() => setMode('mock')}
+          >
+            Mock Draft
+          </button>
         </div>
+
+        {mode === 'mock' && <MockDraftRoom sport={sport} />}
 
         {mode === 'auction' && <AuctionBoard sport={sport} teamFilter={teamFilter} />}
 
@@ -571,10 +592,14 @@ export default function FantasySportPage() {
         )}
 
         <footer className={styles.footer}>
-          <span>
-            {tracked} players tracked
-            {generatedAt ? ` · updated ${new Date(generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
-          </span>
+          {mode === 'mock' ? (
+            <span>bots draft off the same ranking every user sees</span>
+          ) : (
+            <span>
+              {tracked} players tracked
+              {generatedAt ? ` · updated ${new Date(generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+            </span>
+          )}
           <span>
             {mode === 'auction'
               ? 'value = projection above the last startable player, priced to your budget'
