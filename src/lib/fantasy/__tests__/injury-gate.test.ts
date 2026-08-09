@@ -204,7 +204,7 @@ describe('applyInjuryGate', () => {
     expect(board.filter((r) => r.injuryChecked)).toHaveLength(5)
     expect(board[39].injuryChecked).toBe(false)
     expect(board[39].note).toContain('recent headlines were not checked')
-    expect(board[0].note).toContain('recent headlines are clear')
+    expect(board[0].note).toContain('headline cross-check found no severe-injury language')
   })
 
   it('survives a failing headline fetch', async () => {
@@ -219,7 +219,7 @@ describe('applyInjuryGate', () => {
     expect(board[0].injuryTier).toBe('healthy')
     // A failed lookup is not a clean result.
     expect(board[0].injuryChecked).toBe(false)
-    expect(board[0].note).not.toContain('headlines are clear')
+    expect(board[0].note).not.toContain('headline cross-check found no severe-injury language')
   })
 })
 
@@ -272,9 +272,9 @@ describe('composeNote', () => {
     }
   })
 
-  it('only claims headlines are clear when the cross-check actually ran', () => {
+  it('only claims the headline cross-check found no severe language when it actually ran', () => {
     expect(composeNote(row({ gap: 2, injuryChecked: true }))).toContain(
-      'listed active, and recent headlines are clear',
+      'headline cross-check found no severe-injury language',
     )
     expect(composeNote(row({ gap: 2, injuryChecked: false }))).toContain(
       'recent headlines were not checked',

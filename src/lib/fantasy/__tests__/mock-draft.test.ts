@@ -218,8 +218,23 @@ describe('createDraft + applyPick', () => {
 })
 
 describe('INJURY_GRADE penalties in recommend', () => {
-  it('prefers the healthy player over a questionable one with the same projection', () => {
+  it('prefers the healthy player over a questionable one when otherwise equal', () => {
     nextId = 1
+    // Same projection and same ADP, so only the health tag can separate them.
+    const league = [
+      player({ pos: 'QB', proj: 300, adp: 2, injuryStatus: 'QUESTIONABLE', injured: true, name: 'Hurt' }),
+      player({ pos: 'QB', proj: 300, adp: 2, name: 'Fit' }),
+    ]
+    const built = buildDraftPool(league, settings)
+    const state = createDraft(built, settings)
+    const [top] = recommend(state, 1)
+    expect(top.name).toBe('Fit')
+  })
+
+  it('drafts the market\'s ADP-1 player first even when questionable', () => {
+    nextId = 1
+    // The ADP anchor reproduces real drafts: the ADP-1 QB is taken first overall
+    // despite a questionable tag — a healthy lesser QB doesn't jump ahead of him.
     const league = [
       player({ pos: 'QB', proj: 300, adp: 1, injuryStatus: 'QUESTIONABLE', injured: true, name: 'Hurt' }),
       player({ pos: 'QB', proj: 290, adp: 2, name: 'Fit' }),
@@ -227,7 +242,7 @@ describe('INJURY_GRADE penalties in recommend', () => {
     const built = buildDraftPool(league, settings)
     const state = createDraft(built, settings)
     const [top] = recommend(state, 1)
-    expect(top.name).toBe('Fit')
+    expect(top.name).toBe('Hurt')
   })
 
   it('still keeps Doubtful players rankable but behind healthy equals', () => {

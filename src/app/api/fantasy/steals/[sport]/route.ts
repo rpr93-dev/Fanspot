@@ -12,7 +12,7 @@ const SORTS = ['gap', 'adp', 'proj', 'scheme'] as const
 type SortKey = (typeof SORTS)[number]
 
 const METHODOLOGY =
-  'Gap = ADP rank − projected rank, computed within position over every player the platform treats as draftable at that position. Positive = falling past its projected value; negative = going ahead of projection. Conf is a 0-100 projection-confidence score from prior-season production, experience, role certainty, injury status, roster share and the team offensive environment. Environment is a 0-100 team offense score from Vegas implied points (per-position weighted: WR/TE full, RB 85%, QB full, K/D-ST neutral) plus an offseason scheme narrative shift of up to ±20 when coaching/coverage news points one way (a new coordinator, a pass-heavy system, or the opposite). Environment feeds confidence and the scheme sort — it never touches the raw gap. An availability gate runs after ranking: severe or long-term injuries and suspensions are moved to the Availability Watch rather than penalised inside the score, and Doubtful players are held out of the top 10. Headlines are only cross-checked for the top 30 rows of the first page; every other row reports only what the providers designate.'
+  'Gap = the point value the position assigns to the player\'s projected rank slot minus the point value of the slot their ADP points at — i.e. how many real fantasy points the market leaves on the table. The rank→points curve is fit against real prior-season scoring and flattened past each position\'s startable depth, so a 2-spot gap near the top of a position beats a 3-spot gap in the middle and deep-bench rank movements produce only small point deltas. The gap is normalized as a share of the player\'s own projection and weighted by the confidence score — a low-confidence waiver outlier cannot out-rank a stable, well-supported difference-maker with a smaller raw gap. Players under 5% roster share are gated off the board as unownable. Positive = falling past its projected value; negative = going ahead of projection. Conf is a 0-100 projection-confidence score from prior-season production, experience, role certainty, injury status, roster share and the team offensive environment. Environment is a 0-100 team offense score from Vegas implied points (per-position weighted: WR/TE full, RB 85%, QB full, K/D-ST neutral) plus an offseason scheme narrative shift of up to ±20 when coaching/coverage news points one way (a new coordinator, a pass-heavy system, or the opposite). Environment feeds confidence and the scheme sort — it never touches the raw gap. An availability gate runs after ranking: severe or long-term injuries and suspensions are moved to the Availability Watch rather than penalised inside the score, and Doubtful players are held out of the top 10. Headlines are only cross-checked for the top 30 rows of the first page; every other row reports only what the providers designate.'
 
 export async function GET(
   req: NextRequest,
@@ -132,7 +132,9 @@ export async function GET(
 }
 
 function sortRows(rows: StealRow[], sort: SortKey): void {
-  if (sort === 'gap') rows.sort((a, b) => b.gap - a.gap || a.posRank - b.posRank)
+  // `gap` now means the confidence-weighted, projection-normalized steal score
+  // (stealScore), not raw rank spots or even raw point value.
+  if (sort === 'gap') rows.sort((a, b) => b.stealScore - a.stealScore || b.valueGap - a.valueGap || a.posRank - b.posRank)
   else if (sort === 'adp') rows.sort((a, b) => a.adpRank - b.adpRank)
   else if (sort === 'proj') rows.sort((a, b) => a.posRank - b.posRank)
   else rows.sort((a, b) => envAdjustedGap(b) - envAdjustedGap(a) || b.gap - a.gap)

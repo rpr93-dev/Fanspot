@@ -20,6 +20,9 @@ interface StealRow {
   posRank: number
   adpRank: number
   gap: number
+  projSlotValue: number
+  adpSlotValue: number
+  valueGap: number
   adpSource: 'espn' | 'popularity_fallback'
   conf: number
   ownedPct: number
@@ -76,7 +79,7 @@ function FieldBar({ row }: { row: StealRow }) {
   const ad = Math.min(100, (row.adpRank / max) * 100)
   const lo = Math.min(pj, ad)
   const hi = Math.max(pj, ad)
-  const isValue = row.gap > 0
+  const isValue = row.valueGap > 0
 
   return (
     <div className={styles.field}>
@@ -110,7 +113,7 @@ function Row({
   watch?: boolean
   target?: boolean
 }) {
-  const isValue = row.gap > 0
+  const isValue = row.valueGap > 0
   // A suspension outranks any injury tag: it is why the player is unavailable.
   const badge = row.suspended ? { label: 'SUSPENDED', warn: false } : INJURY_BADGES[row.injuryTier]
   return (
@@ -196,9 +199,9 @@ function Row({
         <FieldBar row={row} />
         <div className={styles.gap}>
           <div className={`${styles.num} ${isValue ? styles.pos : styles.neg}`}>
-            {isValue ? '+' : ''}{row.gap}
+            {isValue ? '+' : ''}{Math.round(row.valueGap)}
           </div>
-          <div className={styles.lab}>{isValue ? 'spot value' : row.gap === 0 ? 'on value' : 'reach'}</div>
+          <div className={styles.lab}>{isValue ? 'pts of value' : row.valueGap === 0 ? 'on value' : 'pts behind'}</div>
         </div>
       </div>
       {open && detail && <DetailPanel state={detail} />}
@@ -428,6 +431,13 @@ export default function FantasySportPage() {
             <>
               Players going <b>later</b> than their projected value. Ranked within position — a QB and a kicker are never compared directly.
             </>
+          )}
+          {mode === 'snake' && (
+            <span className={styles.subDetail}>
+              A steal is the point gap between the slot a player is projected for and the slot their
+              ADP prices them at, normalized to their projection and weighted by confidence — so a
+              low-confidence waiver outlier can't outrank a stable difference-maker.
+            </span>
           )}
         </p>
 

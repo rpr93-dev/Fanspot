@@ -7,6 +7,27 @@ const MAX_ADP = 500
 const PROJECTION_FLOOR = 50
 
 /**
+ * Last rank that is realistically startable per position in a 12-team PPR league
+ * (1QB/2RB/3WR/1TE/1FLEX/1K/1DST). Real positional scoring curves are steep near the
+ * top and flatten hard past this depth — deep-bench ranks all cluster around the
+ * replacement baseline, so point deltas there should be tiny, not 50-70.
+ */
+const STARTABLE_DEPTH: Record<string, number> = {
+  QB: 12,
+  RB: 24,
+  WR: 36,
+  TE: 12,
+  K: 16,
+  'D/ST': 16,
+}
+
+/**
+ * Smoothing window for the rank→points curve. A tiny moving average removes the
+ * jagged point-by-point noise without flattening the genuinely steep top of a position.
+ */
+const CURVE_SMOOTH_WINDOW = 5
+
+/**
  * ESPN's kona projection (`appliedTotal`) is Standard scoring — receptions are worth
  * zero. The only scoring-rule difference between NFL Standard / Half-PPR / PPR on ESPN
  * is the receptions-per-point value (0 / 0.5 / 1.0); all yardage, TD and INT values are
@@ -38,6 +59,41 @@ export function formatPoints(player: FantasyPlayerEnriched, fmt: ScoringFormat |
 function formatPriorPoints(player: FantasyPlayerEnriched, fmt: ScoringFormat | undefined): number {
   if (!player.seasonActuals) return 0
   return formatPointsFromStats(player.seasonActuals.points, player.seasonActuals.stats, fmt)
+}
+
+/**
+ * Builds a rank→points curve fit against REAL prior-season scoring, not projections.
+ * Real positional curves are steep near the top and flatten hard past startable depth.
+ * The tail is clamped to the replacement baseline so deep-bench rank movements produce
+ * small point deltas, not the 50-70 point deltas projection-based curves extrapolate.
+ *
+ * `realPoints` is the position's prior-season totals sorted descending (best → worst).
+ * Returns a function: rank (1-based) → smoothed point value, clamped at replacement.
+ */
+export function fitPositionCurve(realPoints: number[], startableDepth: number): (rank: number) => number {
+  const n = realPoints.length
+  if (n === 0) return () => 0
+
+  const smoothed: number[] = []
+  for (let i = 0; i < n; i++) {
+    const lo = Math.max(0, i - CURVE_SMOOTH_WINDOW + 1)
+    const hi = Math.min(n, i + 1)
+    let sum = 0
+    for (let j = lo; j < hi; j++) sum += realPoints[j]
+    smoothed.push(sum / (hi - lo))
+  }
+
+  // Replacement baseline = the point value at the last startable rank. Everything at or
+  // past it collapses onto the baseline so the curve is flat through the deep-bench tier.
+  const baselineIdx = Math.min(startableDepth - 1, smoothed.length - 1)
+  const baseline = smoothed[baselineIdx]
+
+  return (rank: number): number => {
+    if (rank <= 0) return 0
+    const idx = rank - 1
+    if (idx >= smoothed.length) return baseline
+    return Math.max(smoothed[idx], baseline)
+  }
 }
 
 const POSITION_MULTIPLIERS: Record<string, number> = {
@@ -159,6 +215,16 @@ export interface StealRow {
   adpRank: number
   /** adpRank - posRank. Positive = falling past its value. */
   gap: number
+  /** Point value the position's projection curve assigns to the posRank slot. */
+  projSlotValue: number
+  /** Point value the same curve assigns to the adpRank slot — the market price in points. */
+  adpSlotValue: number
+  /** projSlotValue - adpSlotValue. The real margin in fantasy points, not rank spots. */
+  valueGap: number
+  /** valueGap as a share of the player's own projection, so gaps compare across positions. */
+  valueGapPct: number
+  /** valueGapPct weighted by confidence — the sort key. A low-confidence outlier is discounted. */
+  stealScore: number
   adpSource: AdpSource
   conf: number
   ownedPct: number
@@ -209,8 +275,12 @@ export interface BoardConfig {
  * points whose "ADP" is filler — they'd distort the field bar's scale and top the gap
  * sort with noise. Ownership is a measured signal, so the pool size stays a real count
  * rather than a hardcoded per-position guess.
+ *
+ * Raised from 1% to 5% so deep-waiver names (1-5% rostered) are gated off the board
+ * entirely: they are unownable in 12-team leagues and would otherwise surface huge
+ * point gaps from curve noise rather than real difference-making value.
  */
-const ROSTER_RELEVANCE_PCT = 1
+const ROSTER_RELEVANCE_PCT = 5
 
 /**
  * Ranks projection against ADP *within each position*, so a QB is never compared to a
@@ -253,6 +323,25 @@ export function buildStealBoard(
   for (const [pos, group] of byPos) {
     const posPoolSize = group.length
 
+    // Build the rank→points curve from REAL prior-season scoring when it is available;
+    // otherwise fall back to the projection curve. Either way the curve is smoothed and
+    // clamped at startable depth so the top stays steep and the deep-bench tail flattens
+    // to replacement — deep-bench rank movements produce small point deltas, not 50-70.
+    const realPoints = [...group]
+      .map((e) => formatPriorPoints(e.player, config.scoringFormat))
+      .filter((p) => p > 0)
+      .sort((a, b) => b - a)
+    const depth = STARTABLE_DEPTH[pos] ?? 12
+    const curve =
+      realPoints.length >= depth
+        ? fitPositionCurve(realPoints, depth)
+        : fitPositionCurve(
+            [...group]
+              .map((e) => formatPoints(e.player, config.scoringFormat))
+              .sort((a, b) => b - a),
+            depth,
+          )
+
     const posRanks = new Map<number, number>()
     ;[...group]
       .sort((a, b) => formatPoints(b.player, config.scoringFormat) - formatPoints(a.player, config.scoringFormat))
@@ -282,6 +371,20 @@ export function buildStealBoard(
         bodyPart: typeof sleeper?.injury_body_part === 'string' ? sleeper.injury_body_part : undefined,
         notes: typeof sleeper?.injury_notes === 'string' ? sleeper.injury_notes : undefined,
       })
+      // Point value the position's real-scoring curve assigns to the player's projected
+      // rank slot vs. the slot their ADP points at.
+      const projSlotValue = curve(posRank)
+      const adpSlotValue = curve(adpRank)
+      const valueGap = projSlotValue - adpSlotValue
+      const projectedPoints = Math.round(formatPoints(e.player, config.scoringFormat))
+      // Normalize the gap as a share of the player's own projection so a 40-pt gap on a
+      // 149-pt waiver projection is visibly smaller than a 40-pt gap on a 300-pt starter.
+      const valueGapPct = projectedPoints > 0 ? valueGap / projectedPoints : 0
+      // Confidence-weighted sort key: a low-confidence outlier is discounted so it can't
+      // out-rank a stable, well-supported projection with a smaller raw gap.
+      const conf = computeConfidence(e.player, envScore, config.scoringFormat)
+      const stealScore = valueGapPct * (conf / 100)
+
       const row: StealRow = {
         playerId: e.player.id,
         name: e.player.player.fullName,
@@ -290,12 +393,17 @@ export function buildStealBoard(
         posRank,
         adpRank,
         gap: adpRank - posRank,
+        projSlotValue,
+        adpSlotValue,
+        valueGap,
+        valueGapPct,
+        stealScore,
         adpSource: e.adpSource,
-        conf: computeConfidence(e.player, envScore, config.scoringFormat),
+        conf,
         ownedPct: Math.round(e.player.player.ownership?.percentOwned ?? 0),
         note: '',
         posPoolSize,
-        projectedPoints: Math.round(formatPoints(e.player, config.scoringFormat)),
+        projectedPoints,
         overallAdp: e.adp,
         impliedTeamTotal: e.player.vegas?.teamImpliedPoints,
         envScore,
@@ -319,7 +427,10 @@ export function buildStealBoard(
     }
   }
 
-  rows.sort((a, b) => b.gap - a.gap || b.projectedPoints - a.projectedPoints)
+  // Sort by the confidence-weighted, projection-normalized steal score — the real value
+  // margin as a % of the player's own projection, discounted for uncertainty. Raw rank
+  // spots never drive the order.
+  rows.sort((a, b) => b.stealScore - a.stealScore || b.valueGap - a.valueGap || b.projectedPoints - a.projectedPoints)
 
   return rows
 }

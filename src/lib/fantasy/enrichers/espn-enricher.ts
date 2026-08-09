@@ -271,7 +271,7 @@ function processEspnPlayers(
 
     const seasonActuals = extractSeasonActuals(raw, season)
 
-    const draftRanks = raw.player.draftRanksByRankType
+    const draftRanks = raw.player.draftRanksByRankType ?? {}
     const adp: PlayerAdp = {
       ppr: draftRanks.PPR?.rank,
       standard: draftRanks.STANDARD?.rank,

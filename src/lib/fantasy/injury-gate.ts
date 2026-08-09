@@ -270,7 +270,7 @@ function gapClause(row: StealRow): string {
  */
 function healthClause(row: StealRow): string {
   if (row.injuryDesignationKnown === false) return 'no injury status reported either way'
-  if (row.injuryChecked) return 'listed active, and recent headlines are clear'
+  if (row.injuryChecked) return 'listed active, and a headline cross-check found no severe-injury language'
   return 'listed active, though recent headlines were not checked'
 }
 

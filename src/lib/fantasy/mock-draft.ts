@@ -406,42 +406,20 @@ function mulberry32(seed: number): () => number {
 }
 
 /**
- * Where in the draft we are, as a 0..1 fraction of the snake's depth. Wave timing and
- * scarcity decisions read this fraction, not the raw slot index.
+ * How strongly a player's official ADP says they should be coming off the board right
+ * now. The whole point of a mock draft is to reproduce the market: players should be
+ * drafted near where their ADP says they belong, not drift on projection alone.
+ *
+ * A player whose ADP the draft has already passed is "due" — the room should have taken
+ * them, so they get a grab-now boost. A player whose ADP is still ahead is a reach, so
+ * they are dampened until the draft gets closer. This anchors the board to real ADP so
+ * an elite TE like Bowers (ADP ~26) comes off around pick 26 rather than falling to
+ * round 7.
  */
-function roundFraction(state: DraftState): number {
-  const totalRounds = Math.max(1, state.settings.rosterSize)
-  const round = Math.floor(state.cursor / state.settings.teams) + 1
-  return Math.min(1, (round - 1) / totalRounds)
-}
-
-/**
- * Position "wave" tax by draft depth. RBs and WRs stock the board first, QBs surf a
- * rise a few rounds in (their market is fast-moving and crowded, so waiting is cheap
- * until the wave builds), TEs drift, and kickers/defenses are invisible until the
- * closing stretch. 0..1 is the fraction of the draft elapsed.
- */
-function waveScore(pos: MockPosition, ratio: number): number {
-  switch (pos) {
-    case 'QB':
-      if (ratio < 0.3) return 0.25 + 0.9 * (ratio / 0.3)
-      if (ratio < 0.55) return 1.0 - ((ratio - 0.3) / 0.25) * 0.25
-      return 0.75 - ((ratio - 0.55) / 0.45) * 0.3
-    case 'RB':
-      return 1.2 - 0.42 * ratio
-    case 'WR':
-      return 1.12 - 0.18 * ratio
-    case 'TE':
-      if (ratio < 0.2) return 0.5
-      if (ratio < 0.42) return 0.5 + 0.6 * ((ratio - 0.2) / 0.22)
-      return 1.1 - ((ratio - 0.42) / 0.58) * 0.75
-    case 'K':
-    case 'D/ST':
-      // Invisible until the closing rounds, then very available.
-      if (ratio < 0.6) return 0.02
-      if (ratio < 0.84) return 0.02 + ((ratio - 0.6) / 0.24) * 1.0
-      return 1.02 + ((ratio - 0.84) / 0.16) * 0.4
-  }
+function adpAnchor(adp: number, pickNumber: number): number {
+  if (pickNumber >= adp) return 1.35
+  // Linear ramp: dampened well ahead of their ADP, neutral as the pick approaches.
+  return Math.max(0.6, 1 - ((adp - pickNumber) / 24) * 0.5)
 }
 
 /** How many teams still need a starting player at each position right now. */
@@ -519,7 +497,7 @@ interface RankOptions {
 function rankCandidates(state: DraftState, manager: number, opts: RankOptions = {}): { player: DraftPoolPlayer; score: number }[] {
   if (state.cursor >= state.order.length) return []
   const team = state.teams[manager]
-  const ratio = roundFraction(state)
+  const pickNumber = state.cursor + 1
   const need = startingNeed(state)
   const formatW = FORMAT_WEIGHT[state.settings.scoringFormat] ?? {}
 
@@ -528,7 +506,9 @@ function rankCandidates(state: DraftState, manager: number, opts: RankOptions = 
     if (state.pickedIds.has(p.playerId)) continue
     if (!hasOpenSlot(team, p.pos, state.starters, state.settings.rosterSize)) continue
     let score = p.projection * INJURY_GRADE[p.injuryTier] * posWeight(p.pos) * (formatW[p.pos] ?? 1)
-    score *= waveScore(p.pos, ratio)
+    // Anchor the draft to official ADP so players come off the board near their real
+    // market slot, not fall on projection/wave timing alone.
+    score *= adpAnchor(p.adp, pickNumber)
     score *= scarcityFactor(state, p.pos, need)
     score *= runBump(state, p.pos)
     score *= backupGate(state, team, p.pos)
