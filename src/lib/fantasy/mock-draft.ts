@@ -164,11 +164,18 @@ const POSITION_WEIGHT = getPositionMultipliers()
  * base. PPR nudges WR/TE up and RB down; standard rewards RBs; half-PPR splits it.
  * QB/K/D/ST never swing much — their mid- and late-round waves are scripted by the
  * launch curve instead.
+ *
+ * TE is deliberately not boosted: the steals-board base multiplier (1.15) is a
+ * reliability weight, and applying it as a value weight pushed mid-tier TEs ~20%
+ * too high — validated live, a TE with a 126-127 ADP was coming off the board at
+ * pick ~80. The format weights below bring the effective TE factor to ~1.0-1.05,
+ * so the elite TEs still go early (their ADP earns that) but the replacement-tier
+ * TEs fall to their real late-round slots.
  */
 const FORMAT_WEIGHT: Partial<Record<ScoringFormat, Partial<Record<MockPosition, number>>>> = {
-  ppr: { QB: 1.0, RB: 0.97, WR: 1.1, TE: 1.05, K: 0.9, 'D/ST': 0.9 },
-  'half-ppr': { QB: 1.0, RB: 1.04, WR: 1.03, TE: 1.02, K: 0.95, 'D/ST': 0.95 },
-  standard: { QB: 1.0, RB: 1.12, WR: 0.95, TE: 0.95, K: 1.15, 'D/ST': 1.15 },
+  ppr: { QB: 1.0, RB: 0.97, WR: 1.05, TE: 0.9, K: 0.9, 'D/ST': 0.9 },
+  'half-ppr': { QB: 1.0, RB: 1.04, WR: 1.0, TE: 0.88, K: 0.95, 'D/ST': 0.95 },
+  standard: { QB: 1.0, RB: 1.12, WR: 0.93, TE: 0.85, K: 1.15, 'D/ST': 1.15 },
 }
 
 /**
@@ -410,16 +417,23 @@ function mulberry32(seed: number): () => number {
  * now. The whole point of a mock draft is to reproduce the market: players should be
  * drafted near where their ADP says they belong, not drift on projection alone.
  *
- * A player whose ADP the draft has already passed is "due" — the room should have taken
- * them, so they get a grab-now boost. A player whose ADP is still ahead is a reach, so
- * they are dampened until the draft gets closer. This anchors the board to real ADP so
- * an elite TE like Bowers (ADP ~26) comes off around pick 26 rather than falling to
- * round 7.
+ * Validated against the real market (see `real-data-validation.test.ts`): a linear
+ * ramp with a 0.6 floor let late-round backups jump the queue — a QB with a 190 ADP
+ * was coming off the board at pick ~105 because ESPN projects backups at full-season
+ * totals. So the reach side now decays exponentially (a player 50+ picks ahead of
+ * their ADP simply cannot win on projection alone), while the "due" side — ADP
+ * reached — keeps a decisive grab boost so the market's expected order holds (the
+ * ADP-1 player goes first even against a slightly healthier alternative).
  */
 function adpAnchor(adp: number, pickNumber: number): number {
-  if (pickNumber >= adp) return 1.35
-  // Linear ramp: dampened well ahead of their ADP, neutral as the pick approaches.
-  return Math.max(0.6, 1 - ((adp - pickNumber) / 24) * 0.5)
+  const ahead = adp - pickNumber
+  if (ahead <= 0) {
+    // Due now: grab boost, gently tapering so the long-forgotten don't dominate.
+    return 1.3 + Math.min(0.2, Math.max(0, pickNumber - adp - 2) / 100)
+  }
+  // Not yet due: exponential decay. A player 36 picks ahead of ADP is ~37% as
+  // attractive; 72 picks ahead is ~14%; 100+ is nearly invisible.
+  return Math.max(0.08, Math.exp(-ahead / 36))
 }
 
 /** How many teams still need a starting player at each position right now. */
@@ -443,15 +457,20 @@ function scarcityFactor(state: DraftState, pos: MockPosition, need: Record<MockP
   if (deficit === 0) return 1
   const startable = state.pool.filter((p) => p.pos === pos && p.posRank <= deficit + 2).length
   if (startable >= deficit) return 1
-  return 1 + ((deficit - startable) / deficit) * 0.65
+  return 1 + ((deficit - startable) / deficit) * 0.45
 }
 
-/** Recent-pick momentum: teams lean into the position the draft is currently "running" on. */
+/**
+ * Recent-pick momentum: teams lean into the position the draft is currently "running"
+ * on. Deliberately mild — real drafts have runs, but a full round of one position is
+ * a simulation artifact, not a market shape. Measured live: an unscaled bump helped
+ * compress the backup-QB wave into a single 12-pick block.
+ */
 function runBump(state: DraftState, pos: MockPosition): number {
   const lastSpots = state.pickLog.slice(-3)
   const same = lastSpots.filter((p) => p.pos === pos).length
-  if (same >= 3) return 1.2
-  if (same === 2) return 1.1
+  if (same >= 3) return 1.12
+  if (same === 2) return 1.06
   return 1
 }
 
@@ -467,6 +486,24 @@ function backupGate(state: DraftState, team: DraftTeam, pos: MockPosition): numb
   if (countAt(team, pos) < starterNeed) return 1
   const missing = state.teams.some((t) => (t.byPos[pos] ?? 0) < starterNeed)
   return missing ? 0.25 : 1
+}
+
+/**
+ * Backup-value discount: a second QB/TE is a bench pick, and ESPN's full-season
+ * projection for a backup overstates what a non-starter actually contributes — a
+ * manager who already has their QB1 prices a QB2 near replacement, not at the raw
+ * points. Without this, every team fills its starters at the same pace and then the
+ * entire backup wave avalanches in one round; measured live, 12 QBs went in a row
+ * (picks 95-106) including players with a 190+ ADP. The discount pushes backup QB/TE
+ * picks back to the late rounds where real drafts take them.
+ */
+function backupValue(state: DraftState, team: DraftTeam, pos: MockPosition): number {
+  const starterNeed = state.starters[pos] ?? 0
+  if (starterNeed === 0) return 1
+  if (countAt(team, pos) < starterNeed) return 1
+  if (pos === 'QB') return 0.45
+  if (pos === 'TE') return 0.5
+  return 1
 }
 
 /** Bot temperament: deterministic per (seed, manager), stable personalities per draft. */
@@ -512,6 +549,7 @@ function rankCandidates(state: DraftState, manager: number, opts: RankOptions = 
     score *= scarcityFactor(state, p.pos, need)
     score *= runBump(state, p.pos)
     score *= backupGate(state, team, p.pos)
+    score *= backupValue(state, team, p.pos)
     if (opts.persona) score *= opts.persona.tilt[p.pos]
     if (opts.rng) score *= 1 + (opts.rng() - 0.5) * (opts.persona?.jitter ?? 0.08)
     score += Math.max(0, p.gap) * 0.4

@@ -47,7 +47,21 @@ let lastBuildReport: BuildReport | null = null
 let unifiedCache: UnifiedPlayer[] | null = null
 let cacheExpiresAt = 0
 
-const UNIFIED_DB_TTL_MS = 2 * 60 * 1000
+/**
+ * The unified database is fed by caches that are far longer-lived than this used to
+ * be: Sleeper's master dump is cached for 24h and Vegas odds for 60min, so a 2-minute
+ * TTL here only forced the whole pipeline (Sleeper + ESPN pages + Vegas) to re-fetch
+ * on nearly every revisit. 15 minutes keeps the boards responsive without serving
+ * stale projections/ADP for a meaningful amount of time.
+ */
+const UNIFIED_DB_TTL_MS = 15 * 60 * 1000
+
+/**
+ * Single-flight: the steals, mock draft and auction boards can be requested at once
+ * right after expiry. Sharing one in-progress build keeps the upstream providers
+ * (Sleeper, ESPN, Vegas) from being fetched N times in parallel.
+ */
+let buildInFlight: Promise<{ players: UnifiedPlayer[]; report: BuildReport }> | null = null
 
 export function getLastBuildReport(): BuildReport | null {
   return lastBuildReport
@@ -57,12 +71,25 @@ export async function buildUnifiedDatabase(options: BuildOptions = {}): Promise<
   players: UnifiedPlayer[]
   report: BuildReport
 }> {
-  const startTime = Date.now()
-
   if (unifiedCache && Date.now() < cacheExpiresAt && options.cacheOnly !== true) {
     log('info', 'cache', 'Returning cached unified database')
     return { players: unifiedCache, report: lastBuildReport as BuildReport }
   }
+
+  // Share one build across concurrent callers; a failed build clears the slot so the
+  // next request retries instead of inheriting the rejection forever.
+  if (buildInFlight) return buildInFlight
+  buildInFlight = buildUnifiedDatabaseInternal(options).finally(() => {
+    buildInFlight = null
+  })
+  return buildInFlight
+}
+
+async function buildUnifiedDatabaseInternal(options: BuildOptions = {}): Promise<{
+  players: UnifiedPlayer[]
+  report: BuildReport
+}> {
+  const startTime = Date.now()
 
   const master = await buildMasterPlayerList()
   log('info', 'pipeline', `Master list: ${master.count} total, ${master.fantasyCount} fantasy-relevant`)

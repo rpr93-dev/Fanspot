@@ -2,6 +2,15 @@ import { XMLParser } from 'fast-xml-parser'
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' })
 
+/**
+ * The steals board cross-checks up to 30 players' headlines per first-page request;
+ * without a cache that is 30 parallel Google News fetches on every page load. Google
+ * News RSS is not exactly real-time for fantasy coverage, so 30 minutes is a fine
+ * freshness window for "did anyone report something severe".
+ */
+const MOMENTUM_TTL_MS = 30 * 60 * 1000
+const momentumCache = new Map<string, { data: PlayerMomentum; expiresAt: number }>()
+
 export interface NewsArticle {
   title: string
   snippet: string
@@ -64,6 +73,26 @@ export async function fetchNewsArticles(query: string): Promise<NewsArticle[]> {
 }
 
 export async function getPlayerMomentum(
+  playerName: string,
+  teamAbbr: string,
+  sport: string,
+): Promise<PlayerMomentum> {
+  const key = `${sport}|${teamAbbr}|${playerName}`.toLowerCase()
+  const hit = momentumCache.get(key)
+  if (hit && Date.now() < hit.expiresAt) return hit.data
+
+  const data = await fetchPlayerMomentum(playerName, teamAbbr, sport)
+  momentumCache.set(key, { data, expiresAt: Date.now() + MOMENTUM_TTL_MS })
+  // A generous cap guards against unbounded growth from one-off queries; the steals
+  // board only ever touches a few hundred distinct players.
+  if (momentumCache.size > 2000) {
+    const oldest = momentumCache.keys().next().value
+    if (oldest != null) momentumCache.delete(oldest)
+  }
+  return data
+}
+
+async function fetchPlayerMomentum(
   playerName: string,
   teamAbbr: string,
   sport: string,

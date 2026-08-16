@@ -85,14 +85,6 @@ function resolvePastGameFocus(sport: string, focusAreas: string[]): string[] {
   return [...new Set(keys)]
 }
 
-const focusKeysToSection: Record<string, string> = {}
-for (const [area, keys] of Object.entries(TEAM_PAGE_FOCUS)) {
-  for (const k of keys) focusKeysToSection[k] = area
-}
-for (const [area, keys] of Object.entries(NEXT_GAME_FOCUS)) {
-  for (const k of keys) focusKeysToSection[k] = area
-}
-
 export function resolveFocusKeys(pageType: string, sport: string, focusAreas: string[]): string[] {
   if (pageType === 'past-game') return resolvePastGameFocus(sport, focusAreas)
   const map = pageType === 'team' ? TEAM_PAGE_FOCUS : NEXT_GAME_FOCUS
@@ -489,7 +481,6 @@ export async function buildConciergeContext(
     }
   }
 
-  const allFocusSectionNames = req.focusAreas
   const available = new Set(Object.keys(sections).filter(k => sections[k]?.available))
 
   return {

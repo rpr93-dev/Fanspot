@@ -15,3 +15,6 @@ test-results/
 .playwright-tests/
 server.log
 *.json.tmp
+
+# live-data validation harness (fetches ESPN/Sleeper; run with RUN_REAL_DATA=1)
+src/lib/fantasy/__tests__/real-data-validation.test.ts

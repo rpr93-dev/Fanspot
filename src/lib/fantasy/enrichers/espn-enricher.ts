@@ -18,6 +18,13 @@ export function getEspnEnricherLogs(): IntegrationLog[] {
 
 const espnUrlCache = new Map<string, { data: RawEspnPlayer[]; expiresAt: number }>()
 
+/**
+ * Keep the raw ESPN pages aligned with the unified database TTL (15 min): the raw
+ * dump only changes when ESPN republishes projections/ADP, so a shorter cache here
+ * would re-fetch it on every unified rebuild for no freshness gain.
+ */
+const ESPN_ENRICH_TTL_MS = 15 * 60 * 1000
+
 /** ESPN caps a single kona_player_info response well below this; we paginate via the filter's offset. */
 const ESPN_PAGE_SIZE = 500
 const ESPN_MAX_PLAYERS = 2000
@@ -187,7 +194,7 @@ export async function enrichFromEspn(
 
   log('info', 'espn', `Fetched ${deduped.length} unique players from ESPN`)
 
-  espnUrlCache.set(cacheKey, { data: deduped, expiresAt: Date.now() + 120_000 })
+  espnUrlCache.set(cacheKey, { data: deduped, expiresAt: Date.now() + ESPN_ENRICH_TTL_MS })
 
   return processEspnPlayers(deduped, ctx, season)
 }

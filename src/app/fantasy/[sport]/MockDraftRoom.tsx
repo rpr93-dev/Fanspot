@@ -19,6 +19,8 @@ import type {
   DraftPick,
 } from '@/lib/fantasy/mock-draft'
 import type { InjuryTier } from '@/lib/fantasy/injury-gate'
+import PoolPicker from './PoolPicker'
+import AuctionDraftRoom from './AuctionDraftRoom'
 import styles from './steals.module.css'
 
 interface DraftRoomResponse {
@@ -223,6 +225,8 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [generatedAt, setGeneratedAt] = useState<string | null>(null)
+  const [format, setFormat] = useState<'snake' | 'auction'>('snake')
+  const [roomPool, setRoomPool] = useState<DraftPoolPlayer[]>([])
 
   const loadRoom = useCallback(async () => {
     setLoading(true)
@@ -251,6 +255,7 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
       }
       const data: DraftRoomResponse = await res.json()
       setState(createDraft(data.pool, data.settings))
+      setRoomPool(data.pool)
       setGeneratedAt(data.generatedAt)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load the draft room')
@@ -271,6 +276,21 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
   const coords = useMemo(() => {
     if (!state || !isMyTurn) return []
     return recommend(state, 6)
+  }, [state, isMyTurn])
+
+  // "Don't like your options?" — which remaining players no longer fit the user's roster,
+  // so the choose-your-own picker can grey them out instead of hiding them.
+  const snakeDisabled = useMemo(() => {
+    const set = new Set<number>()
+    if (!state || !isMyTurn) return set
+    const team = state.teams[state.order[state.cursor]]
+    const starters = state.settings.starters
+    for (const pl of state.pool) {
+      if ((team.byPos[pl.pos] ?? 0) >= positionCapacity(starters, state.settings.rosterSize, pl.pos)) {
+        set.add(pl.playerId)
+      }
+    }
+    return set
   }, [state, isMyTurn])
 
   // The user's one explicit choice, then the bots immediately fill to the next human
@@ -350,6 +370,21 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
 
   return (
     <div className={styles.room}>
+      <div className={styles.roomFormatTabs}>
+        <button
+          className={format === 'snake' ? styles.active : undefined}
+          onClick={() => setFormat('snake')}
+        >
+          Snake draft
+        </button>
+        <button
+          className={format === 'auction' ? styles.active : undefined}
+          onClick={() => setFormat('auction')}
+        >
+          Auction draft
+        </button>
+      </div>
+
       <div className={styles.draftSettings}>
         <fieldset>
           <legend>Room</legend>
@@ -420,6 +455,10 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
         </button>
       </div>
 
+      {format === 'auction' ? (
+        <AuctionDraftRoom sport={sport} pool={roomPool} settings={state.settings} />
+      ) : (
+        <>
       <div className={styles.draftStatus}>
         {state.completed ? (
           <p className={styles.draftDone}>
@@ -466,6 +505,17 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
 
       {isMyTurn && <Coach coords={coords} onPick={choose} />}
 
+      {isMyTurn && (
+        <PoolPicker
+          pool={state.pool}
+          excludedIds={state.pickedIds}
+          disabledIds={snakeDisabled}
+          onPick={choose}
+          actionLabel="Draft"
+          placeholder="Search the whole pool…"
+        />
+      )}
+
       <div className={styles.starterLegend}>
         <b>Lineup to field each week</b>
         <span>{state.settings.starters.QB} QB</span>
@@ -507,6 +557,8 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
           : ''}
         every team shares the same snake order · your Draft Coach ranks the exact model the bots draft off
       </p>
+        </>
+      )}
     </div>
   )
 }

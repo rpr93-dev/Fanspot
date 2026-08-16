@@ -397,3 +397,49 @@ describe('projectDraftGrade', () => {
     expect(['A', 'B', 'C', 'D']).toContain(grade.grade)
   })
 })
+describe('ADP-anchored market timing (real-data validated)', () => {
+  it('keeps a high-projection, far-ahead-of-ADP player off the early board', () => {
+    nextId = 1
+    // A QB projects like a star (ESPN full-season totals) but the market prices him
+    // 40+ picks later. The exponential reach penalty must keep him off the early
+    // board — real drafts don't reach 40 picks for a projection alone.
+    const league = [
+      player({ pos: 'QB', proj: 340, adp: 45, name: 'Fallback QB' }),
+      ...pool('QB', 12, 400, 3),
+      ...pool('RB', 40, 320, 3),
+      ...pool('WR', 48, 300, 2),
+      ...pool('TE', 20, 220, 2),
+    ]
+    const built = buildDraftPool(league, settings)
+    const state = createDraft(built, settings)
+    const top = recommend(state, 6)
+    expect(top.some((p) => p.name === 'Fallback QB')).toBe(false)
+  })
+
+  it('does not draft backup QBs mid-draft even when they project like starters', () => {
+    nextId = 1
+    // 12 starter QBs at ADP 1-12, then 12 "backup" QBs whose ESPN projections are
+    // nearly starter-level (full-season totals) but whose ADP is rounds 5-6.
+    const qbs = [
+      ...Array.from({ length: 12 }, (_, i) => player({ pos: 'QB', proj: 400 - i * 3, adp: i + 1, name: `QB${i + 1}` })),
+      ...Array.from({ length: 12 }, (_, i) => player({ pos: 'QB', proj: 350 - i * 3, adp: 60 + i, name: `QBB${i + 1}` })),
+    ]
+    const league = [
+      ...qbs,
+      ...pool('RB', 60, 320, 3),
+      ...pool('WR', 60, 300, 2),
+      ...pool('TE', 24, 220, 2),
+      ...pool('K', 12, 140, 0),
+      ...pool('D/ST', 12, 130, 0),
+    ]
+    const built = buildDraftPool(league, settings)
+    const state = simulate(createDraft(built, settings), { untilUser: false })
+    // Find the first pick that is a manager's SECOND QB.
+    const firstBackup = state.pickLog.findIndex((p, i) => {
+      const already = state.pickLog.slice(0, i).filter((x) => x.manager === p.manager && x.pos === 'QB').length
+      return p.pos === 'QB' && already >= 1
+    })
+    // Round 8 (pick 96) at the earliest — backups are a late-round market.
+    expect(firstBackup).toBeGreaterThanOrEqual(96)
+  })
+})
