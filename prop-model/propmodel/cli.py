@@ -88,12 +88,12 @@ def _load_weekly(args) -> pd.DataFrame:
             return pd.read_parquet(path)
         raise ValueError(f"Unsupported weekly file type: {path.suffix} (use .csv/.pkl/.parquet)")
     # Live pull via nfl_data_py, wrapped in the disk cache + retry.
-    from .data_pipeline import _fetch_weekly_nflverse
+    from .data_pipeline import _fetch_weekly_nflverse, normalize_weekly
 
     seasons = args.seasons or default_seasons()
     if args.no_cache:
-        return _fetch_weekly_nflverse(seasons)
-    return cached_fetcher(_fetch_weekly_nflverse, DiskCache(args.cache_dir))(seasons)
+        return normalize_weekly(_fetch_weekly_nflverse(seasons))
+    return normalize_weekly(cached_fetcher(_fetch_weekly_nflverse, DiskCache(args.cache_dir))(seasons))
 
 
 def _lines_provider(args):

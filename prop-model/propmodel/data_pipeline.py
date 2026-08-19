@@ -140,29 +140,74 @@ def default_seasons() -> list[int]:
     return [this_year - 1, this_year]
 
 
-def _fetch_weekly_nflverse(seasons: Iterable[int]) -> pd.DataFrame:
-    """Default fetcher: nflverse weekly player stats via nfl_data_py.
+def normalize_weekly(weekly: pd.DataFrame) -> pd.DataFrame:
+    """Make a weekly frame match the schema the pipeline expects.
 
-    Imported lazily so the package imports (and tests run) without nfl_data_py
-    installed. Only the columns the pipeline needs are requested when the installed
-    version supports it — the full weekly file is large.
+    Accepts both the nflfastR ``weekly`` schema (``recent_team``, ``gameday``,
+    ``games``) and the nflverse ``stats_player`` files (``team``, no game dates).
+    When dates are absent, a ``gameday`` is synthesized from season/week
+    (kickoff ≈ Sep 8, one game per week) so staleness checks and the missed-game
+    window keep working.
     """
-    import nfl_data_py as nfl
+    df = weekly.copy()
+    if "recent_team" not in df.columns and "team" in df.columns:
+        df["recent_team"] = df["team"]
+    if "gameday" not in df.columns and {"season", "week"}.issubset(df.columns):
+        season = pd.to_numeric(df["season"], errors="coerce").fillna(1970).astype(int)
+        week = pd.to_numeric(df["week"], errors="coerce").fillna(1).astype(int)
+        start = pd.to_datetime(season.astype(str) + "-09-08", errors="coerce")
+        df["gameday"] = start + pd.to_timedelta((week - 1) * 7, unit="D")
+    return df
 
+
+def _fetch_weekly_nflverse(seasons: Iterable[int]) -> pd.DataFrame:
+    """Default fetcher: nflverse weekly player stats.
+
+    Prefers ``nfl_data_py`` when it is importable (its ``import_weekly`` /
+    ``import_weekly_data``). On Python >= 3.13 that package can't install
+    (it pins pandas<2/numpy<2, which have no wheels there), so we fall back to
+    downloading the *same* nflverse weekly CSV files directly — identical source
+    data, just without the wrapper. Either path yields the weekly schema the
+    pipeline expects (player_id, recent_team, opponent_team, gameday, games,
+    per-stat columns).
+    """
     years = [int(s) for s in seasons]
     logger.info("Fetching nflverse weekly stats for seasons %s", years)
-    cols = [
-        COL_PLAYER_ID, COL_PLAYER_NAME, COL_POSITION, COL_TEAM, COL_OPPONENT,
-        COL_SEASON, COL_WEEK, COL_GAMEDAY, COL_GAMES, COL_GAME_ID,
-        "passing_yards", "passing_tds",
-        "rushing_yards", "rushing_tds",
-        "receiving_yards", "receptions", "receiving_tds",
-    ]
+
     try:
-        return nfl.import_weekly(years=years, columns=cols)
-    except TypeError:
-        # Older nfl_data_py has no `columns` argument — pull everything and select.
-        return nfl.import_weekly(years=years)[cols]
+        import nfl_data_py as nfl
+    except ImportError:
+        nfl = None
+    if nfl is not None:
+        fn = getattr(nfl, "import_weekly", None) or getattr(nfl, "import_weekly_data", None)
+        if fn is not None:
+            try:
+                return fn(years=years)
+            except TypeError:
+                return fn(years)
+            except Exception as e:  # version/API mismatch — fall through to direct
+                logger.warning("nfl_data_py fetch failed (%s); falling back to direct download", e)
+
+    import io
+
+    import requests
+
+    frames = []
+    for season in years:
+        # nflverse publishes weekly player stats under the `player_stats`
+        # release (parquet). Same schema as the CSV wrapper — one row per
+        # player-week.
+        url = f"https://github.com/nflverse/nflverse-data/releases/download/stats_player/stats_player_week_{season}.parquet"
+        logger.info("Downloading %s", url)
+        resp = requests.get(url, timeout=120)
+        if resp.status_code == 404:
+            logger.warning("No weekly file for %s (season not started?) — skipping", season)
+            continue
+        resp.raise_for_status()
+        frames.append(pd.read_parquet(io.BytesIO(resp.content)))
+    if not frames:
+        raise RuntimeError("No nflverse weekly data downloaded for seasons %s" % years)
+    return pd.concat(frames, ignore_index=True)
 
 
 def _stat_value(row: pd.Series, stat: StatSpec) -> float | None:
@@ -237,7 +282,7 @@ def fetch_player_history(
             flags=[QualityFlag("NO_DATA", "error", reason)],
         )
 
-    weekly = (fetcher or _fetch_weekly_nflverse)(seasons)
+    weekly = normalize_weekly((fetcher or _fetch_weekly_nflverse)(seasons))
     if weekly is None or len(weekly) == 0:
         return _empty_history("Weekly data empty (no seasons returned)")
     if COL_PLAYER_ID not in weekly.columns:

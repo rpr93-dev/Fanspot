@@ -3,7 +3,7 @@
 # fetcher). The package imports and unit tests run without it.
 pandas>=2.0
 numpy>=1.24
-nfl_data_py>=0.4.0
+nfl_data_py>=0.3.0
 
 # dev / test
 pytest>=8.0

@@ -28,9 +28,17 @@ def resolve_player_id(
         return None
     wanted = normalize_name(player_name)
     team = str(team).upper()
+
+    def _norm(v):
+        return normalize_name(v) if isinstance(v, str) else ""
+
+    # nflverse stats_player files abbreviate player_name ("C.Stroud") but keep
+    # the full name in player_display_name — prefer the full name for matching.
+    name_col = "player_display_name" if "player_display_name" in weekly.columns else "player_name"
+    team_col = "recent_team" if "recent_team" in weekly.columns else "team"
     rows = weekly[
-        (weekly["player_name"].astype(str).map(normalize_name) == wanted)
-        & (weekly.get("recent_team", pd.Series(dtype=str)).astype(str).str.upper() == team)
+        (weekly[name_col].map(_norm) == wanted)
+        & (weekly[team_col].astype(str).str.upper() == team)
     ]
     if rows.empty:
         return None

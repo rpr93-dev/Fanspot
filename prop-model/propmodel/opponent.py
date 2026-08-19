@@ -40,6 +40,7 @@ import pandas as pd
 
 from .data_pipeline import (
     COL_GAMEDAY,
+    normalize_weekly,
     COL_OPPONENT,
     COL_POSITION,
     COL_SEASON,
@@ -103,7 +104,7 @@ def defense_allowed(
     if as_of is None:
         as_of = date.today()
 
-    weekly = (fetcher or _fetch_weekly_nflverse)(seasons)
+    weekly = normalize_weekly((fetcher or _fetch_weekly_nflverse)(seasons))
     if weekly is None or len(weekly) == 0 or COL_OPPONENT not in weekly.columns:
         return _empty_rates()
 
