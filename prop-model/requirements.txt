@@ -1,0 +1,9 @@
+# prop-model runtime + test dependencies
+# NOTE: nfl_data_py is only needed for live data pulls (STAGE 1's default
+# fetcher). The package imports and unit tests run without it.
+pandas>=2.0
+numpy>=1.24
+nfl_data_py>=0.4.0
+
+# dev / test
+pytest>=8.0
