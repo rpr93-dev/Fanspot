@@ -29,8 +29,60 @@ def test_resolve_player_id_matches_name_and_team():
     # Both HOU rows normalize to the same name; the most recent (week 2) wins.
     assert resolve_player_id(weekly, "C.J. Stroud", "HOU") == "00-2"
     assert resolve_player_id(weekly, "c.j. stroud", "lv") == "00-3"
-    assert resolve_player_id(weekly, "C.J. Stroud", "SEA") is None
+    # Name-only fallback: a player who changed teams still resolves (their
+    # history lives under the old team), but the requested team is preferred
+    # when both exist.
+    assert resolve_player_id(weekly, "C.J. Stroud", "SEA") == "00-3"
     assert resolve_player_id(weekly, "Nobody", "HOU") is None
+
+
+def test_resolve_player_id_prefers_requested_team():
+    weekly = pd.DataFrame([
+        {"player_id": "00-1", "player_name": "Kirk Cousins", "recent_team": "ATL", "season": 2025, "week": 17},
+        {"player_id": "00-1", "player_name": "Kirk Cousins", "recent_team": "ATL", "season": 2024, "week": 12},
+        {"player_id": "00-2", "player_name": "Kirk Cousins", "recent_team": "LV", "season": 2025, "week": 1},
+    ])
+    # Both teams present: the requested team (LV, the player's current team)
+    # wins even though ATL has more games.
+    assert resolve_player_id(weekly, "Kirk Cousins", "LV") == "00-2"
+    # No rows on the requested team → fall back to name-only.
+    assert resolve_player_id(weekly, "Kirk Cousins", "HOU") == "00-1"
+
+
+def test_cli_uses_espn_prior_for_rookie(tmp_path):
+    """A player with no NFL history projects the ESPN prior instead of refusing."""
+    import tests.test_data_pipeline as tdp  # reuse row builders
+
+    rows = [
+        {
+            **tdp.qb_row(1, 220, gameday="2025-09-08", opp="HOU"),
+            "player_id": "00-100001", "player_name": "Opp QB", "recent_team": "IND",
+            "opponent_team": "HOU",
+        },
+        {
+            **tdp.qb_row(1, 180, gameday="2025-09-08", opp="LV"),
+            "player_id": "00-100002", "player_name": "Opp2 QB", "recent_team": "KC",
+            "opponent_team": "LV",
+        },
+    ]
+    weekly_csv = tmp_path / "weekly.csv"
+    tdp._weekly(rows).to_csv(weekly_csv, index=False)
+
+    batch = tmp_path / "batch.json"
+    batch.write_text(json.dumps([
+        {"player": "Fernando Mendoza", "stat": "passing_yards", "team": "LV", "opponent": "HOU", "prior": 180},
+    ]))
+    result = subprocess.run(
+        [sys.executable, "-m", "propmodel.cli", "--weekly", str(weekly_csv), "--input", str(batch)],
+        capture_output=True, text=True, cwd=Path(__file__).resolve().parent.parent,
+    )
+    assert result.returncode == 0, result.stderr
+    records = json.loads(result.stdout)
+    row = records[0]
+    assert row["projection"] == 180.0
+    assert row["refused_reason"] is None
+    assert "rookie" in (row["note"] or "")
+    assert row["confidence"] == "low"
 
 
 def _sample_projection():
@@ -50,7 +102,7 @@ def test_projections_table_schema():
     assert df.columns.tolist() == [
         "player", "stat", "my_projection", "market_line", "edge",
         "confidence", "last_updated", "low", "high", "n_games",
-        "baseline", "opponent_factor", "script_factor", "refused_reason",
+        "baseline", "opponent_factor", "script_factor", "refused_reason", "note",
     ]
     row = df.iloc[0]
     assert row["my_projection"] == 232.5

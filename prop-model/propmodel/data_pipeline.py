@@ -131,13 +131,15 @@ def _iso(value) -> str | None:
 
 
 def default_seasons() -> list[int]:
-    """Seasons to pull by default: the previous + current calendar year.
+    """Seasons to pull by default: the last 4 calendar years.
 
-    Covers both mid-season runs (current year has games) and offseason runs (the
-    previous year is the last completed season).
+    Covers both mid-season runs (current year has games) and offseason runs
+    (the previous year is the last completed season), and gives thin-history
+    players (backups, rookies who barely played, players with injury gaps)
+    enough games to clear the ``min_games`` bar.
     """
     this_year = date.today().year
-    return [this_year - 1, this_year]
+    return [this_year - 3, this_year - 2, this_year - 1, this_year]
 
 
 def normalize_weekly(weekly: pd.DataFrame) -> pd.DataFrame:

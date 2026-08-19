@@ -65,6 +65,7 @@ class Projection:
     opponent_factor: float | None
     script_factor: float | None
     refused_reason: str | None = None
+    note: str | None = None      # e.g. "ESPN prior — no NFL history (rookie)"
 
     def to_dict(self) -> dict:
         return {
@@ -81,6 +82,7 @@ class Projection:
             "opponent_factor": self.opponent_factor,
             "script_factor": self.script_factor,
             "refused_reason": self.refused_reason,
+            "note": self.note,
         }
 
 
@@ -112,15 +114,20 @@ def _confidence(
     history_ok: bool,
     opp_ok: bool,
     script_ok: bool,
-    stale: bool,
+    stale_warn: bool,
     min_games: int,
 ) -> str:
-    """Rule-based confidence: high / medium / low."""
+    """Rule-based confidence: high / medium / low.
+
+    Only *warn*-severity staleness downgrades confidence. Offseason runs are
+    always informationally "stale" (the last game is months old) — treating
+    that as a confidence killer would make every August projection low.
+    """
     if not history_ok or n_games < min_games:
         return "low"
-    if n_games >= 8 and opp_ok and script_ok and not stale:
+    if n_games >= 8 and opp_ok and script_ok and not stale_warn:
         return "high"
-    if n_games >= 5 and opp_ok and not stale:
+    if n_games >= 5 and opp_ok and not stale_warn:
         return "medium"
     return "low"
 
@@ -162,7 +169,9 @@ def project(
             refused_reason=_refusal_reason(history, weights.min_games),
         )
 
-    stale = any(f.code == "STALE" for f in history.flags)
+    stale_warn = any(
+        f.code == "STALE" and f.severity == "warn" for f in history.flags
+    )
     mean, std = recency_weighted_stats(history.games["value"].tolist(), weights.halflife)
     baseline = mean
 
@@ -181,7 +190,7 @@ def project(
         baseline=baseline,
         low=max(0.0, projection - Z_68 * eff_std),
         high=projection + Z_68 * eff_std,
-        confidence=_confidence(n, history.ok, opp_ok, gs_ok, stale, weights.min_games),
+        confidence=_confidence(n, history.ok, opp_ok, gs_ok, stale_warn, weights.min_games),
         n_games=n,
         opponent_factor=round(opp_f, 3),
         script_factor=round(gs_f, 3),

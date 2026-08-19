@@ -74,6 +74,7 @@ interface ModelProjection {
   opponent_factor: number | null
   script_factor: number | null
   refused_reason: string | null
+  note: string | null
 }
 
 const INJURY_LABEL: Record<string, string> = {
@@ -247,14 +248,17 @@ export default function NextGamePanel({
     opp: (opponentFantasyAbbr || opponentAbbr || '').toUpperCase(),
   })
 
-  const buildTargets = (): { player: string; stat: string; team: string; opponent: string }[] => {
+  const buildTargets = (): { player: string; stat: string; team: string; opponent: string; prior?: number }[] => {
     const codes = modelTeamCodes()
-    const out: { player: string; stat: string; team: string; opponent: string }[] = []
+    const out: { player: string; stat: string; team: string; opponent: string; prior?: number }[] = []
     const add = (players: { name: string; position: string }[], team: string, opponent: string) => {
       for (const p of players.slice(0, 6)) {
         const stat = statForPos(p.position)
         if (!stat) continue
-        out.push({ player: p.name, stat, team, opponent })
+        // ESPN projected line as a prior: lets rookies / thin-history players
+        // project instead of refusing (the model still wins when it has data).
+        const prior = espnLineFor(p.name, stat)
+        out.push({ player: p.name, stat, team, opponent, prior: prior ?? undefined })
       }
     }
     add(ourProjected, codes.our, codes.opp)
@@ -286,7 +290,7 @@ export default function NextGamePanel({
       const res = await fetch('/api/prop-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets, lines: buildLines() }),
+        body: JSON.stringify({ targets, lines: buildLines(), preseason: !!isPreseason }),
         signal: AbortSignal.timeout(180000),
       })
       const json = await res.json().catch(() => ({}))
@@ -306,6 +310,15 @@ export default function NextGamePanel({
     return p?.lines.find((l) => l.label === label)?.value ?? null
   }
 
+  // Sort model rows QB → RB → WR → TE (same order as the player-lines tables),
+  // using the ESPN projection positions the targets were built from.
+  const posFor = (name: string): number => {
+    const p = props?.projections?.find((x) => x.name === name)?.position ?? ''
+    const idx = POS_ORDER.indexOf(p.startsWith('WR') ? 'WR' : p)
+    return idx === -1 ? 99 : idx
+  }
+  const sortedModel = [...(modelResults ?? [])].sort((a, b) => posFor(a.player) - posFor(b.player) || a.player.localeCompare(b.player))
+
   const confBadge = (conf: string) => {
     if (conf === 'high') return 'text-fs-turf bg-fs-turf/15'
     if (conf === 'medium') return 'text-fs-gold bg-fs-gold/15'
@@ -314,15 +327,27 @@ export default function NextGamePanel({
 
   return (
     <div className="animate-fade-in-up mt-4 pt-3" style={{ borderTop: `1px solid ${teamColor}20` }}>
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between gap-2 mb-3">
         <h3 className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Next Game Preview</h3>
-        <button
-          onClick={onBack}
-          className="hover-bright text-xs px-2 py-1 rounded text-fs-muted hover:text-fs-text"
-          style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}
-        >
-          &larr; Back
-        </button>
+        <div className="flex items-center gap-2">
+          {sport.toUpperCase() === 'NFL' && (ourProjected.length > 0 || oppProjected.length > 0) && (
+            <button
+              onClick={runModel}
+              disabled={modelLoading}
+              className="hover-bright text-xs font-semibold px-4 py-2 rounded-lg text-fs-bg disabled:opacity-50 shadow-sm"
+              style={{ backgroundColor: teamColor, '--card-color': teamColor } as React.CSSProperties}
+            >
+              {modelLoading ? 'Running…' : modelResults ? '↻ Re-run model' : '▶ Run model'}
+            </button>
+          )}
+          <button
+            onClick={onBack}
+            className="hover-bright text-xs px-2 py-1 rounded text-fs-muted hover:text-fs-text"
+            style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}
+          >
+            &larr; Back
+          </button>
+        </div>
       </div>
 
       <p className="text-sm text-fs-muted mb-4">
@@ -541,14 +566,16 @@ export default function NextGamePanel({
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Prop Model</p>
-            <button
-              onClick={runModel}
-              disabled={modelLoading}
-              className="hover-bright text-xs px-2.5 py-1 rounded text-fs-muted hover:text-fs-text disabled:opacity-50"
-              style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}
-            >
-              {modelLoading ? 'Running…' : modelResults ? 'Re-run' : 'Run model'}
-            </button>
+            {modelResults && modelResults.length > 0 && (
+              <button
+                onClick={runModel}
+                disabled={modelLoading}
+                className="hover-bright text-[11px] font-semibold px-3 py-1.5 rounded-lg text-fs-bg disabled:opacity-50"
+                style={{ backgroundColor: teamColor, '--card-color': teamColor } as React.CSSProperties}
+              >
+                {modelLoading ? 'Running…' : '↻ Re-run'}
+              </button>
+            )}
           </div>
           <p className="text-xs text-fs-muted-2 mb-2">
             {modelResults
@@ -565,7 +592,7 @@ export default function NextGamePanel({
             <div className="rounded-lg p-3 text-sm text-fs-red" style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}14` }}>
               {modelError}
             </div>
-          ) : modelResults && modelResults.length > 0 ? (
+          ) : sortedModel && sortedModel.length > 0 ? (
             <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${teamColor}16` }}>
               <table className="w-full text-xs">
                 <thead>
@@ -573,26 +600,31 @@ export default function NextGamePanel({
                     <th className="text-left px-2.5 py-1.5 font-medium">Player</th>
                     <th className="text-left px-2 py-1.5 font-medium">Stat</th>
                     <th className="text-right px-2 py-1.5 font-medium">Model</th>
-                    <th className="text-right px-2 py-1.5 font-medium">68% Range</th>
                     <th className="text-right px-2 py-1.5 font-medium">ESPN line</th>
+                    <th className="text-right px-2 py-1.5 font-medium">68% Range</th>
                     <th className="text-right px-2.5 py-1.5 font-medium">Conf</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {modelResults.map((r) => {
+                  {sortedModel.map((r) => {
                     const espnLine = espnLineFor(r.player, r.stat)
                     return (
                       <tr key={`${r.player}-${r.stat}`} className="text-fs-text/75" style={{ borderTop: `1px solid ${teamColor}0c` }}>
-                        <td className="px-2.5 py-1.5 font-medium text-fs-text/90 whitespace-nowrap">{r.player}</td>
+                        <td className="px-2.5 py-1.5 whitespace-nowrap">
+                          <span className="font-medium text-fs-text/90">{r.player}</span>
+                          {r.note ? (
+                            <span className="block text-[10px] text-fs-muted-2" title={r.note}>{r.note}</span>
+                          ) : null}
+                        </td>
                         <td className="px-2 py-1.5 whitespace-nowrap text-fs-muted">{r.stat_label}</td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-text">
                           {r.projection != null ? r.projection : <span className="text-fs-muted-2">refused</span>}
                         </td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
-                          {r.low != null && r.high != null ? `${r.low}–${r.high}` : '—'}
+                          {espnLine != null ? espnLine : '—'}
                         </td>
                         <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
-                          {espnLine != null ? espnLine : '—'}
+                          {r.low != null && r.high != null ? `${r.low}–${r.high}` : '—'}
                         </td>
                         <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
                           <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${confBadge(r.confidence)}`}>

@@ -70,6 +70,7 @@ export async function POST(request: Request) {
       '--output', outPath,
       '--cache-dir', path.join(MODEL_DIR, 'cache'),
     ]
+    if (body?.preseason) args.push('--preseason')
     const lines = body?.lines
     if (lines && typeof lines === 'object' && Object.keys(lines).length > 0) {
       const linesPath = path.join(tmp, 'lines.json')
@@ -96,6 +97,7 @@ export async function POST(request: Request) {
       opponent_factor: r.opponent_factor,
       script_factor: r.script_factor,
       refused_reason: r.refused_reason,
+      note: r.note ?? null,
     }))
     return NextResponse.json({ projections, source: 'prop-model' })
   } catch (err: any) {

@@ -53,6 +53,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--weekly", help="offline weekly file (csv/pkl/parquet) instead of nfl_data_py")
     p.add_argument("--lines-json", help="static Vegas lines JSON {'HOU': {total, spread, favorite}}")
     p.add_argument("--weights-json", help="ModelWeights override JSON (halflife, opponent, game_script, min_games)")
+    p.add_argument("--preseason", action="store_true", help="scale projections to preseason playing time (starters play a fraction of snaps)")
     p.add_argument("--output", help="output path (.json or .csv); default: JSON to stdout")
     p.add_argument("--cache-dir", default="cache", help="disk cache directory (default ./cache)")
     p.add_argument("--no-cache", action="store_true", help="skip the disk cache")
@@ -70,6 +71,10 @@ def _targets_from_args(args) -> list[dict]:
                 "stat": str(t["stat"]),
                 "team": str(t["team"]),
                 "opponent": str(t.get("opponent") or args.opponent or ""),
+                # Optional ESPN-style prior line: used when the player has no
+                # usable NFL history (rookie / barely played) so we project
+                # instead of refusing.
+                "prior": t.get("prior"),
             })
         return out
     if args.player and args.stat and args.team:
@@ -120,27 +125,87 @@ def _project_one(target: dict, weekly: pd.DataFrame, lines_provider, weights: Mo
     seasons = args.seasons or default_seasons()
 
     pid = resolve_player_id(weekly, player, team)
+    prior = target.get("prior")
+    lines = lines_provider.fetch(team, opponent) if lines_provider else None
+    gs = script_adjustment(team, opponent, lines)
+    rates = defense_allowed(
+        stat, seasons=seasons, teams=[team, opponent],
+        window=args.n_games, fetcher=lambda s: weekly,
+    )
+    opp = opponent_factor(opponent, rates)
+
     if pid is None:
-        # Refuse cleanly: a NO_DATA history flows through the same refusal path.
+        # No NFL history at all (rookie, or a name we can't match). If the
+        # caller gave us an ESPN-style prior line, project that with a clear
+        # note instead of refusing — a number beats a wall of refusals, and
+        # the note keeps it honest.
+        if prior is not None:
+            prior = float(prior)
+            # A rookie with zero NFL games has a genuinely wide outcome range —
+            # ±50% is honest uncertainty (the ±15% used for thin-but-existing
+            # history would falsely imply we know something we don't).
+            return Projection(
+                player_name=player, stat=get_stat(stat),
+                projection=prior, baseline=prior,
+                low=round(prior * 0.5, 1), high=round(prior * 1.5, 1),
+                confidence="low", n_games=0,
+                opponent_factor=round(float(opp.get("factor", 1.0)), 3),
+                script_factor=round(float(gs.get("factor", 1.0)), 3),
+                refused_reason=None,
+                note="ESPN prior — no NFL history (rookie)",
+            )
         empty = pd.DataFrame(columns=["season", "week", "game_id", "date", "opponent", "value"])
         hist = PlayerHistory(
             stat=get_stat(stat), player_id="", player_name=player, position="?",
             team=team, n_requested=args.n_games, games=empty, missed_games=empty,
             flags=[QualityFlag("NO_DATA", "error", f"Player '{player}' ({team}) not found in weekly data")],
         )
-        return project(hist, 1.0, {"available": False, "factor": 1.0}, weights)
+        return project(hist, opp, gs, weights)
 
     hist = fetch_player_history(
         pid, stat, n_games=args.n_games, seasons=seasons, fetcher=lambda s: weekly,
     )
-    rates = defense_allowed(
-        stat, seasons=seasons, teams=[team, opponent],
-        window=args.n_games, fetcher=lambda s: weekly,
-    )
-    opp = opponent_factor(opponent, rates)
-    lines = lines_provider.fetch(team, opponent) if lines_provider else None
-    gs = script_adjustment(team, opponent, lines)
+
+    # Player exists but has fewer than min_games of history — blend toward the
+    # ESPN prior if we have one, so thin-history players still project (marked
+    # low confidence).
+    if not hist.ok and prior is not None:
+        prior = float(prior)
+        # 1-2 games of history: the prior is more trustworthy than a sample of
+        # one or two games, but the band stays wider than a full-history line.
+        return Projection(
+            player_name=player, stat=get_stat(stat),
+            projection=prior, baseline=prior,
+            low=round(prior * 0.65, 1), high=round(prior * 1.35, 1),
+            confidence="low", n_games=hist.n_games,
+            opponent_factor=round(float(opp.get("factor", 1.0)), 3),
+            script_factor=round(float(gs.get("factor", 1.0)), 3),
+            refused_reason=None,
+            note="ESPN prior — thin NFL history",
+        )
+
     proj = project(hist, opp, gs, weights)
+    if proj.player_name != player:
+        # Keep the caller's display name (the dashboard built targets from full
+        # names like "C.J. Stroud"; the nflverse file abbreviates to "C.Stroud",
+        # which breaks the panel's name-based ESPN-line lookup).
+        proj.player_name = player
+    if args.preseason and proj.projection is not None:
+        # Preseason games: starters play a fraction of snaps, so scale the
+        # regular-season-calibrated projection down (same 0.4 factor the
+        # /api/props ESPN lines use, keeping both on the same scale).
+        f = 0.4
+        proj = Projection(
+            player_name=proj.player_name, stat=proj.stat,
+            projection=proj.projection * f,
+            baseline=proj.baseline * f if proj.baseline is not None else None,
+            low=proj.low * f if proj.low is not None else None,
+            high=proj.high * f if proj.high is not None else None,
+            confidence=proj.confidence, n_games=proj.n_games,
+            opponent_factor=proj.opponent_factor, script_factor=proj.script_factor,
+            refused_reason=proj.refused_reason,
+            note=(proj.note + " · " if proj.note else "") + "preseason-adjusted",
+        )
 
     if proj.confidence == "low":
         logger.warning(
