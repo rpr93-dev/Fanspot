@@ -60,6 +60,22 @@ interface Starter {
   reason?: string
 }
 
+interface ModelProjection {
+  player: string
+  stat: string
+  stat_label: string
+  unit: string
+  projection: number | null
+  baseline: number | null
+  low: number | null
+  high: number | null
+  confidence: string
+  n_games: number
+  opponent_factor: number | null
+  script_factor: number | null
+  refused_reason: string | null
+}
+
 const INJURY_LABEL: Record<string, string> = {
   probable: 'PROB',
   questionable: 'QUES',
@@ -212,6 +228,89 @@ export default function NextGamePanel({
   const oppProjected = props?.projections?.filter((p) => p.team === opponentAbbr) ?? []
   const showBettingProps = props?.available === true && (ourProps.length > 0 || oppProps.length > 0)
   const showProjected = !showBettingProps && (ourProjected.length > 0 || oppProjected.length > 0)
+
+  // ---- Prop Model (Python pipeline) ----
+  const [modelResults, setModelResults] = useState<ModelProjection[] | null>(null)
+  const [modelLoading, setModelLoading] = useState(false)
+  const [modelError, setModelError] = useState<string | null>(null)
+
+  const statForPos = (pos: string | null): string => {
+    const p = (pos ?? '').toUpperCase()
+    if (p === 'QB') return 'passing_yards'
+    if (p === 'RB') return 'rushing_yards'
+    if (p === 'WR' || p === 'TE') return 'receiving_yards'
+    return ''
+  }
+
+  const modelTeamCodes = () => ({
+    our: (teamFantasyAbbr || teamAbbr || '').toUpperCase(),
+    opp: (opponentFantasyAbbr || opponentAbbr || '').toUpperCase(),
+  })
+
+  const buildTargets = (): { player: string; stat: string; team: string; opponent: string }[] => {
+    const codes = modelTeamCodes()
+    const out: { player: string; stat: string; team: string; opponent: string }[] = []
+    const add = (players: { name: string; position: string }[], team: string, opponent: string) => {
+      for (const p of players.slice(0, 6)) {
+        const stat = statForPos(p.position)
+        if (!stat) continue
+        out.push({ player: p.name, stat, team, opponent })
+      }
+    }
+    add(ourProjected, codes.our, codes.opp)
+    add(oppProjected, codes.opp, codes.our)
+    return out
+  }
+
+  const buildLines = () => {
+    if (typeof odds?.overUnder !== 'number' || typeof odds?.spread !== 'number') return null
+    const codes = modelTeamCodes()
+    const spread = Math.abs(odds.spread)
+    const favorite = odds.spread < 0 ? codes.our : codes.opp
+    return {
+      [codes.our]: { total: odds.overUnder, spread, favorite },
+      [codes.opp]: { total: odds.overUnder, spread, favorite },
+    }
+  }
+
+  const runModel = async () => {
+    setModelLoading(true)
+    setModelError(null)
+    const targets = buildTargets()
+    if (!targets.length) {
+      setModelError('No skill players available to project')
+      setModelLoading(false)
+      return
+    }
+    try {
+      const res = await fetch('/api/prop-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets, lines: buildLines() }),
+        signal: AbortSignal.timeout(180000),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? `Model API returned ${res.status}`)
+      setModelResults(Array.isArray(json.projections) ? json.projections : [])
+    } catch (e: any) {
+      setModelError(e?.message ?? 'Model run failed')
+    } finally {
+      setModelLoading(false)
+    }
+  }
+
+  const espnLineFor = (name: string, stat: string): number | null => {
+    const label = { passing_yards: 'Pass Yds', rushing_yards: 'Rush Yds', receiving_yards: 'Rec Yds' }[stat]
+    if (!label) return null
+    const p = props?.projections?.find((x) => x.name === name)
+    return p?.lines.find((l) => l.label === label)?.value ?? null
+  }
+
+  const confBadge = (conf: string) => {
+    if (conf === 'high') return 'text-fs-turf bg-fs-turf/15'
+    if (conf === 'medium') return 'text-fs-gold bg-fs-gold/15'
+    return 'text-fs-red bg-fs-red/15'
+  }
 
   return (
     <div className="animate-fade-in-up mt-4 pt-3" style={{ borderTop: `1px solid ${teamColor}20` }}>
@@ -434,6 +533,81 @@ export default function NextGamePanel({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* Prop Model projections (Python pipeline) */}
+      {sport.toUpperCase() === 'NFL' && (ourProjected.length > 0 || oppProjected.length > 0) && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between mb-2">
+            <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Prop Model</p>
+            <button
+              onClick={runModel}
+              disabled={modelLoading}
+              className="hover-bright text-xs px-2.5 py-1 rounded text-fs-muted hover:text-fs-text disabled:opacity-50"
+              style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}
+            >
+              {modelLoading ? 'Running…' : modelResults ? 'Re-run' : 'Run model'}
+            </button>
+          </div>
+          <p className="text-xs text-fs-muted-2 mb-2">
+            {modelResults
+              ? 'Our own projection from the Python model: recent games × opponent defense × game script (nflverse weekly stats).'
+              : 'Own projection from recent games, opponent defense, and the Vegas game script — compare against the ESPN lines above.'}
+          </p>
+
+          {modelLoading ? (
+            <div className="animate-pulse space-y-2">
+              <div className="fs-skeleton h-7" style={{ backgroundColor: `${teamColor}12` }} />
+              <div className="fs-skeleton h-7" style={{ backgroundColor: `${teamColor}12` }} />
+            </div>
+          ) : modelError ? (
+            <div className="rounded-lg p-3 text-sm text-fs-red" style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}14` }}>
+              {modelError}
+            </div>
+          ) : modelResults && modelResults.length > 0 ? (
+            <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${teamColor}16` }}>
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-fs-muted-2" style={{ backgroundColor: `${teamColor}08` }}>
+                    <th className="text-left px-2.5 py-1.5 font-medium">Player</th>
+                    <th className="text-left px-2 py-1.5 font-medium">Stat</th>
+                    <th className="text-right px-2 py-1.5 font-medium">Model</th>
+                    <th className="text-right px-2 py-1.5 font-medium">68% Range</th>
+                    <th className="text-right px-2 py-1.5 font-medium">ESPN line</th>
+                    <th className="text-right px-2.5 py-1.5 font-medium">Conf</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {modelResults.map((r) => {
+                    const espnLine = espnLineFor(r.player, r.stat)
+                    return (
+                      <tr key={`${r.player}-${r.stat}`} className="text-fs-text/75" style={{ borderTop: `1px solid ${teamColor}0c` }}>
+                        <td className="px-2.5 py-1.5 font-medium text-fs-text/90 whitespace-nowrap">{r.player}</td>
+                        <td className="px-2 py-1.5 whitespace-nowrap text-fs-muted">{r.stat_label}</td>
+                        <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-text">
+                          {r.projection != null ? r.projection : <span className="text-fs-muted-2">refused</span>}
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
+                          {r.low != null && r.high != null ? `${r.low}–${r.high}` : '—'}
+                        </td>
+                        <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
+                          {espnLine != null ? espnLine : '—'}
+                        </td>
+                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
+                          <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${confBadge(r.confidence)}`}>
+                            {r.confidence.toUpperCase()}
+                          </span>
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : modelResults && modelResults.length === 0 ? (
+            <p className="text-sm text-fs-muted-2">No projections returned.</p>
+          ) : null}
         </div>
       )}
     </div>

@@ -61,7 +61,10 @@ def write_table(df: pd.DataFrame, path: str | Path) -> Path:
     if path.suffix.lower() == ".csv":
         df.to_csv(tmp, index=False)
     elif path.suffix.lower() == ".json":
-        tmp.write_text(json.dumps(df.to_dict(orient="records"), default=str), encoding="utf-8")
+        # NaN → null: Python's json module would otherwise emit bare `NaN`
+        # tokens, which aren't valid JSON (the dashboard's JSON.parse rejects them).
+        records = df.astype(object).where(pd.notna(df), None).to_dict(orient="records")
+        tmp.write_text(json.dumps(records, default=str), encoding="utf-8")
     else:
         raise ValueError(f"Unsupported output extension: {path.suffix} (use .csv or .json)")
     os.replace(tmp, path)
