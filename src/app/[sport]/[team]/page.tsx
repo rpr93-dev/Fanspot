@@ -6,6 +6,7 @@ import { teams, sportConfig, sportPath } from '@/data/teams'
 import { useParams } from 'next/navigation'
 import { getTeamSchedule, getTeamNews, getEspnAbbr } from '@/lib/sports-api'
 import StandingsBox from './StandingsBox'
+import NextGamePanel from './NextGamePanel'
 import AiNalyst from '@/components/AiNalyst'
 import FantasyWidget from '@/components/FantasyWidget'
 import type { EspnEvent } from '@/lib/sports-api'
@@ -85,10 +86,12 @@ interface OddsInfo {
   sportsbook: string
   lastUpdated: string
   isHome: boolean
+  spread?: number | null
+  overUnder?: number | null
 }
 
 interface TeamDashboardData {
-  upcoming: { date: string; opponent: string; opponentLogo: string; location: 'home' | 'away'; venue?: string; isPreseason?: boolean; isLive?: boolean; eventId?: string; homeScore?: string; awayScore?: string; homeAbbr?: string; awayAbbr?: string; statusDetail?: string; seasonTypeName?: string } | null
+  upcoming: { date: string; opponent: string; opponentAbbr?: string; opponentLogo: string; location: 'home' | 'away'; venue?: string; isPreseason?: boolean; isLive?: boolean; eventId?: string; eventDate?: string; kickoff?: string; homeScore?: string; awayScore?: string; homeAbbr?: string; awayAbbr?: string; statusDetail?: string; seasonTypeName?: string } | null
   lastFive: { date: string; opponent: string; opponentAbbr: string; opponentLogo: string; result: 'W' | 'L'; score: string; eventId: string; isPreseason?: boolean; seasonTypeName?: string }[]
   oddsInfo: OddsInfo | null
   news: { title: string; source: string; date: string; snippet: string; url: string }[]
@@ -103,6 +106,38 @@ function getGameDetail(event: EspnEvent): string {
 
 function getShortDate(event: EspnEvent): string {
   return new Date(event.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+/**
+ * Maps an opponent's ESPN abbreviation (e.g. WSH) to the teams.ts abbreviation the
+ * fantasy pipeline uses (e.g. WAS). Falls back to the ESPN abbr when unknown.
+ */
+function getOpponentFantasyAbbr(opponentEspnAbbr: string, opponentName: string, sport: string): string {
+  const match = teams.find((t) => {
+    if (t.sport !== sport.toUpperCase()) return false
+    return getEspnAbbr(t.id, t.abbreviation) === opponentEspnAbbr || t.name === opponentName
+  })
+  return match?.abbreviation ?? opponentEspnAbbr
+}
+
+/**
+ * Odds poll cadence, driven by the game clock:
+ *  - live or within an hour of kickoff → 30s (live odds)
+ *  - within 24h → hourly
+ *  - otherwise → every 6h (preseason/regular-season odds post days ahead and barely
+ *    move, so polling more often just burns the sportsbook quota)
+ */
+function oddsPollInterval(
+  upcoming: { id: string; date: string; kickoff?: string } | null,
+  isLive: boolean,
+): number {
+  if (isLive) return 30_000
+  const kickoff = upcoming?.kickoff ? new Date(upcoming.kickoff).getTime() : null
+  if (!kickoff) return 6 * 60 * 60 * 1000
+  const msUntil = kickoff - Date.now()
+  if (msUntil <= 60 * 60 * 1000) return 30_000
+  if (msUntil <= 24 * 60 * 60 * 1000) return 60 * 60 * 1000
+  return 6 * 60 * 60 * 1000
 }
 
 function getOpponent(event: EspnEvent, teamAbbr: string, sport: string): { name: string; abbr: string; logo: string; location: 'home' | 'away' } {
@@ -150,8 +185,9 @@ export default function TeamDashboard() {
   const [boxScoreLoading, setBoxScoreLoading] = useState(false)
   const [liveBoxScore, setLiveBoxScore] = useState<any>(null)
   const [isLiveGame, setIsLiveGame] = useState(false)
+  const [showNextGame, setShowNextGame] = useState(false)
   const liveGameIdRef = useRef<string | null>(null)
-  const upcomingGameRef = useRef<{ id: string; date: string } | null>(null)
+  const upcomingGameRef = useRef<{ id: string; date: string; kickoff?: string } | null>(null)
 
   const team = teams.find((t) => t.id === teamId && t.sport === sport.toUpperCase())
   const config = sportConfig[sport.toUpperCase()]
@@ -177,7 +213,7 @@ export default function TeamDashboard() {
     )
 
     upcomingGameRef.current = schedForState.upcomingEventId
-      ? { id: schedForState.upcomingEventId, date: schedForState.upcomingDate! }
+      ? { id: schedForState.upcomingEventId, date: schedForState.upcomingDate!, kickoff: schedForState.upcoming?.kickoff }
       : null
 
     const standings = dashboard.standings
@@ -223,13 +259,20 @@ export default function TeamDashboard() {
       .catch((e) => { console.error('[roster fetch]', e); setRosterLoading(false) })
   }, [showRoster, team?.id])
 
-  // Odds poll every 30s (uses upcoming or live game ID)
+  // Odds poll — cadence follows the game clock: ~6h out, hourly the day before,
+  // live (30s) within an hour of kickoff or while the game is in progress.
   useEffect(() => {
     if (!team) return
-    const abbr = getEspnAbbr(team.id, team.abbreviation)
-    const id = setInterval(async () => {
+    const t = team
+    const abbr = getEspnAbbr(t.id, t.abbreviation)
+
+    let timer: ReturnType<typeof setTimeout>
+    let stopped = false
+
+    async function poll() {
+      if (stopped) return
       try {
-        let url = `/api/odds?sport=${team.sport}&team=${abbr}`
+        let url = `/api/odds?sport=${t.sport}&team=${abbr}`
         const ug = upcomingGameRef.current
         const lg = liveGameIdRef.current
         const gameId = lg || ug?.id
@@ -241,9 +284,19 @@ export default function TeamDashboard() {
           setData(p => p ? { ...p, oddsInfo: json.odds ?? null } : p)
         }
       } catch (e) { console.error('[odds poll]', e) }
-    }, 30000)
-    return () => clearInterval(id)
-  }, [team?.id])
+      schedule()
+    }
+
+    function schedule() {
+      if (stopped) return
+      timer = setTimeout(poll, oddsPollInterval(upcomingGameRef.current, !!liveGameIdRef.current))
+    }
+
+    // First fetch after a short beat so the dashboard's initial load (which already
+    // includes odds) doesn't double-fetch; then let the interval take over.
+    timer = setTimeout(poll, 5000)
+    return () => { stopped = true; clearTimeout(timer) }
+  }, [team?.id, isLiveGame])
 
   // News poll every 120s
   useEffect(() => {
@@ -295,7 +348,7 @@ export default function TeamDashboard() {
         const abbr = getEspnAbbr(team.id, team.abbreviation)
         const result = processScheduleForState(schedule, abbr, team.sport)
         upcomingGameRef.current = result.upcomingEventId
-          ? { id: result.upcomingEventId, date: result.upcomingDate! }
+          ? { id: result.upcomingEventId, date: result.upcomingDate!, kickoff: result.upcoming?.kickoff }
           : null
         setData(p => p ? { ...p, upcoming: result.upcoming, lastFive: result.lastFive } : p)
         const live = result.upcoming?.isLive
@@ -391,9 +444,21 @@ export default function TeamDashboard() {
         <Link href={`/${sport}`} className="hover-lift fs-meta hover:text-fs-text inline-block mb-8" style={{ '--card-color': team.colors.primary } as React.CSSProperties}>&larr; {config.name}</Link>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-            <div className={`fs-panel p-5 sm:p-6 ${data?.upcoming?.isLive ? 'hover-card cursor-pointer group' : ''}`}
+            <div className={`fs-panel p-5 sm:p-6 ${data?.upcoming?.eventId ? 'hover-card cursor-pointer group' : ''}`}
               style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}26`, '--card-color': team.colors.primary } as React.CSSProperties}
-              onClick={() => { if (data?.upcoming?.isLive && data.upcoming.eventId) { setSelectedGameId(data.upcoming.eventId) } }}>
+              onClick={() => {
+                if (!data?.upcoming?.eventId) return
+                if (data.upcoming.isLive) {
+                  // Toggle: open the live box score, or close it back to the main page.
+                  const liveId = data.upcoming.eventId
+                  setShowNextGame(false)
+                  setSelectedGameId((cur) => (cur === liveId ? null : (liveId as string)))
+                } else {
+                  // Toggle: open the preview panel, or close it back to the main page.
+                  setSelectedGameId(null)
+                  setShowNextGame((v) => !v)
+                }
+              }}>
               <h2 className="fs-eyebrow mb-4" style={{ '--tint': team.colors.primary } as React.CSSProperties}>{data?.upcoming?.isLive ? 'Live' : 'Next Game'}</h2>
               {loading ? (
                 <div className="animate-pulse space-y-3">
@@ -469,6 +534,20 @@ export default function TeamDashboard() {
                         </span>
                         <span className="font-mono text-fs-text">{data.oddsInfo.opponent.moneyline > 0 ? '+' : ''}{data.oddsInfo.opponent.moneyline}</span>
                       </div>
+                      {(data.oddsInfo.spread != null || data.oddsInfo.overUnder != null) && (
+                        <div className="flex items-center gap-4 text-sm pt-1">
+                          {data.oddsInfo.spread != null && (
+                            <span className="text-fs-muted">
+                              Spread <span className="font-mono text-fs-text">{data.oddsInfo.spread > 0 ? '+' : ''}{data.oddsInfo.spread}</span>
+                            </span>
+                          )}
+                          {data.oddsInfo.overUnder != null && (
+                            <span className="text-fs-muted">
+                              O/U <span className="font-mono text-fs-text">{data.oddsInfo.overUnder}</span>
+                            </span>
+                          )}
+                        </div>
+                      )}
                       <div className="pt-2">
                         <p className="text-xs text-fs-muted mb-2">Implied Probability (vig-free)</p>
                         <div className="flex items-center gap-3">
@@ -521,6 +600,22 @@ export default function TeamDashboard() {
             roster={rosterData}
             loading={rosterLoading}
             onBack={() => setShowRoster(false)}
+          />
+        ) : showNextGame && data?.upcoming?.eventId ? (
+          <NextGamePanel
+            sport={team.sport}
+            teamAbbr={getEspnAbbr(team.id, team.abbreviation)}
+            opponentAbbr={data.upcoming.opponentAbbr ?? ''}
+            teamFantasyAbbr={team.abbreviation}
+            opponentFantasyAbbr={getOpponentFantasyAbbr(data.upcoming.opponentAbbr ?? '', data.upcoming.opponent, team.sport)}
+            eventId={data.upcoming.eventId}
+            eventDate={data.upcoming.eventDate}
+            teamColor={team.colors.primary}
+            teamName={team.name}
+            opponentName={data.upcoming.opponent}
+            odds={data.oddsInfo}
+            isPreseason={data.upcoming.isPreseason}
+            onBack={() => setShowNextGame(false)}
           />
         ) : selectedGameId ? (
           <>
@@ -949,15 +1044,19 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
       awayAbbr = away?.team?.abbreviation
     }
 
+    const upcomingDateIso = schedule.upcoming.date
     upcoming = {
       date: isLive ? (status?.detail ?? status?.shortDetail) : getGameDetail(schedule.upcoming),
       opponent: opp.name,
+      opponentAbbr: opp.abbr,
       opponentLogo: opp.logo,
       location: opp.location,
       venue,
       isPreseason: schedule.upcoming.seasonType?.type === 1 || schedule.upcoming.season?.type === 1,
       isLive,
       eventId: schedule.upcoming.id,
+      eventDate: upcomingDateIso ? upcomingDateIso.slice(0, 10).replace(/-/g, '') : undefined,
+      kickoff: upcomingDateIso,
       homeScore,
       awayScore,
       homeAbbr,

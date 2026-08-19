@@ -3,12 +3,36 @@ import { espnSportMap } from '@/lib/providers/espn'
 
 const log = (msg: string) => console.log(`[odds] ${msg}`)
 
+/** Shift a YYYYMMDD date by ±days (returns YYYYMMDD). */
+function shiftDate(ymd: string, days: number): string {
+  const dt = new Date(Date.UTC(
+    parseInt(ymd.slice(0, 4), 10),
+    parseInt(ymd.slice(4, 6), 10) - 1,
+    parseInt(ymd.slice(6, 8), 10),
+  ))
+  dt.setUTCDate(dt.getUTCDate() + days)
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0')
+  const dd = String(dt.getUTCDate()).padStart(2, '0')
+  return `${dt.getUTCFullYear()}${mm}${dd}`
+}
+
 function parseMoneyline(val: unknown): number | null {
   if (val === undefined || val === null) return null
   if (typeof val === 'number') return val
   if (typeof val === 'string') {
     const cleaned = val.trim().replace(/,/g, '')
     const n = parseInt(cleaned, 10)
+    if (!isNaN(n)) return n
+  }
+  return null
+}
+
+function parseFloatValue(val: unknown): number | null {
+  if (val === undefined || val === null) return null
+  if (typeof val === 'number') return val
+  if (typeof val === 'string') {
+    const cleaned = val.trim().replace(/,/g, '')
+    const n = parseFloat(cleaned)
     if (!isNaN(n)) return n
   }
   return null
@@ -83,20 +107,6 @@ export async function GET(request: Request) {
 
   log(`Request params: sport=${sport} team=${team} eventId=${eventId} date=${providedDate}`)
 
-  // Skip ESPN fetch if game is more than 3 days away (odds won't be posted yet)
-  if (providedDate) {
-    const gameYear = parseInt(providedDate.slice(0, 4), 10)
-    const gameMonth = parseInt(providedDate.slice(4, 6), 10) - 1
-    const gameDay = parseInt(providedDate.slice(6, 8), 10)
-    const gameDt = new Date(gameYear, gameMonth, gameDay)
-    const now = new Date()
-    const diffDays = (gameDt.getTime() - now.getTime()) / 86400000
-    if (diffDays > 3) {
-      log(`Game ${providedDate} is ${Math.round(diffDays)} days away (>3), skipping odds fetch`)
-      return NextResponse.json({ odds: null, source: 'espn' })
-    }
-  }
-
   try {
     let gameDate: string
     let homeAbbr: string | undefined
@@ -148,8 +158,12 @@ export async function GET(request: Request) {
       log(`Upcoming game: ${awayAbbr} @ ${homeAbbr} on ${gameDate} (event ID: ${eventIdStr})`)
     }
 
-    // Step 3: Fetch scoreboard for the game date
-    const sbUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${gameDate}&limit=100`
+    // Step 3: Fetch scoreboard for the game date. ESPN groups games under their US
+    // local date, but schedule event timestamps are UTC — a night game on the East
+    // coast is "tomorrow" in UTC, so a single-date query misses it. Search a ±1 day
+    // window instead; the exact event is matched by ID below.
+    const dateWindow = `${shiftDate(gameDate, -1)}-${shiftDate(gameDate, 1)}`
+    const sbUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${dateWindow}&limit=100`
     log(`Fetching scoreboard: ${sbUrl}`)
 
     const sbRes = await fetch(sbUrl, { signal: AbortSignal.timeout(15000) })
@@ -254,6 +268,11 @@ export async function GET(request: Request) {
 
     const { homeML, awayML } = extractMoneylines(oddsObj)
 
+    // Spread + total come straight off the odds object when present (they are for
+    // NFL/NBA/NHL/MLB on the ESPN scoreboard).
+    const spread = parseFloatValue(oddsObj?.spread)
+    const overUnder = parseFloatValue(oddsObj?.overUnder)
+
     if (homeML === null || awayML === null) {
       log(`Incomplete moneylines: home=${homeML}, away=${awayML}`)
       return NextResponse.json({ odds: null, source: 'espn' })
@@ -261,12 +280,15 @@ export async function GET(request: Request) {
 
     log(`Raw moneylines: home=${homeML} (${sbHome?.team?.displayName}), away=${awayML} (${sbAway?.team?.displayName})`)
 
-    // Step 8: Determine which team is ours and compute probabilities
+    // Step 8: Determine which team is ours and compute probabilities. ESPN's `spread`
+    // is expressed from the home team's point of view (negative = home favorite), so
+    // flip it when the away team is ours to keep the display "our team's spread".
     const isHome = sbHomeAbbr === team.toUpperCase()
     const ourComp = isHome ? sbHome : sbAway
     const oppComp = isHome ? sbAway : sbHome
     const ourML = isHome ? homeML : awayML
     const oppML = isHome ? awayML : homeML
+    const ourSpread = spread != null ? (isHome ? spread : -spread) : null
 
     const normalized = normalizeVig(homeML, awayML)
     const ourProb = isHome ? normalized.home : normalized.away
@@ -299,6 +321,8 @@ export async function GET(request: Request) {
           prob: oppProb,
           isFavorite: !isEven && oppProb > ourProb,
         },
+        spread: ourSpread,
+        overUnder,
         sportsbook: provider,
         lastUpdated: sbEvent.date,
         commenceTime: sbEvent.date,
