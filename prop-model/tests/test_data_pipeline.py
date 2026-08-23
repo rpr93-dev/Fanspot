@@ -168,6 +168,69 @@ def test_missing_gameday_does_not_crash():
     assert hist.n_games == 5
 
 
+# ---- as-of plumbing (walk-forward safety) + absence honesty ----
+
+def test_as_of_excludes_later_games():
+    """``as_of`` is the inclusive last usable gameday: games after it are
+    excluded so a projection can't see the future. (Strictly-before-the-event
+    semantics are composed at the CLI layer by passing event_date - 1 day.)"""
+    rows = [
+        qb_row(1, 210, gameday="2025-09-08"),
+        qb_row(2, 220, gameday="2025-09-14"),
+        qb_row(3, 230, gameday="2025-09-15"),   # Monday game after the cutoff
+        qb_row(4, 240, gameday="2025-09-21"),
+    ]
+    hist = fetch(rows, as_of="2025-09-14")
+    assert hist.games["week"].tolist() == [1, 2]
+
+    hist_mon = fetch(rows, as_of="2025-09-15")
+    assert hist_mon.games["week"].tolist() == [1, 2, 3]
+
+    hist_all = fetch(rows)
+    assert hist_all.games["week"].tolist() == [1, 2, 3, 4]
+
+
+def test_as_of_measures_staleness_against_projection_date():
+    """Walk-forward runs would read every historical game as stale if staleness
+    were measured against today; it must use the as-of date instead."""
+    rows = [qb_row(1, 220, gameday="2025-10-01"), qb_row(2, 180, gameday="2025-10-08")]
+    fresh = fetch(rows, as_of="2025-10-12")
+    assert not any(f.code == "STALE" for f in fresh.flags)
+
+    stale = fetch(rows, as_of="2026-01-01")
+    stale_flags = [f for f in stale.flags if f.code == "STALE"]
+    assert stale_flags and stale_flags[0].severity == "warn"
+
+
+def test_calendar_gap_flagged_when_window_stretches():
+    """8 games spanning far more than 8 weeks means invisible absences (production
+    frames carry no DNP rows); the span itself is the cheap honest proxy."""
+    # 4 games, each 21 days apart: 63-day span vs a 21-day straight schedule.
+    rows = [
+        qb_row(1, 200, gameday="2025-09-08"),
+        qb_row(2, 210, gameday="2025-09-29"),
+        qb_row(3, 220, gameday="2025-10-20"),
+        qb_row(4, 230, gameday="2025-11-10"),
+    ]
+    hist = fetch(rows, min_games=4)
+    gap = [f for f in hist.flags if f.code == "CALENDAR_GAP"]
+    assert gap and gap[0].severity == "info"
+    assert "64" in gap[0].message or "63" in gap[0].message
+
+    # Consecutive weekly games produce no flag.
+    tight = fetch([qb_row(w, 200) for w in range(1, 7)])
+    assert not any(f.code == "CALENDAR_GAP" for f in tight.flags)
+
+
+def test_data_vintage_reads_newest_gameday():
+    from propmodel.data_pipeline import data_vintage
+
+    rows = [qb_row(1, 200), qb_row(2, 210, gameday="2025-09-24")]
+    frame = _weekly(rows)
+    assert data_vintage(frame).isoformat() == "2025-09-24"
+    assert data_vintage(pd.DataFrame(columns=["season", "week"])) is None
+
+
 # ---- schema validation (garbage data must fail loudly, not read as "no data") ----
 
 def test_validate_weekly_passes_valid_frame():

@@ -67,6 +67,80 @@ def test_confidence_tiers():
     assert project(hist_high, {"factor": 1.1, "low_sample": True}, {"factor": 1.0, "available": True}).confidence == "low"
 
 
+def test_missing_lines_do_not_lower_confidence():
+    """Line absence is a normal posture (offseason / keyless runs), not lower
+    model certainty: it must be reported as a note, never gate the tiers."""
+    hist = _history([200.0] * 10)
+    proj = project(hist, {"factor": 1.0, "low_sample": False}, {"factor": 1.0, "available": False})
+    assert proj.confidence == "high"
+    assert proj.note and "no Vegas lines" in proj.note
+
+    # With lines present, no such note.
+    with_lines = project(hist, {"factor": 1.0, "low_sample": False}, {"factor": 1.1, "available": True})
+    assert not (with_lines.note and "Vegas" in with_lines.note)
+
+
+def test_position_mismatch_refuses():
+    """A CB with recorded (zero) receiving rows is an impossible request:
+    refuse it loudly instead of projecting a confident 0.0."""
+    from tests.test_data_pipeline import _weekly
+    rows = []
+    for w in range(1, 9):
+        r = {
+            "player_id": "00-000777", "player_name": "Test CB", "position": "CB",
+            "recent_team": "HOU", "opponent_team": "TEN",
+            "season": 2025, "week": w, "gameday": f"2025-09-{10 + w:02d}",
+            "game_id": f"2025_{w:02d}_HOU_TEN", "games": 1,
+            "passing_yards": None, "passing_tds": None,
+            "rushing_yards": None, "rushing_tds": None,
+            "receiving_yards": 0.0, "receptions": 0.0, "receiving_tds": None,
+        }
+        rows.append(r)
+    hist = fetch_player_history("00-000777", "receiving_yards", seasons=[2025],
+                                fetcher=lambda s: _weekly(rows))
+    assert hist.ok  # the data itself looks fine — zeros are recorded plays
+    proj = project(hist, {"factor": 1.0}, {"factor": 1.0})
+    assert proj.projection is None
+    assert proj.refused_reason and "POSITION_MISMATCH" in proj.refused_reason
+    assert "CB" in proj.refused_reason
+
+
+def test_absence_notes_surface_in_note_column():
+    """Missed weeks inside the window and calendar gaps are absence-honesty
+    signals; they belong where users can see them."""
+    from datetime import date, timedelta
+
+    from tests.test_data_pipeline import _weekly  # reuse the frame builder
+
+    start = date(2025, 9, 8)
+
+    def row(week: int, idx: int, played: bool):
+        return {
+            "player_id": QB_ID, "player_name": "Test QB", "position": "QB",
+            "recent_team": "HOU", "opponent_team": "TEN",
+            "season": 2025, "week": week,
+            "gameday": (start + timedelta(days=7 * idx)).isoformat(),
+            "game_id": f"2025_{week:02d}_HOU_TEN",
+            "games": 1 if played else 0,
+            "passing_yards": 200.0 if played else None,
+            "passing_tds": 1 if played else None,
+            "rushing_yards": None, "rushing_tds": None,
+            "receiving_yards": None, "receptions": None, "receiving_tds": None,
+        }
+
+    # Week 3 is a roster week without a game (injury/scratch): the window
+    # covers weeks 1-5 but only 4 were played.
+    rows = [row(1, 0, True), row(2, 1, True), row(3, 2, False), row(4, 3, True), row(5, 4, True)]
+    hist = fetch_player_history(QB_ID, "tds", seasons=[2025], min_games=4,
+                                fetcher=lambda s: _weekly(rows))
+    assert any(f.code == "MISSED_GAMES" for f in hist.flags)
+    assert any(f.code == "CALENDAR_GAP" for f in hist.flags)
+    proj = project(hist, {"factor": 1.0}, {"factor": 1.0})
+    assert proj.note
+    assert "missed week" in proj.note
+    assert "gap days" in proj.note
+
+
 def test_refuses_insufficient_history():
     hist = _history([200.0, 210.0])
     proj = project(hist, {"factor": 1.0, "low_sample": False}, {"factor": 1.0, "available": True})
