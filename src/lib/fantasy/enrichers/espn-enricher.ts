@@ -12,10 +12,6 @@ function log(level: IntegrationLog['level'], source: string, message: string, de
   console.log(`[${level.toUpperCase()}] [espn-enricher] ${message}`, details ?? '')
 }
 
-export function getEspnEnricherLogs(): IntegrationLog[] {
-  return [...logs]
-}
-
 const espnUrlCache = new Map<string, { data: RawEspnPlayer[]; expiresAt: number }>()
 
 /**

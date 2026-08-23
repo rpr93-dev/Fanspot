@@ -2,7 +2,7 @@ import type { CanonicalPlayer, IntegrationLog } from './player-types'
 import { FANTASY_POSITIONS_NFL } from './player-types'
 import { PRO_TEAM_MAPPER } from '../fantasy-types'
 import { SLEEPER_BASE, SLEEPER_PLAYERS_TTL_MS } from '../providers/fantasy-constants'
-import { fetchOrCache, getCached, setCached } from '../cache/cacheService'
+import { fetchOrCache } from '../cache/cacheService'
 
 const SLEEPER_MASTER_CACHE_KEY = 'sleeper:master:nfl'
 
@@ -30,10 +30,6 @@ function log(level: IntegrationLog['level'], source: string, message: string, de
   logs.push(entry)
   const prefix = level === 'error' ? '[ERROR]' : level === 'warn' ? '[WARN]' : '[INFO]'
   console.log(`${prefix} [sleeper-master] ${message}`, details ?? '')
-}
-
-export function getSleeperMasterLogs(): IntegrationLog[] {
-  return [...logs]
 }
 
 export async function fetchSleeperPlayersRaw(): Promise<Record<string, Record<string, unknown>>> {
@@ -213,11 +209,4 @@ export async function buildMasterPlayerList(): Promise<MasterPlayerList> {
   log('info', 'sleeper', `Master list: ${players.length} active players (${fantasyCount} fantasy-relevant), ${skipped} skipped`)
 
   return { players, bySleeperId, byEspnId, byGsisId, byPfrId, rawBySleeperId, count: players.length, fantasyCount }
-}
-
-export function clearMasterPlayerCache(): void {
-  const cached = getCached<Record<string, Record<string, unknown>>>(SLEEPER_MASTER_CACHE_KEY)
-  if (cached) {
-    setCached(SLEEPER_MASTER_CACHE_KEY, cached.data)
-  }
 }

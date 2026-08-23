@@ -30,24 +30,12 @@ const memoryProvider: CacheProvider = {
 
 let provider: CacheProvider = memoryProvider
 
-export function setCacheProvider(p: CacheProvider) {
-  provider = p
-}
-
-export function getCacheProvider(): CacheProvider {
-  return provider
-}
-
 export function getCached<T>(key: string): { data: T; ts: number } | null {
   return provider.get<T>(key)
 }
 
 export function setCached<T>(key: string, data: T): void {
   provider.set(key, data)
-}
-
-export function invalidate(key: string): void {
-  provider.delete(key)
 }
 
 export function isFresh(ts: number, ttl: number): boolean {
@@ -57,10 +45,6 @@ export function isFresh(ts: number, ttl: number): boolean {
 export function isStale(ts: number, ttl: number, stale: number): boolean {
   const age = Date.now() - ts
   return age >= ttl && age < ttl + stale
-}
-
-export function isExpired(ts: number, ttl: number, stale: number): boolean {
-  return Date.now() - ts >= ttl + stale
 }
 
 export async function swr<T>(

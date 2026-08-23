@@ -4,7 +4,6 @@
 @theme {
   --animate-fade-in: fade-in 0.45s ease-out both;
   --animate-fade-in-up: fade-in-up 0.5s ease-out both;
-  --animate-wigolo-progress: wigolo-progress 2s ease-in-out infinite;
 
   --color-fs-bg: #0b0f0d;
   --color-fs-panel: #111712;
@@ -31,12 +30,6 @@ body {
 @keyframes fade-in-up {
   from { opacity: 0; transform: translateY(12px) }
   to { opacity: 1; transform: translateY(0) }
-}
-
-@keyframes wigolo-progress {
-  0% { transform: translateX(-100%) }
-  50% { transform: translateX(100%) }
-  100% { transform: translateX(400%) }
 }
 
 @keyframes glow-pulse {

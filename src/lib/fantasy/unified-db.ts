@@ -4,11 +4,11 @@ import type {
   IntegrationLog,
 } from './player-types'
 import { FANTASY_POSITIONS_NFL } from './player-types'
-import { buildMasterPlayerList, getSleeperMasterLogs, clearMasterPlayerCache, type MasterPlayerList } from './sleeper-master'
+import { buildMasterPlayerList, type MasterPlayerList } from './sleeper-master'
 import { buildMatchContext, logUnmatchedPlayers, type MatchContext } from './player-matching-engine'
-import { enrichFromEspn, getEspnEnricherLogs, type EspnEnrichmentResult } from './enrichers/espn-enricher'
-import { enrichInjuries, getInjuryEnricherLogs, mapInjuryStatus, type InjuryEnrichmentResult } from './enrichers/injury-enricher'
-import { enrichVegas, getVegasEnricherLogs, type VegasEnrichmentResult } from './enrichers/vegas-enricher'
+import { enrichFromEspn, type EspnEnrichmentResult } from './enrichers/espn-enricher'
+import { enrichInjuries, mapInjuryStatus, type InjuryEnrichmentResult } from './enrichers/injury-enricher'
+import { enrichVegas, type VegasEnrichmentResult } from './enrichers/vegas-enricher'
 import { PRO_TEAM_MAPPER } from '../fantasy-types'
 import type { AdpSource } from '../fantasy-types'
 import { validateUnifiedDatabase, type ValidationReport } from './validation'
@@ -21,10 +21,6 @@ function log(level: IntegrationLog['level'], source: string, message: string, de
   logs.push({ timestamp: Date.now(), level, source, message, details })
   const prefix = level === 'error' ? '[ERROR]' : level === 'warn' ? '[WARN]' : '[INFO]'
   console.log(`${prefix} [unified-db] ${message}`, details ?? '')
-}
-
-export function getUnifiedDbLogs(): IntegrationLog[] {
-  return [...logs, ...getSleeperMasterLogs(), ...getEspnEnricherLogs(), ...getInjuryEnricherLogs(), ...getVegasEnricherLogs()]
 }
 
 export interface BuildOptions {
@@ -62,10 +58,6 @@ const UNIFIED_DB_TTL_MS = 15 * 60 * 1000
  * (Sleeper, ESPN, Vegas) from being fetched N times in parallel.
  */
 let buildInFlight: Promise<{ players: UnifiedPlayer[]; report: BuildReport }> | null = null
-
-export function getLastBuildReport(): BuildReport | null {
-  return lastBuildReport
-}
 
 export async function buildUnifiedDatabase(options: BuildOptions = {}): Promise<{
   players: UnifiedPlayer[]
@@ -254,13 +246,6 @@ async function buildUnifiedDatabaseInternal(options: BuildOptions = {}): Promise
   log('info', 'pipeline', `Build complete: ${unified.length} unified players in ${buildTimeMs}ms`)
 
   return { players: unified, report }
-}
-
-export function invalidateUnifiedDb(): void {
-  unifiedCache = null
-  cacheExpiresAt = 0
-  clearMasterPlayerCache()
-  log('info', 'cache', 'Unified database cache invalidated')
 }
 
 export function unifiedToFantasyPlayerEnriched(
