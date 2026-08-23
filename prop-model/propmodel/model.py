@@ -140,14 +140,6 @@ def _weighted_var(values: np.ndarray, weights: np.ndarray, center: float) -> flo
     return max(0.0, var)
 
 
-def recency_weighted_stats(values: list[float] | np.ndarray, halflife: float = 4.0):
-    """Recency-weighted mean and (unbiased) weighted std of game values."""
-    x = np.asarray(values, dtype=float)
-    w = recency_weights(len(x), halflife)
-    mean = float(np.average(x, weights=w))
-    return mean, math.sqrt(_weighted_var(x, w, mean))
-
-
 def _confidence(
     n_games: int,
     history_ok: bool,

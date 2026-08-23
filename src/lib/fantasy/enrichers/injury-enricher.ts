@@ -7,10 +7,6 @@ function log(level: IntegrationLog['level'], source: string, message: string, de
   logs.push(entry)
 }
 
-export function getInjuryEnricherLogs(): IntegrationLog[] {
-  return [...logs]
-}
-
 export interface InjuryEnrichmentResult {
   injuries: Map<string, PlayerInjury>
   source: string

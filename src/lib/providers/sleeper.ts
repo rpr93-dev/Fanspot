@@ -49,39 +49,3 @@ export async function getSleeperPlayers(sport: FantasySport): Promise<Record<str
   }
 }
 
-let espnIdLookupCache = new Map<FantasySport, Map<number, SleeperPlayer>>()
-
-export function getSleeperByEspnId(sport: FantasySport, espnId: number): SleeperPlayer | undefined {
-  const cache = espnIdLookupCache.get(sport)
-  if (cache) return cache.get(espnId)
-
-  const players = sleeperPlayersCache.get(sport)?.data
-  if (!players || Object.keys(players).length === 0) return undefined
-
-  const lookup = new Map<number, SleeperPlayer>()
-  for (const player of Object.values(players)) {
-    if (player.espn_id > 0) {
-      lookup.set(player.espn_id, player)
-    }
-  }
-  espnIdLookupCache.set(sport, lookup)
-  return lookup.get(espnId)
-}
-
-export function clearSleeperCache(sport?: FantasySport): void {
-  if (sport) {
-    sleeperPlayersCache.delete(sport)
-    espnIdLookupCache.delete(sport)
-  } else {
-    sleeperPlayersCache.clear()
-    espnIdLookupCache.clear()
-  }
-}
-
-export function getSleeperCacheStats(): { entries: number; expired: boolean }[] {
-  return Array.from(sleeperPlayersCache.entries()).map(([sport, entry]) => ({
-    sport,
-    entries: Object.keys(entry.data).length,
-    expired: Date.now() >= entry.expiresAt,
-  }))
-}

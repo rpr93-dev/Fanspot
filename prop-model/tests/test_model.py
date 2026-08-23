@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from datetime import date, timedelta
 
+import numpy as np
 import pytest
 
 from propmodel.data_pipeline import fetch_player_history
@@ -12,7 +13,6 @@ from propmodel.model import (
     ModelWeights,
     effective_sample_size,
     project,
-    recency_weighted_stats,
     recency_weights,
 )
 
@@ -41,16 +41,6 @@ def _history(values: list[float], stat: str = "passing_yards", **kw):
     from tests.test_data_pipeline import _weekly  # reuse the frame builder
     frame = _weekly(_qb_rows(values))
     return fetch_player_history(QB_ID, stat, seasons=[2025], fetcher=lambda s: frame, **kw)
-
-
-def test_recency_weighting_prefers_recent_games():
-    hist = _history([100.0, 100.0, 200.0])
-    mean, _ = recency_weighted_stats([100.0, 100.0, 200.0], halflife=4.0)
-    # Simple average would be 133.3; recency-weighted must be higher.
-    assert mean > 133.3
-    # And with a strong halflife, very recent games dominate.
-    mean2, _ = recency_weighted_stats([100.0, 200.0], halflife=1.0)
-    assert mean2 > 150.0
 
 
 def test_projection_multiplies_factors():
@@ -103,7 +93,8 @@ def test_thin_history_shrinks_toward_position_prior():
     """A short sample leans toward the position prior instead of trusting a
     tiny raw mean; prior_strength=0 recovers the unshrunk behavior."""
     hist = _history([300.0, 290.0, 310.0])
-    raw_mean, _ = recency_weighted_stats([300.0, 290.0, 310.0], halflife=4.0)
+    x = np.asarray([300.0, 290.0, 310.0])
+    raw_mean = float(np.average(x, weights=recency_weights(len(x), halflife=4.0)))
     proj = project(hist, {"factor": 1.0}, {"factor": 1.0},
                    position_prior=200.0, weights=ModelWeights(prior_strength=3.0))
     assert proj.baseline < raw_mean          # pulled toward the prior
@@ -118,8 +109,10 @@ def test_prior_pull_weakens_as_history_grows():
     shrinkage must fade out as real evidence accumulates."""
     thin = _history([300.0, 290.0, 310.0])
     full = _history([300.0] * 8)
-    raw_thin, _ = recency_weighted_stats([300.0, 290.0, 310.0], halflife=4.0)
-    raw_full, _ = recency_weighted_stats([300.0] * 8, halflife=4.0)
+    raw_thin = float(np.average(np.asarray([300.0, 290.0, 310.0]),
+                                weights=recency_weights(3, halflife=4.0)))
+    raw_full = float(np.average(np.asarray([300.0] * 8),
+                                weights=recency_weights(8, halflife=4.0)))
     p_thin = project(thin, {"factor": 1.0}, {"factor": 1.0}, position_prior=200.0)
     p_full = project(full, {"factor": 1.0}, {"factor": 1.0}, position_prior=200.0)
     pull_thin = raw_thin - p_thin.baseline

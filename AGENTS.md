@@ -8,6 +8,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 
 - Setup: `cd prop-model && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt pyarrow requests` (system Python has no pandas; `pyarrow` is needed for the direct nflverse parquet fallback, `requests` for downloads).
 - On Python ≥3.13 `nfl_data_py` fails to install/404s; the fetcher falls back to direct nflverse parquet downloads automatically. Live pulls are cached under `prop-model/cache/*.pkl` via `DiskCache` (6h TTL) — any CLI pull populates it.
+- Sharp edge: with `prop-model/.venv` present, `npm run build` (Turbopack) fails tracing `src/app/api/prop-model/route.ts` ("Symlink ... is invalid, it points out of the filesystem root"). Temporarily move the venv out of the tree to build; it is git-ignored.
 - Tests: `.venv/bin/python -m pytest tests/ -q` run from `prop-model/`. No network needed.
 - Backtest/validation: `.venv/bin/python backtest.py --help` — walks a cached season as-of each week. Interval calibration constants (`model.CALIBRATED_SD_MULT_*`) were fitted on 2024+2025 walk-forwards; refit via the quantile method in the backtest if the interval formula changes.
 

@@ -89,68 +89,6 @@ export function buildMatchContext(master: {
   }
 }
 
-export function matchCanonicalToEspn(
-  canonical: CanonicalPlayer,
-  espnPlayer: UnmatchedEspnPlayer,
-  ctx: MatchContext,
-): PlayerMatchResult {
-  const strategies: Array<{
-    name: PlayerMatchResult['strategy']
-    match: boolean
-    confidence: number
-  }> = []
-
-  if (canonical.espnId != null && canonical.espnId === espnPlayer.espnId) {
-    return {
-      canonical,
-      strategy: 'espn-id',
-      confidence: 1.0,
-    }
-  }
-
-  const npKey = `${normalizeName(espnPlayer.fullName)}|${espnPlayer.position}`
-  const existingNp = ctx.master.byNamePosition.get(npKey)
-  if (existingNp) {
-    return {
-      canonical: existingNp,
-      strategy: 'name-position',
-      confidence: 0.95,
-    }
-  }
-
-  const ntKey = `${normalizeName(espnPlayer.fullName)}|${espnPlayer.team}`
-  const existingNt = ctx.master.byNameTeam.get(ntKey)
-  if (existingNt) {
-    return {
-      canonical: existingNt,
-      strategy: 'name-team',
-      confidence: 0.9,
-    }
-  }
-
-  let bestFuzzy: { player: CanonicalPlayer; score: number } | null = null
-  for (const p of ctx.master.bySleeperId.values()) {
-    if (!FANTASY_POSITIONS_NFL.has(p.position)) continue
-    const sim = nameSimilarity(espnPlayer.fullName, p.fullName)
-    if (sim > FUZZY_THRESHOLD && sim > (bestFuzzy?.score ?? 0)) {
-      bestFuzzy = { player: p, score: sim }
-    }
-  }
-  if (bestFuzzy) {
-    return {
-      canonical: bestFuzzy.player,
-      strategy: 'fuzzy',
-      confidence: bestFuzzy.score,
-    }
-  }
-
-  return {
-    canonical,
-    strategy: 'new',
-    confidence: 0.1,
-  }
-}
-
 export function matchEspnPlayerToMaster(
   espnPlayer: UnmatchedEspnPlayer,
   ctx: MatchContext,

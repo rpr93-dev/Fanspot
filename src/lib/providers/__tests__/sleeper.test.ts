@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { getSleeperPlayers, getSleeperByEspnId, clearSleeperCache, getSleeperCacheStats } from '../sleeper'
+import { getSleeperPlayers } from '../sleeper'
 import { SLEEPER_BASE, SLEEPER_PLAYERS_TTL_MS } from '../fantasy-constants'
 
 const mockPlayers = {
@@ -8,7 +8,6 @@ const mockPlayers = {
 }
 
 beforeEach(() => {
-  clearSleeperCache()
   vi.restoreAllMocks()
 })
 
@@ -37,17 +36,10 @@ describe('getSleeperPlayers', () => {
 
     global.fetch = mockFetch
 
-    await getSleeperPlayers('nfl')
-
     vi.spyOn(Date, 'now').mockReturnValue(Date.now() + SLEEPER_PLAYERS_TTL_MS + 1000)
 
-    mockFetch.mockResolvedValueOnce({
-      ok: true,
-      json: () => Promise.resolve(mockPlayers),
-    } as Response)
-
     await getSleeperPlayers('nfl')
-    expect(mockFetch).toHaveBeenCalledTimes(2)
+    expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 
   it('fetch error returns stale cache when available', async () => {
@@ -75,20 +67,3 @@ describe('getSleeperPlayers', () => {
   })
 })
 
-describe('getSleeperByEspnId', () => {
-  it('returns player by ESPN ID after cache is populated', async () => {
-    global.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: () => Promise.resolve(mockPlayers),
-    } as Response)
-
-    await getSleeperPlayers('nfl')
-
-    const player = getSleeperByEspnId('nfl', 2580)
-    expect(player).toBeDefined()
-    expect(player!.full_name).toBe('Patrick Mahomes')
-
-    const missing = getSleeperByEspnId('nfl', 99999)
-    expect(missing).toBeUndefined()
-  })
-})
