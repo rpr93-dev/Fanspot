@@ -60,6 +60,34 @@ function apiOrigin(origin?: string): string {
   return origin ?? ''
 }
 
+const SELF_FETCH_RETRY_DELAY_MS = 250
+
+/**
+ * A failed self-route sub-fetch is a provider problem, not "no games". On a cold
+ * process the ~6 parallel /api/schedule sub-calls race route compilation and a subset
+ * 500s in single-digit ms; treating that as `{ events: [] }` silently emptied the
+ * Next-Game/Last-5 cards. Retry once after a short delay; a persistent failure
+ * returns null so callers can surface an explicit problem instead of empty data.
+ */
+async function selfFetch(url: string, timeoutMs: number): Promise<Response | null> {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+    if (res.ok) return res
+    console.warn(`[espn] sub-fetch ${url} -> ${res.status}; retrying once`)
+  } catch (err) {
+    console.warn(`[espn] sub-fetch ${url} failed (${err}); retrying once`)
+  }
+  await new Promise((resolve) => setTimeout(resolve, SELF_FETCH_RETRY_DELAY_MS))
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(timeoutMs) })
+    if (!res.ok) console.warn(`[espn] sub-fetch ${url} -> ${res.status} after retry`)
+    return res.ok ? res : null
+  } catch (err) {
+    console.warn(`[espn] sub-fetch ${url} failed after retry (${err})`)
+    return null
+  }
+}
+
 export async function fetchTeamSchedule(
   sport: string,
   teamId: string,
@@ -87,18 +115,13 @@ export async function fetchTeamSchedule(
     // Fetch all season years in parallel
     const seasonResults = await Promise.all(
       seasonYears.map(async (year) => {
-        try {
-          const res = await fetch(`${base}/api/schedule?sport=${sport}&team=${abbr}&season=${year}`, {
-            signal: AbortSignal.timeout(10000),
-          })
-          if (res.ok) {
-            const data = await res.json()
-            return { events: (data?.events as EspnEvent[]) ?? [], problem: data.events?.length === 0 ? `ESPN season=${year} returned 0 events` : '' }
-          }
-          return { events: [], problem: `ESPN season=${year} returned status ${res.status}` }
-        } catch {
-          return { events: [], problem: `ESPN season=${year} fetch failed` }
+        const url = `${base}/api/schedule?sport=${sport}&team=${abbr}&season=${year}`
+        const res = await selfFetch(url, 10000)
+        if (!res) {
+          return { events: [], problem: `Schedule unavailable: /api/schedule season=${year} failed after retry` }
         }
+        const data = await res.json()
+        return { events: (data?.events as EspnEvent[]) ?? [], problem: data.events?.length === 0 ? `ESPN season=${year} returned 0 events` : '' }
       })
     )
 
@@ -110,10 +133,8 @@ export async function fetchTeamSchedule(
 
     // Fetch current schedule in parallel with season fetches (not in the array since it's a different URL)
     try {
-      const currentRes = await fetch(`${base}/api/schedule?sport=${sport}&team=${abbr}`, {
-        signal: AbortSignal.timeout(10000),
-      })
-      if (currentRes.ok) {
+      const currentRes = await selfFetch(`${base}/api/schedule?sport=${sport}&team=${abbr}`, 10000)
+      if (currentRes) {
         const data = await currentRes.json()
         if (data?.events?.length) {
           const existingIds = new Set(allEvents.map((e) => e.id))
@@ -124,6 +145,8 @@ export async function fetchTeamSchedule(
             }
           }
         }
+      } else {
+        problems.push(`Schedule unavailable: /api/schedule current window failed after retry`)
       }
     } catch (e) { console.error('[espn] current schedule error:', e) }
 
@@ -137,32 +160,34 @@ export async function fetchTeamSchedule(
 
     async function fetchScoreboard(dates: string, existingIds: Set<string>) {
       try {
-        const res = await fetch(`${base}/api/schedule?sport=${sport}&team=${abbr}&source=scoreboard&dates=${dates}`)
-        if (res.ok) {
-          const data = await res.json()
-          if (data?.events) {
-            for (const e of data.events) {
-              const comps = e.competitions?.[0]?.competitors ?? []
-              if (!comps.some((c: any) => c.team?.abbreviation === abbr)) continue
-              if (e.competitions?.[0]?.competitors) {
-                for (const c of e.competitions[0].competitors) {
-                  c.score = normalizeScore(c.score)
-                }
+        const res = await selfFetch(`${base}/api/schedule?sport=${sport}&team=${abbr}&source=scoreboard&dates=${dates}`, 10000)
+        if (!res) {
+          problems.push(`Schedule unavailable: scoreboard dates=${dates} failed after retry`)
+          return
+        }
+        const data = await res.json()
+        if (data?.events) {
+          for (const e of data.events) {
+            const comps = e.competitions?.[0]?.competitors ?? []
+            if (!comps.some((c: any) => c.team?.abbreviation === abbr)) continue
+            if (e.competitions?.[0]?.competitors) {
+              for (const c of e.competitions[0].competitors) {
+                c.score = normalizeScore(c.score)
               }
-              const sbOdds = e.competitions?.[0]?.odds
-              if (!existingIds.has(e.id)) {
-                allEvents.push(e)
-                existingIds.add(e.id)
-              } else if (sbOdds) {
-                const existing = allEvents.find((x: any) => x.id === e.id)
-                if (existing && !existing.competitions?.[0]?.odds) {
-                  existing.competitions[0].odds = sbOdds
-                }
+            }
+            const sbOdds = e.competitions?.[0]?.odds
+            if (!existingIds.has(e.id)) {
+              allEvents.push(e)
+              existingIds.add(e.id)
+            } else if (sbOdds) {
+              const existing = allEvents.find((x: any) => x.id === e.id)
+              if (existing && !existing.competitions?.[0]?.odds) {
+                existing.competitions[0].odds = sbOdds
               }
             }
           }
         }
-    } catch (e) { console.error('[espn] current schedule fetch error:', e) }
+      } catch (e) { console.error('[espn] scoreboard fetch error:', e) }
     }
 
     if (cfg) {
@@ -201,6 +226,14 @@ export async function fetchTeamSchedule(
     }
 
     const unique = deduplicateById(allEvents)
+
+    // An empty result caused by sub-fetch failures is a provider problem, not a quiet
+    // day: caching it would pin the blackout onto the next two minutes of requests too.
+    // (Genuine "no events" responses only carry informational problems and stay cached.)
+    const hardFailures = problems.filter((p) => p.startsWith('Schedule unavailable:'))
+    if (unique.length === 0 && hardFailures.length > 0) {
+      return { events: unique, problems }
+    }
 
     const result = { events: unique, problems }
     scheduleCache.set(cacheKey, { ...result, ts: Date.now() })

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { SUPPORTED_SPORTS, isFantasySportLive } from '@/lib/providers/fantasy-constants'
 import { buildUnifiedDatabase, unifiedToFantasyPlayerEnriched } from '@/lib/fantasy/unified-db'
-import { formatProjStats } from '@/lib/fantasy/steal-engine'
+import { computeMarketAdp, formatProjStats } from '@/lib/fantasy/steal-engine'
 import { searchWeb } from '@/lib/wigolo'
 import type { FantasySport, FantasyPlayerEnriched } from '@/lib/fantasy-types'
 
@@ -51,18 +51,18 @@ export async function GET(
 
     const { players: unified } = await buildUnifiedDatabase({ season })
 
-    let player: FantasyPlayerEnriched | undefined
-    for (const u of unified) {
-      const normalized = unifiedToFantasyPlayerEnriched(u) as unknown as FantasyPlayerEnriched
-      if (normalized.id === id) {
-        player = normalized
-        break
-      }
-    }
+    // Map every row once: the within-position ADP rank must be computed over the same
+    // full pool the Steals board ranks, not just the requested player.
+    const normalized = unified.map(
+      (u) => unifiedToFantasyPlayerEnriched(u) as unknown as FantasyPlayerEnriched,
+    )
+    const player = normalized.find((p) => p.id === id)
 
     if (!player) {
       return NextResponse.json({ error: 'player-not-found', playerId: id }, { status: 404 })
     }
+
+    const marketAdp = computeMarketAdp(player, normalized)
 
     const s = player.sleeper as Record<string, unknown> | undefined
     const name = player.player.fullName
@@ -96,7 +96,11 @@ export async function GET(
           ? { year: player.seasonActualsYear, points: Math.round(player.seasonActuals.points) }
           : null,
         market: {
-          adpRank: player.pprRank,
+          // Board-consistent within-position rank, plus the league-wide rank, both
+          // labelled so the card can never contradict the board's ADP figure.
+          adpRank: marketAdp.adpRank,
+          overallAdpRank: marketAdp.overallAdpRank,
+          adpLabel: marketAdp.label,
           adpSource: player.adpSource ?? 'espn',
           ownedPct: Math.round(player.player.ownership?.percentOwned ?? 0),
           startedPct: Math.round(player.player.ownership?.percentStarted ?? 0),

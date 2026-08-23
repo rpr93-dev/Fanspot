@@ -454,6 +454,49 @@ export function envAdjustedGap(row: StealRow): number {
   return row.gap + Math.round((row.envScore - 50) / 10)
 }
 
+export interface MarketAdp {
+  /** Within-position ADP rank — the same number the Steals board's field bar shows. */
+  adpRank?: number
+  /** League-wide rank carried by the unified row (ESPN PPR rank). */
+  overallAdpRank?: number
+  /** Both figures in one labelled string, e.g. "QB #12 - overall #102". */
+  label?: string
+}
+
+/**
+ * The player-detail card must quote the same within-position ADP rank the board shows —
+ * `pprRank` on the unified row is LEAGUE-WIDE, so quoting it as "ADP" made Stafford read
+ * "#102" on the card while his QB board said "#12". This mirrors buildStealBoard's
+ * eligibility gate and per-position ADP sort (default board config: PPR / ESPN) so both
+ * surfaces agree; the league-wide rank rides along, clearly labelled.
+ */
+export function computeMarketAdp(
+  target: FantasyPlayerEnriched,
+  players: FantasyPlayerEnriched[],
+): MarketAdp {
+  const overall = target.pprRank
+  if (overall == null || overall <= 0) return {}
+  const pos = getPosKey(target)
+  if (!new Set<string>(BOARD_POSITIONS).has(pos)) return { overallAdpRank: overall }
+
+  const group = players.filter(
+    (p) =>
+      isActivePlayer(p) &&
+      p.syntheticEspnId !== true &&
+      getPosKey(p) === pos &&
+      formatPoints(p, 'ppr') > 0 &&
+      (p.player.ownership?.percentOwned ?? 0) >= ROSTER_RELEVANCE_PCT &&
+      p.pprRank != null &&
+      p.pprRank > 0,
+  )
+  group.sort((a, b) => (a.pprRank as number) - (b.pprRank as number))
+  const adpRank = group.findIndex((p) => p.id === target.id)
+  if (adpRank === -1) return { overallAdpRank: overall }
+  const rank = adpRank + 1
+  return { adpRank: rank, overallAdpRank: overall, label: `${pos} #${rank} - overall #${overall}` }
+}
+
+
 /** The prior-production fact behind the confidence score, phrased for the note. */
 function buildConfidenceDriver(p: FantasyPlayerEnriched): string {
   if (missedRecentSeason(p)) return 'No production last season'
