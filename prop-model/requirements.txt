@@ -4,6 +4,10 @@
 pandas>=2.0
 numpy>=1.24
 nfl_data_py>=0.3.0
+# Direct-download fallback for the live weekly pull (the only path on
+# Python >= 3.13, where nfl_data_py can't install). Used to be undeclared,
+# which made live runs die with ModuleNotFoundError on lean venvs.
+requests>=2.31
 
 # dev / test
 pytest>=8.0

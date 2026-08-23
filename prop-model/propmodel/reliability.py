@@ -101,9 +101,19 @@ class DiskCache:
     def get(self, key: str):
         pk, js = self._paths(key)
         if self._fresh(pk):
-            return pd.read_pickle(pk)
+            try:
+                return pd.read_pickle(pk)
+            except Exception as e:  # noqa: BLE001 — corrupt entry must not wedge every run
+                logger.warning("Cache entry %s unreadable (%s) — treating as a miss", key, e)
+                pk.unlink(missing_ok=True)
+                return None
         if self._fresh(js):
-            return json.loads(js.read_text(encoding="utf-8"))
+            try:
+                return json.loads(js.read_text(encoding="utf-8"))
+            except Exception as e:  # noqa: BLE001
+                logger.warning("Cache entry %s unreadable (%s) — treating as a miss", key, e)
+                js.unlink(missing_ok=True)
+                return None
         return None
 
     def set(self, key: str, value: Any) -> None:
@@ -129,12 +139,21 @@ def cached_fetcher(
     fetcher: Callable[[list[int]], pd.DataFrame],
     cache: DiskCache,
     prefix: str = "weekly",
+    validator: Callable[[Any], bool] | None = None,
 ) -> Callable[[list[int]], pd.DataFrame]:
-    """Wrap a fetcher so identical season lists hit the disk cache."""
+    """Wrap a fetcher so identical season lists hit the disk cache.
+
+    ``validator`` (optional) is called on a cache hit; when it returns False the
+    entry is treated as a miss (e.g. a cached frame from an older schema that
+    would silently project nobody), and the fetcher runs to replace it.
+    """
 
     def wrapped(seasons: list[int]) -> pd.DataFrame:
         key = _key(prefix, sorted(int(s) for s in seasons))
         hit = cache.get(key)
+        if hit is not None and validator is not None and not validator(hit):
+            logger.warning("Cached %s for seasons %s failed validation — refetching", prefix, sorted(seasons))
+            hit = None
         if hit is not None:
             logger.info("Cache hit for %s (seasons %s)", prefix, sorted(seasons))
             return hit
