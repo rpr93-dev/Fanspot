@@ -61,8 +61,8 @@ def test_ratio_normalized_against_league_average():
 
 
 def test_ratio_shrinks_toward_neutral_for_short_windows():
-    """With default shrink_games=3, a ratio from only g games carries
-    g/(g+3) of its raw signal — a 2-game read keeps 40% of the matchup edge."""
+    """With default shrink_games=6, a ratio from only g games carries
+    g/(g+6) of its raw signal — a 2-game read keeps 25% of the matchup edge."""
     rows = [
         wr("A", "HOU", 1, 140), wr("C", "HOU", 2, 160),   # HOU raw ratio 1.2
         wr("B", "LV", 1, 90), wr("D", "LV", 2, 110),
@@ -70,8 +70,8 @@ def test_ratio_shrinks_toward_neutral_for_short_windows():
     rates = defense_allowed("receiving_yards", seasons=[2025], min_games=2,
                             fetcher=lambda s: _frame(rows))
     hou = rates[rates["team"] == "HOU"].iloc[0]
-    assert hou["ratio"] == pytest.approx(1.0 + (1.2 - 1.0) * (2 / 5))
-    assert rates[rates["team"] == "LV"].iloc[0]["ratio"] == pytest.approx(1.0 - (1.0 - 0.8) * (2 / 5))
+    assert hou["ratio"] == pytest.approx(1.0 + (1.2 - 1.0) * (2 / 8))
+    assert rates[rates["team"] == "LV"].iloc[0]["ratio"] == pytest.approx(1.0 - (1.0 - 0.8) * (2 / 8))
 
 
 def test_low_sample_keeps_shrunk_ratio_and_flag():

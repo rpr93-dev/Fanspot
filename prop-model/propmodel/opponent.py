@@ -17,9 +17,11 @@ produce the stat are counted (a QB's rushing yards never counts toward
 
 Statistical choices
 -------------------
-- *Window*: the last ``window`` team games (default 5) per defense. A matchup
+- *Window*: the last ``window`` team games (default 8) per defense. A matchup
   read should reflect recent form, not the whole season — and STAGE 4 can align
-  it with the player's own history window by passing the same value.
+  it with the player's own history window by passing the same value. Eight
+  (not 5) is the default because a 5-game ratio was mostly noise in walk-forward
+  scoring; 6-10 all scored similarly.
 - *Normalization*: ratio = team_allowed_per_game / league_allowed_per_game over
   the same window (per team-*game*, not per-team mean, so teams with byes aren't
   weighted oddly). A ratio of 1.0 = exactly league-average defense.
@@ -57,8 +59,11 @@ from .stats import StatSpec, get_stat
 logger = logging.getLogger(__name__)
 
 # Pseudo-games of weight given to "league average" when shrinking a defense's
-# raw ratio. 3 means a full 5-game window keeps 5/8 ≈ 62% of its raw signal.
-DEFAULT_OPP_SHRINK = 3.0
+# raw ratio. 6 means a full 8-game window keeps 8/14 ≈ 57% of its raw signal
+# (walk-forward scoring preferred heavy shrinkage for every stat).
+DEFAULT_OPP_SHRINK = 6.0
+
+DEFAULT_OPP_WINDOW = 8
 
 
 def _allowed_per_team_week(weekly: pd.DataFrame, stat: StatSpec) -> pd.DataFrame:
@@ -87,7 +92,7 @@ def _allowed_per_team_week(weekly: pd.DataFrame, stat: StatSpec) -> pd.DataFrame
 
 def team_week_rates(
     tw: pd.DataFrame,
-    window: int = 5,
+    window: int = DEFAULT_OPP_WINDOW,
     min_games: int = 3,
     shrink_games: float = DEFAULT_OPP_SHRINK,
 ) -> pd.DataFrame:
@@ -134,7 +139,7 @@ def team_week_rates(
 def defense_allowed(
     stat: str | StatSpec,
     seasons: Iterable[int] | None = None,
-    window: int = 5,
+    window: int = DEFAULT_OPP_WINDOW,
     min_games: int = 3,
     as_of: str | date | None = None,
     teams: Iterable[str] | None = None,

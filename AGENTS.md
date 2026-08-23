@@ -10,7 +10,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - On Python ≥3.13 `nfl_data_py` fails to install/404s; the fetcher falls back to direct nflverse parquet downloads automatically. Live pulls are cached under `prop-model/cache/*.pkl` via `DiskCache` (6h TTL) — any CLI pull populates it.
 - Sharp edge: with `prop-model/.venv` present, `npm run build` (Turbopack) fails tracing `src/app/api/prop-model/route.ts` ("Symlink ... is invalid, it points out of the filesystem root"). Temporarily move the venv out of the tree to build; it is git-ignored.
 - Tests: `.venv/bin/python -m pytest tests/ -q` run from `prop-model/`. No network needed.
-- Backtest/validation: `.venv/bin/python backtest.py --help` — walks a cached season as-of each week. Interval calibration constants (`model.CALIBRATED_SD_MULT_*`) were fitted on 2024+2025 walk-forwards; refit via the quantile method in the backtest if the interval formula changes.
+- `tests/test_walkforward_acceptance.py` is the shrinkage regression gate (model MAE vs plain mean-8 on real data, per repair-plan item 5). It needs a populated `prop-model/cache/*.pkl` — git-ignored, so it skips silently in CI; populate once with any live CLI pull (e.g. `--player "C.J. Stroud" --stat passing_yards --team HOU --opponent LV`) and re-run. Knob changes to `ModelWeights` (esp. `prior_strength`, `opp_shrink`, `*_count` fields) must keep it green.
+- As-of convention: `--as-of DATE` projects an event on DATE using strictly-prior data; internally the CLI subtracts one day and `fetch_player_history(as_of)` / `defense_allowed(as_of)` treat the cutoff as inclusive last-usable gameday.
+- Backtest/validation: `.venv/bin/python backtest.py --help` — walks a cached season as-of each week. Interval calibration constants (`model.CALIBRATED_SD_MULT_*`) were fitted on 2024+2025 walk-forwards; refit via the quantile method in the backtest if the interval formula changes (they were re-checked after the 2026-08 shrinkage retune: coverage 0.71 continuous / 0.72 count).
 
 ## Maintaining this file
 

@@ -75,6 +75,7 @@ interface ModelProjection {
   script_factor: number | null
   refused_reason: string | null
   note: string | null
+  last_updated?: string | null
 }
 
 const INJURY_LABEL: Record<string, string> = {
@@ -235,12 +236,16 @@ export default function NextGamePanel({
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
 
-  const statForPos = (pos: string | null): string => {
+  // Markets modeled per position group (yards + volume + TD markets).
+  const MARKETS_FOR_POS: Record<string, string[]> = {
+    QB: ['passing_yards', 'tds'],
+    RB: ['rushing_yards', 'receptions', 'tds'],
+    WR: ['receiving_yards', 'receptions', 'tds'],
+    TE: ['receiving_yards', 'receptions', 'tds'],
+  }
+  const statForPos = (pos: string | null): string[] => {
     const p = (pos ?? '').toUpperCase()
-    if (p === 'QB') return 'passing_yards'
-    if (p === 'RB') return 'rushing_yards'
-    if (p === 'WR' || p === 'TE') return 'receiving_yards'
-    return ''
+    return MARKETS_FOR_POS[p] ?? []
   }
 
   const modelTeamCodes = () => ({
@@ -253,12 +258,13 @@ export default function NextGamePanel({
     const out: { player: string; stat: string; team: string; opponent: string; prior?: number }[] = []
     const add = (players: { name: string; position: string }[], team: string, opponent: string) => {
       for (const p of players.slice(0, 6)) {
-        const stat = statForPos(p.position)
-        if (!stat) continue
-        // ESPN projected line as a prior: lets rookies / thin-history players
-        // project instead of refusing (the model still wins when it has data).
-        const prior = espnLineFor(p.name, stat)
-        out.push({ player: p.name, stat, team, opponent, prior: prior ?? undefined })
+        // One target per modeled market (yards + receptions + TDs).
+        for (const stat of statForPos(p.position)) {
+          // ESPN projected line as a prior: lets rookies / thin-history players
+          // project instead of refusing (the model still wins when it has data).
+          const prior = espnLineFor(p.name, stat)
+          out.push({ player: p.name, stat, team, opponent, prior: prior ?? undefined })
+        }
       }
     }
     add(ourProjected, codes.our, codes.opp)
@@ -290,7 +296,7 @@ export default function NextGamePanel({
       const res = await fetch('/api/prop-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets, lines: buildLines(), preseason: !!isPreseason }),
+        body: JSON.stringify({ targets, lines: buildLines(), preseason: !!isPreseason, eventDate }),
         signal: AbortSignal.timeout(180000),
       })
       const json = await res.json().catch(() => ({}))
@@ -304,10 +310,21 @@ export default function NextGamePanel({
   }
 
   const espnLineFor = (name: string, stat: string): number | null => {
-    const label = { passing_yards: 'Pass Yds', rushing_yards: 'Rush Yds', receiving_yards: 'Rec Yds' }[stat]
-    if (!label) return null
     const p = props?.projections?.find((x) => x.name === name)
-    return p?.lines.find((l) => l.label === label)?.value ?? null
+    if (!p) return null
+    const find = (label: string): number | null =>
+      p.lines.find((l) => l.label === label)?.value ?? null
+    if (stat === 'passing_yards') return find('Pass Yds')
+    if (stat === 'rushing_yards') return find('Rush Yds')
+    if (stat === 'receiving_yards') return find('Rec Yds')
+    if (stat === 'receptions') return find('Receptions')
+    if (stat === 'tds') {
+      // Anytime-TD prior: ESPN projects per-type TDs; sum what it has.
+      const parts = [find('Pass TDs'), find('Rush TDs'), find('Rec TDs')]
+      const known = parts.filter((v): v is number => v != null)
+      return known.length ? Math.round(known.reduce((a, b) => a + b, 0) * 10) / 10 : null
+    }
+    return null
   }
 
   // Sort model rows QB → RB → WR → TE (same order as the player-lines tables),
@@ -318,6 +335,19 @@ export default function NextGamePanel({
     return idx === -1 ? 99 : idx
   }
   const sortedModel = [...(modelResults ?? [])].sort((a, b) => posFor(a.player) - posFor(b.player) || a.player.localeCompare(b.player))
+
+  // Data-vintage stamp from the model (max gameday in its input frame) — the
+  // honest freshness signal, not when the run happened.
+  const modelDataThrough = (() => {
+    const stamps = (modelResults ?? [])
+      .map((r) => r.last_updated)
+      .filter((v): v is string => !!v)
+      .map((v) => v.slice(0, 10))
+      .sort()
+    const iso = stamps[stamps.length - 1]
+    if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null
+    return `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}`
+  })()
 
   const confBadge = (conf: string) => {
     if (conf === 'high') return 'text-fs-turf bg-fs-turf/15'
@@ -581,6 +611,11 @@ export default function NextGamePanel({
             {modelResults
               ? 'Our own projection from the Python model: recent games × opponent defense × game script (nflverse weekly stats).'
               : 'Own projection from recent games, opponent defense, and the Vegas game script — compare against the ESPN lines above.'}
+            {modelDataThrough && (
+              <>
+                {' '}· Data through {modelDataThrough}
+              </>
+            )}
           </p>
 
           {modelLoading ? (

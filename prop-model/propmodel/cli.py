@@ -25,14 +25,17 @@ import json
 import logging
 import os
 import sys
+from datetime import date, timedelta
 from pathlib import Path
 
 import pandas as pd
 
 from .data_pipeline import (
+    COL_GAMEDAY,
     COL_POSITION,
     PlayerHistory,
     QualityFlag,
+    data_vintage,
     default_seasons,
     fetch_player_history,
     _stat_value,
@@ -41,12 +44,13 @@ from .data_pipeline import (
     weekly_is_usable,
 )
 from .game_script import GameLines, OddsApiLineProvider, StaticLineProvider, script_adjustment
-from .model import ModelWeights, Projection, project
+from .model import ModelWeights, Projection, position_guard_reason, project
 from .opponent import defense_allowed, opponent_factor
 from .output import projections_table, write_table
 from .players import resolve_player_id
 from .reliability import DiskCache, cached_fetcher, setup_logging
 from .stats import StatSpec, get_stat
+from .teams import normalize_team_code, team_codes_in_frame
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--lines-json", help="static Vegas lines JSON {'HOU': {total, spread, favorite}}")
     p.add_argument("--weights-json", help="ModelWeights override JSON (halflife, opponent, game_script, min_games)")
     p.add_argument("--preseason", action="store_true", help="scale projections to preseason playing time (starters play a fraction of snaps)")
+    p.add_argument("--as-of", help="project an event happening on this date (YYYY-MM-DD): uses only data played strictly before it, so same-week games never leak in. Enables walk-forward evaluation.")
+    p.add_argument("--warm-cache", action="store_true", help="load (and cache) the weekly data, then exit — used by server warm-up")
     p.add_argument("--output", help="output path (.json or .csv); default: JSON to stdout")
     p.add_argument("--cache-dir", default="cache", help="disk cache directory (default ./cache)")
     p.add_argument("--no-cache", action="store_true", help="skip the disk cache")
@@ -134,10 +140,15 @@ def _load_weekly(args) -> pd.DataFrame:
     )
     if args.no_cache:
         return fetch_validated(seasons)
-    return cached_fetcher(fetch_validated, DiskCache(args.cache_dir), validator=weekly_is_usable)(seasons)
+    # Normalize again after a cache hit: entries written by older versions may
+    # predate schema normalization (e.g. no synthesized gameday), and callers
+    # like the freshness stamp need the normalized shape.
+    return normalize_weekly(
+        cached_fetcher(fetch_validated, DiskCache(args.cache_dir), validator=weekly_is_usable)(seasons)
+    )
 
 
-def _lines_provider(args):
+def _lines_provider(args, known_codes: set[str] | None = None):
     if args.lines_json:
         path = Path(args.lines_json)
         try:
@@ -145,7 +156,10 @@ def _lines_provider(args):
         except json.JSONDecodeError as e:
             raise ValueError(f"{path} is not valid JSON: {e}") from e
         try:
-            lines = {team.upper(): GameLines(**cfg) for team, cfg in raw.items()}
+            # Keys are spelled by the caller (often fantasy codes like LAR);
+            # normalize them to nflverse spellings so lookups after team-code
+            # normalization still hit.
+            lines = {normalize_team_code(team, known_codes): GameLines(**cfg) for team, cfg in raw.items()}
         except (TypeError, AttributeError) as e:
             raise ValueError(f"{path} must be an object of {{team: {{total, spread, favorite}}}}: {e}") from e
         return StaticLineProvider(lines)
@@ -164,6 +178,7 @@ def _weights(args) -> ModelWeights:
         keys = (
             "halflife", "opponent", "game_script", "min_games",
             "prior_strength", "opp_shrink", "sd_mult_continuous", "sd_mult_count",
+            "halflife_count", "opponent_count", "prior_strength_count",
         )
         try:
             return ModelWeights(**{k: raw[k] for k in keys if k in raw})
@@ -211,6 +226,19 @@ def _prior_projection(
     prior's pseudo-games — a raw unadjusted prior would silently ignore both.
     The band stays a wide ±50%: honest uncertainty, not false precision.
     """
+    spec = get_stat(stat)
+    if hist is not None:
+        guard = position_guard_reason(hist.position, spec)
+        if guard:
+            n = hist.n_games
+            return Projection(
+                player_name=player, stat=spec,
+                projection=None, baseline=None, low=None, high=None,
+                confidence="low", n_games=n,
+                opponent_factor=round(float(opp.get("factor", 1.0)), 3),
+                script_factor=round(float(gs.get("factor", 1.0)), 3),
+                refused_reason=guard,
+            )
     n = hist.n_games if hist is not None else 0
     if n > 0:
         m = max(weights.prior_strength, 1.0)
@@ -257,20 +285,41 @@ def _failed_projection(target: dict, exc: Exception) -> Projection:
 def _project_one(
     target: dict, weekly: pd.DataFrame, lines_provider, weights: ModelWeights, args,
     priors: dict[str, float] | None = None,
+    known_codes: set[str] | None = None,
+    history_cutoff=None,
+    rates_cache: dict[str, pd.DataFrame] | None = None,
 ) -> Projection:
     player, stat = target["player"], target["stat"]
-    team, opponent = target["team"].upper(), target["opponent"].upper()
+    # Normalize fantasy/broadcast spellings (LAR→LA, JAX→JAC, …) at the
+    # boundary so resolution and rate lookups see nflverse codes.
+    team = normalize_team_code(target["team"], known_codes)
+    opponent = normalize_team_code(target.get("opponent") or "", known_codes)
     seasons = args.seasons or default_seasons()
 
     pid = resolve_player_id(weekly, player, team)
     prior = target.get("prior")
     lines = lines_provider.fetch(team, opponent) if lines_provider else None
     gs = script_adjustment(team, opponent, lines)
-    rates = defense_allowed(
-        stat, seasons=seasons, teams=[team, opponent],
-        window=args.n_games, fetcher=lambda s: weekly,
-        shrink_games=weights.opp_shrink,
-    )
+
+    # Defense rates per stat are shared across the batch: compute the
+    # league-wide table once and slice the two teams we need per target.
+    spec = get_stat(stat)
+    if rates_cache is not None:
+        if spec.key not in rates_cache:
+            rates_cache[spec.key] = defense_allowed(
+                spec, seasons=seasons, window=args.n_games,
+                fetcher=lambda s: weekly, shrink_games=weights.opp_shrink,
+                as_of=history_cutoff,
+            )
+        all_rates = rates_cache[spec.key]
+        wanted = {team.upper(), opponent.upper()}
+        rates = all_rates[all_rates["team"].isin(wanted)] if not all_rates.empty else all_rates
+    else:
+        rates = defense_allowed(
+            spec, seasons=seasons, teams=[team, opponent],
+            window=args.n_games, fetcher=lambda s: weekly,
+            shrink_games=weights.opp_shrink, as_of=history_cutoff,
+        )
     opp = opponent_factor(opponent, rates)
 
     def _get_prior() -> float | None:
@@ -296,6 +345,7 @@ def _project_one(
 
     hist = fetch_player_history(
         pid, stat, n_games=args.n_games, seasons=seasons, fetcher=lambda s: weekly,
+        as_of=history_cutoff,
     )
 
     # Player exists but has fewer than min_games of usable history — blend
@@ -306,9 +356,16 @@ def _project_one(
 
     pos_prior = None
     if priors is not None:
-        key = get_stat(stat).key
+        key = spec.key
         if key not in priors:
-            priors[key] = position_prior(weekly, stat)
+            # The prior must respect the as-of cut too — a walk-forward
+            # projection can't lean on position averages that include the
+            # future.
+            prior_frame = weekly
+            if history_cutoff is not None and COL_GAMEDAY in weekly.columns:
+                gd = pd.to_datetime(weekly[COL_GAMEDAY], errors="coerce")
+                prior_frame = weekly[gd.isna() | (gd <= pd.Timestamp(history_cutoff))]
+            priors[key] = position_prior(prior_frame, stat)
         pos_prior = priors[key]
 
     proj = project(hist, opp, gs, weights, position_prior=pos_prior)
@@ -351,18 +408,34 @@ def main(argv: list[str] | None = None) -> int:
     except ValueError as e:
         logger.error("Bad batch input: %s", e)
         return 2
-    if not targets:
+    warm_only = args.warm_cache
+    if not targets and not warm_only:
         print("Nothing to project: pass --player/--stat/--team/--opponent, or --input", file=sys.stderr)
         return 2
+
+    history_cutoff = None
+    if args.as_of:
+        try:
+            event_date = date.fromisoformat(str(args.as_of))
+        except ValueError:
+            logger.error("--as-of must be an ISO date (YYYY-MM-DD), got %r", args.as_of)
+            return 2
+        # Strictly-before semantics: an event on DATE may not use games played
+        # on/after DATE (same-week early games leaking into later ones).
+        history_cutoff = event_date - timedelta(days=1)
 
     try:
         weekly = _load_weekly(args)
     except Exception as e:  # noqa: BLE001 — a hard data failure must stop the run
         logger.error("Failed to load weekly data: %s", e)
         return 1
+    if warm_only:
+        logger.info("Warm-up complete: %d weekly rows available", len(weekly))
+        return 0
 
+    known_codes = team_codes_in_frame(weekly)
     try:
-        lines_provider = _lines_provider(args)
+        lines_provider = _lines_provider(args, known_codes)
         weights = _weights(args)
     except ValueError as e:
         logger.error("Bad input file: %s", e)
@@ -373,9 +446,14 @@ def main(argv: list[str] | None = None) -> int:
     # contract of this CLI. The failure names its cause in refused_reason.
     projections: list[Projection] = []
     priors: dict[str, float] = {}
+    rates_cache: dict[str, pd.DataFrame] = {}
     for i, t in enumerate(targets):
         try:
-            projections.append(_project_one(t, weekly, lines_provider, weights, args, priors))
+            projections.append(_project_one(
+                t, weekly, lines_provider, weights, args, priors,
+                known_codes=known_codes, history_cutoff=history_cutoff,
+                rates_cache=rates_cache,
+            ))
         except Exception as e:  # noqa: BLE001 — keep the batch alive
             logger.error(
                 "Target %d/%d (%s, %s) failed: %s",
@@ -384,7 +462,7 @@ def main(argv: list[str] | None = None) -> int:
             projections.append(_failed_projection(t, e))
 
     if args.output:
-        write_table(projections_table(projections), args.output)
+        write_table(projections_table(projections, data_through=data_vintage(weekly)), args.output)
         logger.info("Wrote %d projections to %s", len(projections), args.output)
     else:
         print(json.dumps([p.to_dict() for p in projections], indent=2))

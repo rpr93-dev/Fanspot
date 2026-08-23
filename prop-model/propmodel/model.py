@@ -46,7 +46,8 @@ Statistical assumptions (plain language)
   a number built on sand.
 
 Confidence labels: high / medium / low, from history size, opponent sample
-size, game-script availability, and data freshness.
+size, and data freshness. Missing Vegas lines are reported as a note on the
+projection, not as lower confidence.
 """
 
 from __future__ import annotations
@@ -74,10 +75,18 @@ class ModelWeights:
     opponent: float = 1.0            # exponent on the opponent factor (0 = ignore)
     game_script: float = 1.0         # exponent on the game-script factor (0 = ignore)
     min_games: int = 3               # refuse to project below this
-    prior_strength: float = 2.0      # pseudo-games pulling the baseline toward the prior
-    opp_shrink: float = 3.0          # pseudo-games pulling the opponent ratio toward 1.0
+    prior_strength: float = 0.5      # pseudo-games pulling the baseline toward the prior
+    opp_shrink: float = 6.0          # pseudo-games pulling the opponent ratio toward 1.0
     sd_mult_continuous: float = CALIBRATED_SD_MULT_CONTINUOUS
     sd_mult_count: float = CALIBRATED_SD_MULT_COUNT
+    # Count stats (TDs) behave differently from yardage: week-to-week "form"
+    # in small integer counts is nearly pure noise (walk-forward: any recency
+    # emphasis or position-prior pull *loses* MAE to a flat mean), and the
+    # TD-allowed defense ratio is the pipeline's bluntest proxy. So counts get
+    # their own, deliberately flatter treatment.
+    halflife_count: float = 8.0      # near-flat recency
+    opponent_count: float = 0.5      # softened exponent on the opponent factor
+    prior_strength_count: float = 0.0  # no positional pull
 
 
 @dataclass
@@ -144,7 +153,6 @@ def _confidence(
     n_games: int,
     history_ok: bool,
     opp_ok: bool,
-    script_ok: bool,
     stale_warn: bool,
     min_games: int,
 ) -> str:
@@ -153,14 +161,50 @@ def _confidence(
     Only *warn*-severity staleness downgrades confidence. Offseason runs are
     always informationally "stale" (the last game is months old) — treating
     that as a confidence killer would make every August projection low.
+
+    Missing Vegas lines do NOT gate the tiers here: line absence is a normal
+    posture (offseason, keyless runs), not lower model certainty. It is
+    reported as a separate note on the projection instead.
     """
     if not history_ok or n_games < min_games:
         return "low"
-    if n_games >= 8 and opp_ok and script_ok and not stale_warn:
+    if n_games >= 8 and opp_ok and not stale_warn:
         return "high"
     if n_games >= 5 and opp_ok and not stale_warn:
         return "medium"
     return "low"
+
+
+def position_guard_reason(position: str, stat: StatSpec) -> str | None:
+    """Reason string when ``position`` cannot produce ``stat``, else None.
+
+    A recorded position that cannot produce the requested stat (a CB asked for
+    receiving yards off eight zero-rows) is an impossible request. Unknown
+    positions ("?") are allowed through — absence of evidence is not evidence.
+    """
+    pos = str(position or "").upper()
+    if pos and pos != "?" and pos not in stat.positions:
+        return (
+            f"POSITION_MISMATCH: {pos} cannot produce {stat.key} "
+            f"(valid positions: {'/'.join(stat.positions)})"
+        )
+    return None
+
+
+def _absence_note(history: PlayerHistory) -> str | None:
+    """Human-readable absence honesty for the note column.
+
+    Production weekly frames carry no DNP rows, so injury absences are
+    invisible directly; the calendar span of the window is the cheap proxy
+    ("8 games spanning 84 days"). Roster-level missed weeks are surfaced too
+    when the frame has them."""
+    parts = []
+    for f in history.flags:
+        if f.code == "CALENDAR_GAP":
+            parts.append(f.message)
+        elif f.code == "MISSED_GAMES":
+            parts.append(f"{len(history.missed_games)} missed week(s) in window")
+    return " · ".join(parts) if parts else None
 
 
 def _factor_value(f: dict | float) -> tuple[float, bool]:
@@ -212,6 +256,17 @@ def project(
     opp_f, opp_ok = _factor_value(opponent_factor)
     gs_f, gs_ok = _factor_value(script_factor)
 
+    # Per-kind treatment (see ModelWeights): counts get flatter recency, no
+    # positional pull, and a softened opponent factor.
+    if history.stat.kind == "count":
+        halflife = weights.halflife_count
+        w_opp = weights.opponent_count
+        prior_k = weights.prior_strength_count
+    else:
+        halflife = weights.halflife
+        w_opp = weights.opponent
+        prior_k = weights.prior_strength
+
     n = history.n_games
     if not history.ok or n < weights.min_games or history.games.empty:
         return Projection(
@@ -222,15 +277,27 @@ def project(
             refused_reason=_refusal_reason(history, weights.min_games),
         )
 
+    # Position guard: refuse the impossible request loudly instead of
+    # emitting a confident 0.0 built on zero-rows.
+    guard = position_guard_reason(getattr(history, "position", ""), history.stat)
+    if guard:
+        return Projection(
+            player_name=history.player_name, stat=history.stat,
+            projection=None, baseline=None, low=None, high=None,
+            confidence="low", n_games=n,
+            opponent_factor=round(opp_f, 3), script_factor=round(gs_f, 3),
+            refused_reason=guard,
+        )
+
     stale_warn = any(
         f.code == "STALE" and f.severity == "warn" for f in history.flags
     )
     values = np.asarray(history.games["value"].tolist(), dtype=float)
-    w = recency_weights(len(values), weights.halflife)
+    w = recency_weights(len(values), halflife)
     ess = effective_sample_size(w)
     raw_mean = float(np.average(values, weights=w))
 
-    baseline = _shrunk_baseline(raw_mean, ess, position_prior, weights.prior_strength)
+    baseline = _shrunk_baseline(raw_mean, ess, position_prior, prior_k)
     std = math.sqrt(_weighted_var(values, w, baseline)) if len(values) > 1 else 0.0
 
     # Outcome spread plus estimation error of the baseline itself (σ/√ESS):
@@ -245,7 +312,16 @@ def project(
         sd_mult = weights.sd_mult_continuous
     pred_sd = core_std * math.sqrt(1.0 + 1.0 / ess) * sd_mult if ess > 0 else core_std * sd_mult
 
-    projection = baseline * (opp_f**weights.opponent) * (gs_f**weights.game_script)
+    projection = baseline * (opp_f**w_opp) * (gs_f**weights.game_script)
+
+    # Honest-input notes: line absence is reported separately from confidence
+    # (D9), and absence-honesty flags surface in the note column.
+    notes = []
+    if not gs_ok:
+        notes.append("no Vegas lines — game-script neutral")
+    absence = _absence_note(history)
+    if absence:
+        notes.append(absence)
 
     return Projection(
         player_name=history.player_name,
@@ -254,11 +330,12 @@ def project(
         baseline=baseline,
         low=max(0.0, projection - pred_sd),
         high=projection + pred_sd,
-        confidence=_confidence(n, history.ok, opp_ok, gs_ok, stale_warn, weights.min_games),
+        confidence=_confidence(n, history.ok, opp_ok, stale_warn, weights.min_games),
         n_games=n,
         opponent_factor=round(opp_f, 3),
         script_factor=round(gs_f, 3),
         pred_sd=pred_sd,
+        note=" · ".join(notes) if notes else None,
     )
 
 
