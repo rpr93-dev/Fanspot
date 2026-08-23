@@ -42,13 +42,15 @@ def _frame(rows: list[dict]) -> pd.DataFrame:
 
 
 def test_ratio_normalized_against_league_average():
-    """HOU allows 150 rec-yds/game, LV allows 100, league avg 125 → 1.2 and 0.8."""
+    """HOU allows 150 rec-yds/game, LV allows 100, league avg 125 → raw ratios
+    1.2 / 0.8; shrink_games=0 recovers them exactly."""
     rows = [
         wr("A", "HOU", 1, 140), wr("C", "HOU", 2, 160),   # HOU avg 150
         wr("B", "LV", 1, 90), wr("D", "LV", 2, 110),      # LV avg 100
     ]
     # Each defense has only 2 games here, so relax min_games to exercise the ratio.
-    rates = defense_allowed("receiving_yards", seasons=[2025], min_games=2, fetcher=lambda s: _frame(rows))
+    rates = defense_allowed("receiving_yards", seasons=[2025], min_games=2,
+                            shrink_games=0, fetcher=lambda s: _frame(rows))
     hou = rates[rates["team"] == "HOU"].iloc[0]
     lv = rates[rates["team"] == "LV"].iloc[0]
     assert hou["allowed_per_game"] == pytest.approx(150)
@@ -58,12 +60,32 @@ def test_ratio_normalized_against_league_average():
     assert lv["ratio"] == pytest.approx(0.8)
 
 
-def test_low_sample_gets_neutral_ratio():
-    rows = [wr("A", "HOU", 1, 140)]  # only 1 game vs HOU
-    rates = defense_allowed("receiving_yards", seasons=[2025], min_games=3, fetcher=lambda s: _frame(rows))
+def test_ratio_shrinks_toward_neutral_for_short_windows():
+    """With default shrink_games=3, a ratio from only g games carries
+    g/(g+3) of its raw signal — a 2-game read keeps 40% of the matchup edge."""
+    rows = [
+        wr("A", "HOU", 1, 140), wr("C", "HOU", 2, 160),   # HOU raw ratio 1.2
+        wr("B", "LV", 1, 90), wr("D", "LV", 2, 110),
+    ]
+    rates = defense_allowed("receiving_yards", seasons=[2025], min_games=2,
+                            fetcher=lambda s: _frame(rows))
     hou = rates[rates["team"] == "HOU"].iloc[0]
-    assert hou["low_sample"]
-    assert hou["ratio"] == 1.0
+    assert hou["ratio"] == pytest.approx(1.0 + (1.2 - 1.0) * (2 / 5))
+    assert rates[rates["team"] == "LV"].iloc[0]["ratio"] == pytest.approx(1.0 - (1.0 - 0.8) * (2 / 5))
+
+
+def test_low_sample_keeps_shrunk_ratio_and_flag():
+    """A thin window is no longer thrown away: it keeps a heavily shrunk ratio,
+    but still carries low_sample so downstream confidence can react."""
+    rows = [wr("A", "HOU", w, 140) for w in range(1, 10)]      # LV-ish filler team
+    rows += [wr("B", "TEN", 1, 200)]                           # TEN: 1 game, allowed 200
+    rates = defense_allowed("receiving_yards", seasons=[2025], min_games=3,
+                            fetcher=lambda s: _frame(rows))
+    ten = rates[rates["team"] == "TEN"].iloc[0]
+    assert ten["low_sample"]
+    assert ten["games"] == 1
+    assert ten["ratio"] != pytest.approx(1.0)   # shrunk, not neutralized
+    assert abs(ten["ratio"] - 1.0) < abs(ten["allowed_per_game"] / ten["league_avg"] - 1.0)
 
 
 def test_position_filter_excludes_other_position_stats():
