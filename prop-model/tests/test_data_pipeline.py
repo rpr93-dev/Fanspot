@@ -132,15 +132,33 @@ def test_season_boundary_ordering():
     assert hist.games["season"].tolist() == [2025, 2025, 2026]
 
 
-def test_incomplete_stat_flagged_and_zeroed():
-    """A played week with no recorded stat value is flagged, not silently dropped."""
+def test_incomplete_stat_excluded_and_flagged():
+    """A played week with no recorded continuous-stat value is excluded loudly.
+
+    It must never silently enter the model as a 0.0 — that would fabricate a
+    dud game out of a data gap. The week is flagged INCOMPLETE_STAT and
+    dropped from the modeling series.
+    """
     rows = [qb_row(1, 220), qb_row(2, 0, gameday="2025-09-20", played=True)]
     rows[-1]["passing_yards"] = None  # played but stat missing
     hist = fetch(rows, min_games=2)
+    assert not hist.ok  # 1 usable game < min_games=2 → refuse rather than fake it
+    assert hist.games["value"].tolist() == [220.0]
+    incomplete = [f for f in hist.flags if f.code == "INCOMPLETE_STAT"]
+    assert len(incomplete) == 1
+    assert "excluded" in incomplete[0].message
+
+
+def test_incomplete_count_stat_reads_zero():
+    """Count stats legitimately read missing columns as zero (a player never
+    accumulates TDs in a category they don't line up in)."""
+    rows = [{**qb_row(w, 200 + w), "passing_tds": None} for w in (1, 2)]
+    frame = _weekly(rows)
+    hist = fetch_player_history(QB_ID, "tds", seasons=[2025], min_games=2,
+                                fetcher=lambda s: frame)
     assert hist.ok
-    assert any(f.code == "INCOMPLETE_STAT" for f in hist.flags)
-    # The missing week still appears, valued at 0.
-    assert hist.games["value"].tolist() == [220.0, 0.0]
+    assert hist.games["value"].tolist() == [0.0, 0.0]
+    assert not any(f.code == "INCOMPLETE_STAT" for f in hist.flags)
 
 
 def test_missing_gameday_does_not_crash():

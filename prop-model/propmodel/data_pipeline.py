@@ -400,14 +400,30 @@ def fetch_player_history(
             "game_id": r.get(COL_GAME_ID),
             "date": r.get(COL_GAMEDAY),
             "opponent": r.get(COL_OPPONENT),
-            "value": value if value is not None else 0.0,
+            "value": value,
         }
 
+    records = [_game_record(r) for _, r in history.iterrows()]
+    # A played week with *no recorded value* must never silently enter the
+    # model as a 0.0 — that fabricates a dud game out of a data gap. Count
+    # stats legitimately read missing columns as zero (a player never
+    # accumulates in a category they don't line up in); continuous stats get
+    # the week excluded loudly via an INCOMPLETE_STAT flag.
+    if stat.kind == "count":
+        for rec in records:
+            if rec["value"] is None:
+                rec["value"] = 0.0
+        kept_records = records
+    else:
+        kept_records = [rec for rec in records if rec["value"] is not None]
+
     games_df = (
-        pd.DataFrame([_game_record(r) for _, r in history.iterrows()])
-        if not history.empty
+        pd.DataFrame(kept_records, columns=["season", "week", "game_id", "date", "opponent", "value"])
+        if kept_records
         else empty.copy()
     )
+    n_modeled = len(games_df)
+    n_unrecorded = len(records) - len(kept_records)
 
     missed_df = (
         pd.DataFrame([{**_game_record(r), "reason": "dnp"} for _, r in missed.iterrows()])
@@ -416,20 +432,25 @@ def fetch_player_history(
     )
 
     flags: list[QualityFlag] = []
-    if len(history) < min_games:
-        flags.append(QualityFlag(
-            "INSUFFICIENT_HISTORY", "error",
-            f"Only {len(history)} played games (< {min_games} required)",
-        ))
-    elif len(history) < n_games:
+    if n_modeled < min_games:
+        reason = f"Only {n_modeled} played games with a recorded {stat.key} value (< {min_games} required)"
+        flags.append(QualityFlag("INSUFFICIENT_HISTORY", "error", reason))
+    elif n_modeled < n_games:
         flags.append(QualityFlag(
             "FEWER_GAMES", "info",
-            f"Only {len(history)} played games available (requested {n_games})",
+            f"Only {n_modeled} played games available (requested {n_games})",
         ))
-    if len(history) == 0:
+    if n_modeled == 0:
         flags.append(QualityFlag(
             "NO_PLAYED_GAMES", "error",
-            f"Player has no played games in seasons {seasons}",
+            f"Player has no played games with a recorded {stat.key} value in seasons {seasons}",
+        ))
+
+    if n_unrecorded:
+        flags.append(QualityFlag(
+            "INCOMPLETE_STAT", "warn",
+            f"{n_unrecorded} played week(s) had no recorded {stat.key} value "
+            "and were excluded from the model input (not counted as zeros)",
         ))
 
     if not history.empty:
@@ -448,12 +469,6 @@ def fetch_player_history(
         flags.append(QualityFlag(
             "MISSED_GAMES", "warn",
             f"{len(missed)} roster week(s) without a game inside the history window (injury/scratch)",
-        ))
-
-    if not history.empty and history.apply(lambda r: _stat_value(r, stat) is None, axis=1).any():
-        flags.append(QualityFlag(
-            "INCOMPLETE_STAT", "warn",
-            "Some played weeks are missing a recorded stat value",
         ))
 
     return PlayerHistory(

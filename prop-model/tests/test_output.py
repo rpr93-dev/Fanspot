@@ -79,7 +79,12 @@ def test_cli_uses_espn_prior_for_rookie(tmp_path):
     assert result.returncode == 0, result.stderr
     records = json.loads(result.stdout)
     row = records[0]
-    assert row["projection"] == 180.0
+    # The prior is no longer emitted raw: it gets the same opponent/game-script
+    # treatment as any projection. HOU allows 220 to the one sampled QB,
+    # LV allows 180, league avg 200 → HOU raw ratio 1.1, shrunk at 1 game with
+    # shrink_games=3 → factor 1.025. No lines → script factor 1.0.
+    assert row["projection"] == pytest.approx(180.0 * 1.025)
+    assert row["low"] == pytest.approx(row["projection"] * 0.5, abs=0.1)
     assert row["refused_reason"] is None
     assert "rookie" in (row["note"] or "")
     assert row["confidence"] == "low"

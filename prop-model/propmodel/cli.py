@@ -30,10 +30,12 @@ from pathlib import Path
 import pandas as pd
 
 from .data_pipeline import (
+    COL_POSITION,
     PlayerHistory,
     QualityFlag,
     default_seasons,
     fetch_player_history,
+    _stat_value,
     normalize_weekly,
     validate_weekly,
     weekly_is_usable,
@@ -159,12 +161,76 @@ def _weights(args) -> ModelWeights:
             raw = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as e:
             raise ValueError(f"{path} is not valid JSON: {e}") from e
-        keys = ("halflife", "opponent", "game_script", "min_games")
+        keys = (
+            "halflife", "opponent", "game_script", "min_games",
+            "prior_strength", "opp_shrink", "sd_mult_continuous", "sd_mult_count",
+        )
         try:
             return ModelWeights(**{k: raw[k] for k in keys if k in raw})
         except TypeError as e:
             raise ValueError(f"Bad weights override in {path}: {e}") from e
     return ModelWeights()
+
+
+def position_prior(weekly: pd.DataFrame, stat: str | StatSpec) -> float | None:
+    """Position-level per-player-game average for a stat, from the weekly frame.
+
+    This is the prior thin histories shrink toward (STAGE 4). It is the plain
+    league-at-position mean — the value an uninformed projection would carry —
+    computed from every recorded player-week at the stat's positions. Returns
+    None when the frame has no usable rows at those positions.
+    """
+    spec = get_stat(stat)
+    if COL_POSITION not in weekly.columns:
+        return None
+    rows = weekly[weekly[COL_POSITION].isin(spec.positions)]
+    if rows.empty:
+        return None
+    vals = rows.apply(lambda r: _stat_value(r, spec), axis=1)
+    vals = vals.dropna().astype(float)
+    if vals.empty:
+        return None
+    return float(vals.mean())
+
+
+def _apply_factors(value: float, opp: dict, gs: dict, weights: ModelWeights) -> float:
+    """Scale a raw line by the opponent and game-script factors."""
+    return value * (float(opp.get("factor", 1.0)) ** weights.opponent) * (
+        float(gs.get("factor", 1.0)) ** weights.game_script
+    )
+
+
+def _prior_projection(
+    player: str, stat: str, prior: float, hist: PlayerHistory | None,
+    opp: dict, gs: dict, weights: ModelWeights,
+) -> Projection:
+    """Project from an ESPN-style prior line when NFL history is missing/thin.
+
+    The prior is adjusted for matchup and game context like any other
+    projection, and any observed games are blended in weighted against the
+    prior's pseudo-games — a raw unadjusted prior would silently ignore both.
+    The band stays a wide ±50%: honest uncertainty, not false precision.
+    """
+    n = hist.n_games if hist is not None else 0
+    if n > 0:
+        m = max(weights.prior_strength, 1.0)
+        player_mean = float(hist.games["value"].mean())
+        blended = (n * player_mean + m * prior) / (n + m)
+        center = _apply_factors(blended, opp, gs, weights)
+        note = "ESPN prior — blended with thin NFL history"
+    else:
+        center = _apply_factors(prior, opp, gs, weights)
+        note = "ESPN prior — no NFL history (rookie)"
+    return Projection(
+        player_name=player, stat=get_stat(stat),
+        projection=center, baseline=center,
+        low=round(center * 0.5, 1), high=round(center * 1.5, 1),
+        confidence="low", n_games=n,
+        opponent_factor=round(float(opp.get("factor", 1.0)), 3),
+        script_factor=round(float(gs.get("factor", 1.0)), 3),
+        refused_reason=None,
+        note=note,
+    )
 
 
 def _failed_projection(target: dict, exc: Exception) -> Projection:
@@ -188,7 +254,10 @@ def _failed_projection(target: dict, exc: Exception) -> Projection:
     )
 
 
-def _project_one(target: dict, weekly: pd.DataFrame, lines_provider, weights: ModelWeights, args) -> Projection:
+def _project_one(
+    target: dict, weekly: pd.DataFrame, lines_provider, weights: ModelWeights, args,
+    priors: dict[str, float] | None = None,
+) -> Projection:
     player, stat = target["player"], target["stat"]
     team, opponent = target["team"].upper(), target["opponent"].upper()
     seasons = args.seasons or default_seasons()
@@ -200,29 +269,23 @@ def _project_one(target: dict, weekly: pd.DataFrame, lines_provider, weights: Mo
     rates = defense_allowed(
         stat, seasons=seasons, teams=[team, opponent],
         window=args.n_games, fetcher=lambda s: weekly,
+        shrink_games=weights.opp_shrink,
     )
     opp = opponent_factor(opponent, rates)
+
+    def _get_prior() -> float | None:
+        if prior is None:
+            return None
+        return float(prior)
 
     if pid is None:
         # No NFL history at all (rookie, or a name we can't match). If the
         # caller gave us an ESPN-style prior line, project that with a clear
         # note instead of refusing — a number beats a wall of refusals, and
         # the note keeps it honest.
-        if prior is not None:
-            prior = float(prior)
-            # A rookie with zero NFL games has a genuinely wide outcome range —
-            # ±50% is honest uncertainty (the ±15% used for thin-but-existing
-            # history would falsely imply we know something we don't).
-            return Projection(
-                player_name=player, stat=get_stat(stat),
-                projection=prior, baseline=prior,
-                low=round(prior * 0.5, 1), high=round(prior * 1.5, 1),
-                confidence="low", n_games=0,
-                opponent_factor=round(float(opp.get("factor", 1.0)), 3),
-                script_factor=round(float(gs.get("factor", 1.0)), 3),
-                refused_reason=None,
-                note="ESPN prior — no NFL history (rookie)",
-            )
+        p = _get_prior()
+        if p is not None:
+            return _prior_projection(player, stat, p, None, opp, gs, weights)
         empty = pd.DataFrame(columns=["season", "week", "game_id", "date", "opponent", "value"])
         hist = PlayerHistory(
             stat=get_stat(stat), player_id="", player_name=player, position="?",
@@ -235,25 +298,20 @@ def _project_one(target: dict, weekly: pd.DataFrame, lines_provider, weights: Mo
         pid, stat, n_games=args.n_games, seasons=seasons, fetcher=lambda s: weekly,
     )
 
-    # Player exists but has fewer than min_games of history — blend toward the
-    # ESPN prior if we have one, so thin-history players still project (marked
-    # low confidence).
+    # Player exists but has fewer than min_games of usable history — blend
+    # toward the ESPN prior if we have one, so thin-history players still
+    # project (marked low confidence).
     if not hist.ok and prior is not None:
-        prior = float(prior)
-        # 1-2 games of history: the prior is more trustworthy than a sample of
-        # one or two games, but the band stays wider than a full-history line.
-        return Projection(
-            player_name=player, stat=get_stat(stat),
-            projection=prior, baseline=prior,
-            low=round(prior * 0.65, 1), high=round(prior * 1.35, 1),
-            confidence="low", n_games=hist.n_games,
-            opponent_factor=round(float(opp.get("factor", 1.0)), 3),
-            script_factor=round(float(gs.get("factor", 1.0)), 3),
-            refused_reason=None,
-            note="ESPN prior — thin NFL history",
-        )
+        return _prior_projection(player, stat, float(prior), hist, opp, gs, weights)
 
-    proj = project(hist, opp, gs, weights)
+    pos_prior = None
+    if priors is not None:
+        key = get_stat(stat).key
+        if key not in priors:
+            priors[key] = position_prior(weekly, stat)
+        pos_prior = priors[key]
+
+    proj = project(hist, opp, gs, weights, position_prior=pos_prior)
     if proj.player_name != player:
         # Keep the caller's display name (the dashboard built targets from full
         # names like "C.J. Stroud"; the nflverse file abbreviates to "C.Stroud",
@@ -314,9 +372,10 @@ def main(argv: list[str] | None = None) -> int:
     # an explicit failure row instead of aborting the batch — the documented
     # contract of this CLI. The failure names its cause in refused_reason.
     projections: list[Projection] = []
+    priors: dict[str, float] = {}
     for i, t in enumerate(targets):
         try:
-            projections.append(_project_one(t, weekly, lines_provider, weights, args))
+            projections.append(_project_one(t, weekly, lines_provider, weights, args, priors))
         except Exception as e:  # noqa: BLE001 — keep the batch alive
             logger.error(
                 "Target %d/%d (%s, %s) failed: %s",

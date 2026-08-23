@@ -23,9 +23,12 @@ Statistical choices
 - *Normalization*: ratio = team_allowed_per_game / league_allowed_per_game over
   the same window (per team-*game*, not per-team mean, so teams with byes aren't
   weighted oddly). A ratio of 1.0 = exactly league-average defense.
-- *Small-sample protection*: a defense with fewer than ``min_games`` games in
-  the window gets a neutral 1.0 ratio + a ``low_sample`` flag instead of a noisy
-  estimate. Downstream stages may clamp or shrink the ratio further.
+- *Small-sample protection*: a ratio estimated from only ``games`` team-games
+  is mostly noise, so it is shrunk toward neutral 1.0, carrying
+  ``games / (games + shrink_games)`` of its raw signal (empirical-Bayes style,
+  default ``shrink_games`` = :data:`DEFAULT_OPP_SHRINK`). Teams with *zero*
+  games in the window get exactly 1.0 + a ``low_sample`` flag; short windows
+  keep a heavily-shrunk read instead of throwing it away entirely.
 - *No leakage*: ``as_of`` (default: today) filters out team games after the
   projection date, so a game already played this week never leaks in.
 """
@@ -53,6 +56,10 @@ from .stats import StatSpec, get_stat
 
 logger = logging.getLogger(__name__)
 
+# Pseudo-games of weight given to "league average" when shrinking a defense's
+# raw ratio. 3 means a full 5-game window keeps 5/8 ≈ 62% of its raw signal.
+DEFAULT_OPP_SHRINK = 3.0
+
 
 def _allowed_per_team_week(weekly: pd.DataFrame, stat: StatSpec) -> pd.DataFrame:
     """Sum the stat allowed by each defense per team-week.
@@ -78,6 +85,52 @@ def _allowed_per_team_week(weekly: pd.DataFrame, stat: StatSpec) -> pd.DataFrame
     return tw
 
 
+def team_week_rates(
+    tw: pd.DataFrame,
+    window: int = 5,
+    min_games: int = 3,
+    shrink_games: float = DEFAULT_OPP_SHRINK,
+) -> pd.DataFrame:
+    """Aggregate an as-of-filtered team-week table into per-defense rates.
+
+    One row per team: ``team, games, allowed_per_game, std, league_avg, ratio,
+    low_sample``. ``ratio`` is the matchup factor with empirical-Bayes
+    shrinkage toward 1.0 (see module docstring); shared by
+    :func:`defense_allowed` and the backtest harness so both apply identical
+    aggregation.
+    """
+    if tw is None or len(tw) == 0:
+        return _empty_rates()
+
+    tw = tw.sort_values([COL_SEASON, COL_WEEK], kind="stable")
+
+    # Last `window` team games per defense.
+    recent = tw.groupby("team", sort=False).tail(window)
+
+    team_agg = (
+        recent.groupby("team", sort=False)
+        .agg(games=("allowed", "count"), allowed_per_game=("allowed", "mean"), std=("allowed", "std"))
+        .reset_index()
+    )
+
+    # League average is per team-*game* over the same window, so defenses with
+    # byes (fewer games) don't skew it.
+    league_avg = float(recent["allowed"].mean()) if not recent.empty else 0.0
+
+    team_agg["league_avg"] = round(league_avg, 2)
+    team_agg["low_sample"] = team_agg["games"] < min_games
+
+    def _ratio(r: pd.Series) -> float:
+        if r["games"] <= 0 or league_avg <= 0:
+            return 1.0
+        raw = r["allowed_per_game"] / league_avg
+        weight = r["games"] / (r["games"] + max(0.0, shrink_games))
+        return 1.0 + (raw - 1.0) * weight
+
+    team_agg["ratio"] = team_agg.apply(_ratio, axis=1).round(3)
+    return team_agg.reset_index(drop=True)
+
+
 def defense_allowed(
     stat: str | StatSpec,
     seasons: Iterable[int] | None = None,
@@ -86,6 +139,7 @@ def defense_allowed(
     as_of: str | date | None = None,
     teams: Iterable[str] | None = None,
     fetcher: Callable[[Iterable[int]], pd.DataFrame] | None = None,
+    shrink_games: float = DEFAULT_OPP_SHRINK,
 ) -> pd.DataFrame:
     """Per-defense normalized "allowed" rates for a stat over a recent window.
 
@@ -94,8 +148,9 @@ def defense_allowed(
         team, games, allowed_per_game, std, league_avg, ratio, low_sample
 
     ``ratio`` is the matchup factor — multiply a player's baseline projection by
-    it (STAGE 4) to get the opponent-adjusted line. Teams with insufficient data
-    carry ``ratio == 1.0`` and ``low_sample == True``.
+    it (STAGE 4) to get the opponent-adjusted line. The factor shrinks toward
+    neutral 1.0 for thin samples; teams with no games in the window carry
+    ``ratio == 1.0`` and ``low_sample == True``.
     """
     stat = get_stat(stat)
     if seasons is None:
@@ -117,36 +172,13 @@ def defense_allowed(
         cutoff = pd.Timestamp(as_of)
         tw = tw[tw[COL_GAMEDAY].isna() | (tw[COL_GAMEDAY] <= cutoff)]
 
-    tw.sort_values([COL_SEASON, COL_WEEK], kind="stable", inplace=True)
+    rates = team_week_rates(tw, window=window, min_games=min_games, shrink_games=shrink_games)
 
-    # Last `window` team games per defense.
-    recent = tw.groupby("team", sort=False).tail(window)
-
-    team_agg = (
-        recent.groupby("team", sort=False)
-        .agg(games=("allowed", "count"), allowed_per_game=("allowed", "mean"), std=("allowed", "std"))
-        .reset_index()
-    )
-
-    # League average is per team-*game* over the same window, so defenses with
-    # byes (fewer games) don't skew it.
-    league_avg = float(recent["allowed"].mean()) if not recent.empty else 0.0
-
-    team_agg["league_avg"] = round(league_avg, 2)
-    team_agg["low_sample"] = team_agg["games"] < min_games
-    team_agg["ratio"] = team_agg.apply(
-        lambda r: 1.0
-        if r["low_sample"] or league_avg <= 0
-        else r["allowed_per_game"] / league_avg,
-        axis=1,
-    )
-    team_agg["ratio"] = team_agg["ratio"].round(3)
-
-    if teams is not None:
+    if teams is not None and not rates.empty:
         wanted = {str(t).upper() for t in teams}
-        team_agg = team_agg[team_agg["team"].isin(wanted)]
+        rates = rates[rates["team"].isin(wanted)]
 
-    return team_agg.reset_index(drop=True)
+    return rates.reset_index(drop=True)
 
 
 def opponent_factor(opponent_team: str, rates: pd.DataFrame) -> dict:
