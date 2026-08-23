@@ -475,19 +475,23 @@ def fetch_player_history(
         ))
 
     if not history.empty:
+        # as-of filtering deliberately keeps rows whose gameday failed to parse
+        # (NaT); staleness is undefined for an all-NaT window, so skip the flag
+        # instead of crashing the projection.
         last_date = pd.Timestamp(history[COL_GAMEDAY].max()).date()
-        # Measure staleness against the projection date when one is given
-        # (walk-forward runs would otherwise read every past game as stale).
-        today = pd.Timestamp(as_of).date() if as_of is not None else date.today()
-        age_days = (today - last_date).days
-        if age_days > max_age_days:
-            # Offseason gaps (> ~90 days) are expected and informational; a long
-            # gap *during* the season usually means injury and is worth warning on.
-            severity = "info" if age_days > 90 else "warn"
-            flags.append(QualityFlag(
-                "STALE", severity,
-                f"Most recent game {age_days} days ago (> {max_age_days})",
-            ))
+        if last_date is not pd.NaT and not pd.isna(last_date):
+            # Measure staleness against the projection date when one is given
+            # (walk-forward runs would otherwise read every past game as stale).
+            today = pd.Timestamp(as_of).date() if as_of is not None else date.today()
+            age_days = (today - last_date).days
+            if age_days > max_age_days:
+                # Offseason gaps (> ~90 days) are expected and informational; a long
+                # gap *during* the season usually means injury and is worth warning on.
+                severity = "info" if age_days > 90 else "warn"
+                flags.append(QualityFlag(
+                    "STALE", severity,
+                    f"Most recent game {age_days} days ago (> {max_age_days})",
+                ))
 
     if not missed.empty:
         flags.append(QualityFlag(
