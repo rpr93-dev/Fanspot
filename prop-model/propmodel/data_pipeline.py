@@ -162,6 +162,56 @@ def normalize_weekly(weekly: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def weekly_is_usable(weekly: pd.DataFrame | None) -> bool:
+    """Cheap check for :func:`cached_fetcher`'s ``validator`` hook.
+
+    True when a cached/fetched weekly frame has the columns the pipeline
+    actually needs and at least one row — i.e. it can't silently project
+    nobody. Schema *errors* still raise via :func:`validate_weekly`; this
+    predicate only decides whether an existing cache entry is worth keeping.
+    """
+    if weekly is None or not isinstance(weekly, pd.DataFrame) or len(weekly) == 0:
+        return False
+    try:
+        _require_weekly_columns(weekly.columns, source="cached weekly data")
+    except ValueError:
+        return False
+    return True
+
+
+def _require_weekly_columns(cols, source: str) -> None:
+    """Raise ValueError naming every required column group missing from ``cols``."""
+    have = set(cols)
+    groups: list[tuple[str, tuple[str, ...]]] = [
+        ("player_id", (COL_PLAYER_ID,)),
+        ("player_name or player_display_name", (COL_PLAYER_NAME, "player_display_name")),
+        ("recent_team or team", (COL_TEAM, "team")),
+        ("season", (COL_SEASON,)),
+        ("week", (COL_WEEK,)),
+    ]
+    missing = [f"{any_of}" for any_of, options in groups if not (set(options) & have)]
+    if missing:
+        raise ValueError(
+            f"{source} is missing required column(s): {', '.join(missing)} — "
+            f"got columns [{', '.join(sorted(have))}]"
+        )
+
+
+def validate_weekly(weekly: pd.DataFrame | None, source: str = "weekly data") -> pd.DataFrame:
+    """Fail loudly when a weekly frame can't feed the pipeline.
+
+    A wrong-schema file (someone hands the CLI a different export) or an empty
+    pull must stop the run with the cause named — otherwise every player
+    resolves to nothing and the tool emits plausible-looking "player not
+    found" refusals instead of the truth (the *data* is broken). Returns the
+    frame unchanged when it is usable.
+    """
+    if weekly is None or len(weekly) == 0:
+        raise ValueError(f"{source} is empty (0 rows)")
+    _require_weekly_columns(weekly.columns, source=source)
+    return weekly
+
+
 def _fetch_weekly_nflverse(seasons: Iterable[int]) -> pd.DataFrame:
     """Default fetcher: nflverse weekly player stats.
 
@@ -192,7 +242,17 @@ def _fetch_weekly_nflverse(seasons: Iterable[int]) -> pd.DataFrame:
 
     import io
 
-    import requests
+    try:
+        import requests
+    except ImportError as e:
+        # The direct-download fallback is the only path on Python >= 3.13
+        # (nfl_data_py can't install there), so a missing requests must be a
+        # named, actionable error — not a bare ModuleNotFoundError from deep
+        # inside the fetch.
+        raise RuntimeError(
+            "Live weekly fetch needs nfl_data_py or the 'requests' package "
+            "(neither is installed). Install deps: pip install -r requirements.txt"
+        ) from e
 
     frames = []
     for season in years:

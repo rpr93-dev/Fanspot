@@ -7,7 +7,12 @@ from datetime import date, timedelta
 import pandas as pd
 import pytest
 
-from propmodel.data_pipeline import fetch_player_history
+from propmodel.data_pipeline import (
+    fetch_player_history,
+    normalize_weekly,
+    validate_weekly,
+    weekly_is_usable,
+)
 from propmodel.stats import get_stat
 
 QB_ID = "00-000001"
@@ -143,3 +148,56 @@ def test_missing_gameday_does_not_crash():
     hist = fetch(rows)
     assert hist.ok
     assert hist.n_games == 5
+
+
+# ---- schema validation (garbage data must fail loudly, not read as "no data") ----
+
+def test_validate_weekly_passes_valid_frame():
+    df = _weekly([qb_row(1, 200)])
+    assert validate_weekly(df, source="test") is df
+
+
+def test_validate_weekly_names_missing_columns():
+    # stats_player-style file without season/week: normalize keeps team alias,
+    # validation must name exactly what's still missing.
+    df = pd.DataFrame([{"player_id": "00-1", "player_name": "A", "team": "HOU"}])
+    with pytest.raises(ValueError) as ei:
+        validate_weekly(df, source="stats_player.csv")
+    msg = str(ei.value)
+    for expected in ("season", "week", "stats_player.csv"):
+        assert expected in msg
+
+
+def test_validate_weekly_rejects_empty_frame():
+    with pytest.raises(ValueError, match="empty"):
+        validate_weekly(pd.DataFrame(), source="weekly.csv")
+
+
+def test_weekly_is_usable_false_for_garbage_or_empty():
+    assert not weekly_is_usable(None)
+    assert not weekly_is_usable(pd.DataFrame())
+    assert not weekly_is_usable(pd.DataFrame({"legacy": [1]}))
+    assert weekly_is_usable(_weekly([qb_row(1, 200)]))
+
+
+def test_normalize_then_validate_accepts_stats_player_schema():
+    df = pd.DataFrame([
+        {"player_id": "00-1", "player_name": "A", "team": "HOU",
+         "season": 2025, "week": 3, "passing_yards": 250.0},
+    ])
+    out = validate_weekly(normalize_weekly(df), source="stats_player.csv")
+    assert "recent_team" in out.columns and "gameday" in out.columns
+
+
+def test_live_fetch_names_missing_requests_dependency(monkeypatch):
+    """On Python >= 3.13 nfl_data_py can't install; when its fallback dep
+    ``requests`` is missing too, the error must name the fix — not a bare
+    ModuleNotFoundError."""
+    import sys
+
+    import propmodel.data_pipeline as tdp
+
+    monkeypatch.setitem(sys.modules, "nfl_data_py", None)
+    monkeypatch.setitem(sys.modules, "requests", None)
+    with pytest.raises(RuntimeError, match="requests"):
+        tdp._fetch_weekly_nflverse([2025])

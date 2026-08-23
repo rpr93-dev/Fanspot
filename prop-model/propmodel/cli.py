@@ -29,14 +29,22 @@ from pathlib import Path
 
 import pandas as pd
 
-from .data_pipeline import PlayerHistory, QualityFlag, default_seasons, fetch_player_history
+from .data_pipeline import (
+    PlayerHistory,
+    QualityFlag,
+    default_seasons,
+    fetch_player_history,
+    normalize_weekly,
+    validate_weekly,
+    weekly_is_usable,
+)
 from .game_script import GameLines, OddsApiLineProvider, StaticLineProvider, script_adjustment
 from .model import ModelWeights, Projection, project
 from .opponent import defense_allowed, opponent_factor
 from .output import projections_table, write_table
 from .players import resolve_player_id
 from .reliability import DiskCache, cached_fetcher, setup_logging
-from .stats import get_stat
+from .stats import StatSpec, get_stat
 
 logger = logging.getLogger(__name__)
 
@@ -63,9 +71,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _targets_from_args(args) -> list[dict]:
     if args.input:
-        raw = json.loads(Path(args.input).read_text(encoding="utf-8"))
+        path = Path(args.input)
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{path} is not valid JSON: {e}") from e
+        if not isinstance(raw, list):
+            raise ValueError(f"{path} must contain a JSON list of targets, got {type(raw).__name__}")
         out = []
-        for t in raw:
+        for i, t in enumerate(raw):
+            if not isinstance(t, dict):
+                raise ValueError(f"{path}: target {i + 1} must be an object, got {type(t).__name__}")
+            for key in ("player", "stat", "team"):
+                if not t.get(key):
+                    raise ValueError(f"{path}: target {i + 1} is missing required field '{key}'")
             out.append({
                 "player": str(t["player"]),
                 "stat": str(t["stat"]),
@@ -85,26 +104,48 @@ def _targets_from_args(args) -> list[dict]:
 def _load_weekly(args) -> pd.DataFrame:
     if args.weekly:
         path = Path(args.weekly)
-        if path.suffix.lower() == ".csv":
-            return pd.read_csv(path)
-        if path.suffix.lower() in (".pkl", ".pickle"):
-            return pd.read_pickle(path)
-        if path.suffix.lower() == ".parquet":
-            return pd.read_parquet(path)
-        raise ValueError(f"Unsupported weekly file type: {path.suffix} (use .csv/.pkl/.parquet)")
-    # Live pull via nfl_data_py, wrapped in the disk cache + retry.
-    from .data_pipeline import _fetch_weekly_nflverse, normalize_weekly
+        try:
+            if path.suffix.lower() == ".csv":
+                df = pd.read_csv(path)
+            elif path.suffix.lower() in (".pkl", ".pickle"):
+                df = pd.read_pickle(path)
+            elif path.suffix.lower() == ".parquet":
+                df = pd.read_parquet(path)
+            else:
+                raise ValueError(f"Unsupported weekly file type: {path.suffix} (use .csv/.pkl/.parquet)")
+        except ValueError:
+            raise
+        except Exception as e:  # noqa: BLE001 — name the file that failed to parse
+            raise ValueError(f"Could not read weekly file {path}: {e}") from e
+        # A wrong-schema file (different export, renamed columns) used to sail
+        # through and read as "every player missing". Fail here with the cause.
+        return validate_weekly(normalize_weekly(df), source=f"Weekly file {path}")
+    # Live pull via nfl_data_py, wrapped in the disk cache + retry. Validation
+    # runs *before* the frame is cached so a bad pull never poisons the cache,
+    # and cached hits are re-checked so a stale/garbage entry triggers a
+    # refetch instead of silently projecting nobody.
+    from .data_pipeline import _fetch_weekly_nflverse
 
     seasons = args.seasons or default_seasons()
+    fetch_validated = lambda s: validate_weekly(  # noqa: E731
+        normalize_weekly(_fetch_weekly_nflverse(s)), source="nflverse weekly data"
+    )
     if args.no_cache:
-        return normalize_weekly(_fetch_weekly_nflverse(seasons))
-    return normalize_weekly(cached_fetcher(_fetch_weekly_nflverse, DiskCache(args.cache_dir))(seasons))
+        return fetch_validated(seasons)
+    return cached_fetcher(fetch_validated, DiskCache(args.cache_dir), validator=weekly_is_usable)(seasons)
 
 
 def _lines_provider(args):
     if args.lines_json:
-        raw = json.loads(Path(args.lines_json).read_text(encoding="utf-8"))
-        lines = {team.upper(): GameLines(**cfg) for team, cfg in raw.items()}
+        path = Path(args.lines_json)
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{path} is not valid JSON: {e}") from e
+        try:
+            lines = {team.upper(): GameLines(**cfg) for team, cfg in raw.items()}
+        except (TypeError, AttributeError) as e:
+            raise ValueError(f"{path} must be an object of {{team: {{total, spread, favorite}}}}: {e}") from e
         return StaticLineProvider(lines)
     if os.environ.get("ODDS_API_KEY"):
         return OddsApiLineProvider()
@@ -113,10 +154,38 @@ def _lines_provider(args):
 
 def _weights(args) -> ModelWeights:
     if args.weights_json:
-        raw = json.loads(Path(args.weights_json).read_text(encoding="utf-8"))
+        path = Path(args.weights_json)
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as e:
+            raise ValueError(f"{path} is not valid JSON: {e}") from e
         keys = ("halflife", "opponent", "game_script", "min_games")
-        return ModelWeights(**{k: raw[k] for k in keys if k in raw})
+        try:
+            return ModelWeights(**{k: raw[k] for k in keys if k in raw})
+        except TypeError as e:
+            raise ValueError(f"Bad weights override in {path}: {e}") from e
     return ModelWeights()
+
+
+def _failed_projection(target: dict, exc: Exception) -> Projection:
+    """A refusal row for a target whose projection raised (e.g. unknown stat).
+
+    One bad target must not abort the batch — it becomes an explicit failure
+    row (projection null + reason naming the error) while the rest still run.
+    """
+    stat_key = str(target.get("stat") or "")
+    return Projection(
+        player_name=str(target.get("player") or "?"),
+        stat=StatSpec(
+            key=stat_key or "?", label=stat_key or "?", unit="",
+            columns=(), positions=(), kind="continuous",
+        ),
+        projection=None, baseline=None, low=None, high=None,
+        confidence="low", n_games=0,
+        opponent_factor=None, script_factor=None,
+        refused_reason=f"{type(exc).__name__}: {exc}",
+        note="target failed — see logs",
+    )
 
 
 def _project_one(target: dict, weekly: pd.DataFrame, lines_provider, weights: ModelWeights, args) -> Projection:
@@ -219,7 +288,11 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     setup_logging(logging.DEBUG if args.verbose else logging.INFO)
 
-    targets = _targets_from_args(args)
+    try:
+        targets = _targets_from_args(args)
+    except ValueError as e:
+        logger.error("Bad batch input: %s", e)
+        return 2
     if not targets:
         print("Nothing to project: pass --player/--stat/--team/--opponent, or --input", file=sys.stderr)
         return 2
@@ -230,10 +303,26 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Failed to load weekly data: %s", e)
         return 1
 
-    lines_provider = _lines_provider(args)
-    weights = _weights(args)
+    try:
+        lines_provider = _lines_provider(args)
+        weights = _weights(args)
+    except ValueError as e:
+        logger.error("Bad input file: %s", e)
+        return 2
 
-    projections = [_project_one(t, weekly, lines_provider, weights, args) for t in targets]
+    # Per-target isolation: one bad target (unknown stat, bad prior, …) becomes
+    # an explicit failure row instead of aborting the batch — the documented
+    # contract of this CLI. The failure names its cause in refused_reason.
+    projections: list[Projection] = []
+    for i, t in enumerate(targets):
+        try:
+            projections.append(_project_one(t, weekly, lines_provider, weights, args))
+        except Exception as e:  # noqa: BLE001 — keep the batch alive
+            logger.error(
+                "Target %d/%d (%s, %s) failed: %s",
+                i + 1, len(targets), t.get("player"), t.get("stat"), e,
+            )
+            projections.append(_failed_projection(t, e))
 
     if args.output:
         write_table(projections_table(projections), args.output)
