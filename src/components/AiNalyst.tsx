@@ -1,8 +1,13 @@
 'use client'
 
 import { useState, useRef, useEffect } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import dynamic from 'next/dynamic'
+
+// Loaded on demand: the react-markdown + remark-gfm tree (~224 KB raw) is only
+// needed once analysis output renders, so keep it out of the team-route
+// first-load bundle (F4). The wrapper module carries both imports behind this
+// single dynamic boundary.
+const Markdown = dynamic(() => import('@/components/Markdown'), { ssr: false })
 
 const TEAM_AREAS = ['Team News', 'Injuries', 'Recent Form', 'Win Probability Next Game', 'Roster Moves', 'Rumors', 'Key Player Stats', 'Web Sources']
 const NEXT_GAME_AREAS = ['Team Stats Comparison', 'Key Matchups', 'Injury Report', 'Recent Form (both teams)', 'Betting Line/Odds', 'Historical Head-to-Head', 'Web Sources']
@@ -276,9 +281,9 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
                   className="rounded-xl p-4 text-sm leading-relaxed text-fs-text/85 max-h-80 overflow-y-auto prose prose-invert prose-sm"
                   style={{ backgroundColor: 'var(--color-fs-panel)', border: `1px solid ${teamColor}20` }}
                 >
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  <Markdown>
                     {output}
-                  </ReactMarkdown>
+                  </Markdown>
                 </div>
               )}
             </div>
