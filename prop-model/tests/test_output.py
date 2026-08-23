@@ -192,8 +192,13 @@ def test_cli_end_to_end(tmp_path):
 
 
 def test_cli_batch_with_unknown_player(tmp_path):
+    # A weekly file with data but no row for the target player: the unknown
+    # player becomes a refusal row (projection null + reason), exit 0.
     weekly_csv = tmp_path / "weekly.csv"
-    pd.DataFrame(columns=["player_id", "player_name", "recent_team"]).to_csv(weekly_csv, index=False)
+    pd.DataFrame([{
+        "player_id": "00-1", "player_name": "Other Guy", "recent_team": "KC",
+        "season": 2025, "week": 1,
+    }]).to_csv(weekly_csv, index=False)
     batch = tmp_path / "batch.json"
     batch.write_text(json.dumps([{"player": "Nobody", "stat": "passing_yards", "team": "HOU", "opponent": "LV"}]))
     result = subprocess.run(
