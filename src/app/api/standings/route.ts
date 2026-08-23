@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { teams } from '@/data/teams'
 import { getEspnAbbr, espnSportMap } from '@/lib/providers/espn'
+import { fetchOrCache } from '@/lib/cache/cacheService'
+import { TTL } from '@/lib/cache/ttl'
 
 interface StandingRow {
   abbr: string
@@ -72,157 +74,169 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Invalid sport' }, { status: 400 })
   }
 
-  const sportTeams = teams.filter((t) => t.sport === sport.toUpperCase())
-  const teamMap = new Map(sportTeams.map((t) => [getEspnAbbr(t.id, t.abbreviation), t]))
+  // Route-level cache: the client polls /api/standings every 120s per tab, and
+  // each miss re-downloads the full league standings from ESPN (~151 KB) only
+  // to trim it to ~6 KB (F3). Standings change a few times per week, so
+  // TTL.STANDINGS absorbs essentially all repeat traffic.
+  const payload = await fetchOrCache(
+    `standings:${sport.toUpperCase()}:${teamId.toUpperCase()}`,
+    TTL.STANDINGS,
+    async (): Promise<{ standings: ConferenceGroup[]; teamStanding: string }> => {
+      const sportTeams = teams.filter((t) => t.sport === sport.toUpperCase())
+      const teamMap = new Map(sportTeams.map((t) => [getEspnAbbr(t.id, t.abbreviation), t]))
 
-  let teamConference = ''
-  let teamDivision = ''
+      let teamConference = ''
+      let teamDivision = ''
 
-  if (teamMap.has(teamId.toUpperCase())) {
-    const t = teamMap.get(teamId.toUpperCase())!
-    teamConference = t.conference
-    teamDivision = t.division
-  }
-
-  const standings: StandingRow[] = []
-
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
-
-  const isInSeason = (s: string): boolean => {
-    switch (s) {
-      case 'NFL': return month >= 8 && month <= 12
-      case 'NBA': return month >= 10 || month <= 6
-      case 'NHL': return month >= 10 || month <= 6
-      case 'MLB': return month >= 3 && month <= 10
-      default: return false
-    }
-  }
-
-  try {
-    const res = await fetch(
-      `https://site.web.api.espn.com/apis/v2/sports/${espnPath}/standings`,
-      { signal: AbortSignal.timeout(15000) }
-    )
-
-    if (!res.ok) {
-      console.error(`[standings] ESPN v2 standings returned ${res.status} for ${sport}`)
-      throw new Error(`ESPN standings returned ${res.status}`)
-    }
-
-    const data = await res.json()
-    const children: any[] = data?.children ?? []
-
-    for (const child of children) {
-      const entries: any[] = child?.standings?.entries ?? []
-      for (const entry of entries) {
-        const team = entry?.team
-        if (!team?.abbreviation) continue
-
-        const abbr = team.abbreviation.toUpperCase()
-        const allStats: any[] = entry.stats ?? []
-        const overallStat = allStats.find((s: any) => s.type === 'total' || s.type === 'overall' || s.name === 'overall')
-        const record = cleanRecord(overallStat?.summary ?? overallStat?.displayValue ?? allStats)
-
-        const logo = team.logos?.[0]?.href ?? ''
-
-        const match = teamMap.get(abbr)
-        standings.push({
-          abbr,
-          name: team.displayName ?? abbr,
-          logo,
-          record,
-          conference: match?.conference ?? '',
-          division: match?.division ?? '',
-          teamId: match?.id ?? '',
-        })
+      if (teamMap.has(teamId.toUpperCase())) {
+        const t = teamMap.get(teamId.toUpperCase())!
+        teamConference = t.conference
+        teamDivision = t.division
       }
-    }
-  } catch (err) {
-    console.error(`[standings] v2 API failed for ${sport}:`, err)
 
-    // Fallback: extract records from scoreboard
-    try {
-      if (!isInSeason(sport.toUpperCase())) {
-        const seasonYear = sport.toUpperCase() === 'NFL' ? year - 1 : year
-        const endMonth = sport.toUpperCase() === 'NFL' ? '02' : '06'
-        const startMonth = sport.toUpperCase() === 'NFL' ? '08' : '10'
+      const standings: StandingRow[] = []
 
-        const res = await fetch(
-          `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${seasonYear}${startMonth}01-${year}${endMonth}28&limit=300`,
-          { signal: AbortSignal.timeout(15000) }
-        )
-        if (res.ok) {
-          const data = await res.json()
-          const events = data?.events ?? []
-          const seen = new Set<string>()
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = now.getMonth() + 1
 
-          for (const event of events) {
-            const comps = event.competitions?.[0]?.competitors ?? []
-            for (const comp of comps) {
-              const abbr = comp.team?.abbreviation
-              if (!abbr || seen.has(abbr)) continue
-              seen.add(abbr)
-              const recs = comp.records ?? []
-              const overall = Array.isArray(recs) ? recs.find((r: any) => r.name === 'overall') : null
-              const match = teamMap.get(abbr.toUpperCase())
-              standings.push({
-                abbr,
-                name: comp.team.displayName ?? abbr,
-                logo: `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${abbr.toLowerCase()}.png`,
-                record: cleanRecord(overall?.summary ?? ''),
-                conference: match?.conference ?? '',
-                division: match?.division ?? '',
-                teamId: match?.id ?? '',
-              })
-            }
-          }
-        }
-      } else {
-        const startMonth = sport.toUpperCase() === 'NFL' ? '08' : '03'
-        const endDate = sport.toUpperCase() === 'NFL' ? '01-15' : '10-01'
-        const nextYear = sport.toUpperCase() === 'NFL' ? year + 1 : year
-
-        const res = await fetch(
-          `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${year}${startMonth}01-${nextYear}${endDate}&limit=300`,
-          { signal: AbortSignal.timeout(15000) }
-        )
-        if (res.ok) {
-          const data = await res.json()
-          const events = data?.events ?? []
-          const seen = new Set<string>()
-
-          for (const event of events) {
-            const comps = event.competitions?.[0]?.competitors ?? []
-            for (const comp of comps) {
-              const abbr = comp.team?.abbreviation
-              if (!abbr || seen.has(abbr)) continue
-              seen.add(abbr)
-              const recs = comp.records ?? []
-              const overall = Array.isArray(recs) ? recs.find((r: any) => r.name === 'overall') : null
-              const match = teamMap.get(abbr.toUpperCase())
-              standings.push({
-                abbr,
-                name: comp.team.displayName ?? abbr,
-                logo: `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${abbr.toLowerCase()}.png`,
-                record: cleanRecord(overall?.summary ?? ''),
-                conference: match?.conference ?? '',
-                division: match?.division ?? '',
-                teamId: match?.id ?? '',
-              })
-            }
-          }
+      const isInSeason = (s: string): boolean => {
+        switch (s) {
+          case 'NFL': return month >= 8 && month <= 12
+          case 'NBA': return month >= 10 || month <= 6
+          case 'NHL': return month >= 10 || month <= 6
+          case 'MLB': return month >= 3 && month <= 10
+          default: return false
         }
       }
-    } catch (fallbackErr) {
-      console.error(`[standings] Scoreboard fallback also failed for ${sport}:`, fallbackErr)
-    }
-  }
 
-  const grouped = groupStandings(standings)
+      try {
+        const res = await fetch(
+          `https://site.web.api.espn.com/apis/v2/sports/${espnPath}/standings`,
+          { signal: AbortSignal.timeout(15000) }
+        )
+
+        if (!res.ok) {
+          console.error(`[standings] ESPN v2 standings returned ${res.status} for ${sport}`)
+          throw new Error(`ESPN standings returned ${res.status}`)
+        }
+
+        const data = await res.json()
+        const children: any[] = data?.children ?? []
+
+        for (const child of children) {
+          const entries: any[] = child?.standings?.entries ?? []
+          for (const entry of entries) {
+            const team = entry?.team
+            if (!team?.abbreviation) continue
+
+            const abbr = team.abbreviation.toUpperCase()
+            const allStats: any[] = entry.stats ?? []
+            const overallStat = allStats.find((s: any) => s.type === 'total' || s.type === 'overall' || s.name === 'overall')
+            const record = cleanRecord(overallStat?.summary ?? overallStat?.displayValue ?? allStats)
+
+            const logo = team.logos?.[0]?.href ?? ''
+
+            const match = teamMap.get(abbr)
+            standings.push({
+              abbr,
+              name: team.displayName ?? abbr,
+              logo,
+              record,
+              conference: match?.conference ?? '',
+              division: match?.division ?? '',
+              teamId: match?.id ?? '',
+            })
+          }
+        }
+      } catch (err) {
+        console.error(`[standings] v2 API failed for ${sport}:`, err)
+
+        // Fallback: extract records from scoreboard
+        try {
+          if (!isInSeason(sport.toUpperCase())) {
+            const seasonYear = sport.toUpperCase() === 'NFL' ? year - 1 : year
+            const endMonth = sport.toUpperCase() === 'NFL' ? '02' : '06'
+            const startMonth = sport.toUpperCase() === 'NFL' ? '08' : '10'
+
+            const res = await fetch(
+              `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${seasonYear}${startMonth}01-${year}${endMonth}28&limit=300`,
+              { signal: AbortSignal.timeout(15000) }
+            )
+            if (res.ok) {
+              const data = await res.json()
+              const events = data?.events ?? []
+              const seen = new Set<string>()
+
+              for (const event of events) {
+                const comps = event.competitions?.[0]?.competitors ?? []
+                for (const comp of comps) {
+                  const abbr = comp.team?.abbreviation
+                  if (!abbr || seen.has(abbr)) continue
+                  seen.add(abbr)
+                  const recs = comp.records ?? []
+                  const overall = Array.isArray(recs) ? recs.find((r: any) => r.name === 'overall') : null
+                  const match = teamMap.get(abbr.toUpperCase())
+                  standings.push({
+                    abbr,
+                    name: comp.team.displayName ?? abbr,
+                    logo: `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${abbr.toLowerCase()}.png`,
+                    record: cleanRecord(overall?.summary ?? ''),
+                    conference: match?.conference ?? '',
+                    division: match?.division ?? '',
+                    teamId: match?.id ?? '',
+                  })
+                }
+              }
+            }
+          } else {
+            const startMonth = sport.toUpperCase() === 'NFL' ? '08' : '03'
+            const endDate = sport.toUpperCase() === 'NFL' ? '01-15' : '10-01'
+            const nextYear = sport.toUpperCase() === 'NFL' ? year + 1 : year
+
+            const res = await fetch(
+              `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${year}${startMonth}01-${nextYear}${endDate}&limit=300`,
+              { signal: AbortSignal.timeout(15000) }
+            )
+            if (res.ok) {
+              const data = await res.json()
+              const events = data?.events ?? []
+              const seen = new Set<string>()
+
+              for (const event of events) {
+                const comps = event.competitions?.[0]?.competitors ?? []
+                for (const comp of comps) {
+                  const abbr = comp.team?.abbreviation
+                  if (!abbr || seen.has(abbr)) continue
+                  seen.add(abbr)
+                  const recs = comp.records ?? []
+                  const overall = Array.isArray(recs) ? recs.find((r: any) => r.name === 'overall') : null
+                  const match = teamMap.get(abbr.toUpperCase())
+                  standings.push({
+                    abbr,
+                    name: comp.team.displayName ?? abbr,
+                    logo: `https://a.espncdn.com/i/teamlogos/${sport.toLowerCase()}/500/${abbr.toLowerCase()}.png`,
+                    record: cleanRecord(overall?.summary ?? ''),
+                    conference: match?.conference ?? '',
+                    division: match?.division ?? '',
+                    teamId: match?.id ?? '',
+                  })
+                }
+              }
+            }
+          }
+        } catch (fallbackErr) {
+          console.error(`[standings] Scoreboard fallback also failed for ${sport}:`, fallbackErr)
+        }
+      }
+
+      const grouped = groupStandings(standings)
+      return { standings: grouped, teamStanding: `${teamConference} ${teamDivision}`.trim() }
+    }
+  )
+
   return NextResponse.json(
-    { standings: grouped, teamStanding: `${teamConference} ${teamDivision}`.trim() },
+    payload,
     { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } }
   )
 }

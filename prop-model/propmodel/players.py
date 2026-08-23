@@ -13,10 +13,26 @@ def normalize_name(name: str) -> str:
     return re.sub(r"\s+", " ", cleaned).strip()
 
 
+def normalized_names(weekly: pd.DataFrame) -> pd.Series:
+    """Normalized candidate name for every row of the weekly frame.
+
+    nflverse stats_player files abbreviate player_name ("C.Stroud") but keep
+    the full name in player_display_name — prefer the full name for matching.
+    Building this once per run (see :func:`resolve_player_id`'s ``name_index``)
+    avoids regex-normalizing ~57k names on every resolution.
+    """
+    if "player_display_name" in weekly.columns:
+        name_col = "player_display_name"
+    else:
+        name_col = "player_name"
+    return weekly[name_col].map(lambda v: normalize_name(v) if isinstance(v, str) else "")
+
+
 def resolve_player_id(
     weekly: pd.DataFrame,
     player_name: str,
     team: str | None = None,
+    name_index: pd.Series | None = None,
 ) -> str | None:
     """Find the nflfastR player_id for ``player_name`` (optionally on ``team``).
 
@@ -28,21 +44,20 @@ def resolve_player_id(
     most recent game when multiple ids match (career splits across versions).
     Returns None when the player isn't in the frame at all (e.g. a rookie
     with no NFL games yet).
+
+    ``name_index`` optionally supplies :func:`normalized_names` output reused
+    across calls; results are identical to computing it per call.
     """
     if "player_id" not in weekly.columns or "player_name" not in weekly.columns:
         return None
     wanted = normalize_name(player_name)
+    if name_index is None:
+        name_index = normalized_names(weekly)
 
-    def _norm(v):
-        return normalize_name(v) if isinstance(v, str) else ""
-
-    # nflverse stats_player files abbreviate player_name ("C.Stroud") but keep
-    # the full name in player_display_name — prefer the full name for matching.
-    name_col = "player_display_name" if "player_display_name" in weekly.columns else "player_name"
-    team_col = "recent_team" if "recent_team" in weekly.columns else "team"
-    rows = weekly[weekly[name_col].map(_norm) == wanted]
+    rows = weekly[name_index == wanted]
     if rows.empty:
         return None
+    team_col = "recent_team" if "recent_team" in weekly.columns else "team"
     if team:
         team = str(team).upper()
         team_rows = rows[rows[team_col].astype(str).str.upper() == team]

@@ -271,6 +271,7 @@ export default function TeamDashboard() {
 
     async function poll() {
       if (stopped) return
+      if (document.hidden) { schedule(); return } // background tab: skip the fetch, keep the cycle alive
       try {
         let url = `/api/odds?sport=${t.sport}&team=${abbr}`
         const ug = upcomingGameRef.current
@@ -302,6 +303,7 @@ export default function TeamDashboard() {
   useEffect(() => {
     if (!team) return
     const id = setInterval(async () => {
+      if (document.hidden) return // background tab
       try {
         const raw = await getTeamNews(team.sport, team.id, team.name, team.abbreviation)
         const items = raw.map((a: any) => ({
@@ -328,6 +330,7 @@ export default function TeamDashboard() {
     if (!team) return
     const abbr = getEspnAbbr(team.id, team.abbreviation)
     const id = setInterval(async () => {
+      if (document.hidden) return // background tab
       try {
         const res = await fetch(`/api/standings?sport=${team.sport}&team=${abbr}`)
         if (res.ok) {
@@ -343,6 +346,7 @@ export default function TeamDashboard() {
   useEffect(() => {
     if (!team) return
     const id = setInterval(async () => {
+      if (document.hidden) return // background tab
       try {
         const schedule = await getTeamSchedule(team.sport, team.id, team.abbreviation)
         const abbr = getEspnAbbr(team.id, team.abbreviation)
@@ -366,6 +370,7 @@ export default function TeamDashboard() {
     const t = team
 
     async function fetchLiveBoxScore() {
+      if (document.hidden) return // background tab
       try {
         const res = await fetch(`/api/box-score?sport=${t.sport}&eventId=${eventId}`)
         if (res.ok) {

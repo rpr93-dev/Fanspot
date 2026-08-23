@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server'
 import { XMLParser } from 'fast-xml-parser'
+import { fetchOrCache } from '@/lib/cache/cacheService'
+import { TTL } from '@/lib/cache/ttl'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -161,40 +163,47 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Missing team' }, { status: 400 })
   }
 
-  const queries = [
-    `${teamName} ${sport}`,
-    teamName,
-  ]
+  // Route-level cache: the client news poll re-hits this route every 120s per
+  // tab, and each miss costs live Google News RSS round-trips (F2). TTL.NEWS
+  // keeps repeat polls at in-memory cost.
+  const articles = await fetchOrCache(
+    `news-search:${sport.toLowerCase()}:${teamName.toLowerCase()}`,
+    TTL.NEWS,
+    async () => {
+      const queries = [
+        `${teamName} ${sport}`,
+        teamName,
+      ]
 
-  let allArticles: NewsItem[] = []
+      // Both RSS feeds are independent — fetch them concurrently instead of
+      // paying two sequential round-trips.
+      const [primary, secondary] = await Promise.all(queries.map((q) => fetchGoogleNews(q)))
+      const allArticles: NewsItem[] = [...primary, ...secondary]
 
-  for (const q of queries) {
-    const googleArticles = await fetchGoogleNews(q)
-    allArticles.push(...googleArticles)
-  }
-
-  const seenUrls = new Set<string>()
-  const scored = allArticles
-    .filter((a) => {
-      const key = a.url || a.title
-      if (seenUrls.has(key)) return false
-      seenUrls.add(key)
-      return true
-    })
-    .map((a) => {
-      a.score = scoreArticle(a.title, a.snippet, teamName)
-      return a
-    })
-    .filter((a) => a.score >= 5 && isRecent(a.date))
-    .sort((a, b) => {
-      const dateA = new Date(a.date).getTime()
-      const dateB = new Date(b.date).getTime()
-      return dateB - dateA
-    })
-    .slice(0, 6)
+      const seenUrls = new Set<string>()
+      return allArticles
+        .filter((a) => {
+          const key = a.url || a.title
+          if (seenUrls.has(key)) return false
+          seenUrls.add(key)
+          return true
+        })
+        .map((a) => {
+          a.score = scoreArticle(a.title, a.snippet, teamName)
+          return a
+        })
+        .filter((a) => a.score >= 5 && isRecent(a.date))
+        .sort((a, b) => {
+          const dateA = new Date(a.date).getTime()
+          const dateB = new Date(b.date).getTime()
+          return dateB - dateA
+        })
+        .slice(0, 6)
+    },
+  )
 
   return NextResponse.json(
-    { articles: scored },
+    { articles },
     { headers: { 'Cache-Control': 'public, s-maxage=180, stale-while-revalidate=300' } }
   )
 }

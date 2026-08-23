@@ -6,7 +6,9 @@ Makes the pipeline safe to run unattended (cron):
   comes from GitHub raw; 429s and transient network errors are normal).
 - :class:`DiskCache` — parquet/JSON disk cache so repeat runs don't re-download
   the multi-MB weekly file. Writes go to a temp file then ``os.replace`` so a
-  crash mid-write never corrupts a cache entry.
+  crash mid-write never corrupts a cache entry. The default TTL (24h) reflects
+  how often nflverse actually publishes weekly files; the cached entry carries
+  an honest freshness stamp, so staleness is visible rather than silent.
 - :func:`cached_fetcher` — wraps any ``(seasons) -> DataFrame`` fetcher with the
   disk cache, keyed by the seasons list.
 - :func:`setup_logging` — idempotent console logging; low-confidence projections
@@ -84,7 +86,7 @@ class DiskCache:
     cron job runs on a flaky connection.
     """
 
-    def __init__(self, directory: str | Path, ttl_seconds: int = 6 * 3600):
+    def __init__(self, directory: str | Path, ttl_seconds: int = 24 * 3600):
         self.dir = Path(directory)
         self.dir.mkdir(parents=True, exist_ok=True)
         self.ttl_seconds = ttl_seconds

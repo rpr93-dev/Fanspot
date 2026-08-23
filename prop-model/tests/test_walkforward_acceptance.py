@@ -48,7 +48,12 @@ def _load_frame() -> pd.DataFrame:
     assert hits
     from propmodel.data_pipeline import normalize_weekly
 
-    frames = [pd.read_pickle(p) for p in hits]
+    # Normalize each entry BEFORE concatenating: cache entries written by
+    # different vintages can carry different raw schemas (e.g. gameday present
+    # natively vs derived by normalize_weekly). Concatenating raw frames first
+    # turns the missing column into NaN in the mixed dtype and normalization
+    # can no longer recover it — half the frame would read NaT gameday.
+    frames = [normalize_weekly(pd.read_pickle(p)) for p in hits]
     return normalize_weekly(pd.concat(frames, ignore_index=True))
 
 

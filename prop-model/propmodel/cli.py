@@ -47,7 +47,7 @@ from .game_script import GameLines, OddsApiLineProvider, StaticLineProvider, scr
 from .model import ModelWeights, Projection, position_guard_reason, project
 from .opponent import defense_allowed, opponent_factor
 from .output import projections_table, write_table
-from .players import resolve_player_id
+from .players import normalized_names, resolve_player_id
 from .reliability import DiskCache, cached_fetcher, setup_logging
 from .stats import StatSpec, get_stat
 from .teams import normalize_team_code, team_codes_in_frame
@@ -282,12 +282,104 @@ def _failed_projection(target: dict, exc: Exception) -> Projection:
     )
 
 
+class RunMemo:
+    """Per-run caches so a batch never repeats identical whole-frame work (F11).
+
+    - ``pids``: player-id resolution results per (player, team).
+    - ``name_index``: normalized candidate names for the weekly frame, built
+      lazily once and shared by every resolution (one ~50 ms scan per run
+      instead of one per target).
+    - ``rates``: league-wide defense rates per stat, filtered views per
+      matchup (see :func:`_defense_rates_for`).
+
+    Pure caching — nothing here changes any computed value.
+    """
+
+    def __init__(self) -> None:
+        self.pids: dict[tuple[str, str], str | None] = {}
+        self.rates: dict = {}
+        self._name_index = None
+
+    def name_index(self, weekly: pd.DataFrame):
+        if self._name_index is None:
+            self._name_index = normalized_names(weekly)
+        return self._name_index
+
+
+def _resolve_pid(
+    memo: RunMemo | None,
+    weekly: pd.DataFrame,
+    player: str,
+    team: str,
+) -> str | None:
+    """Player-id resolution, memoized per run via the shared name index."""
+    if memo is None:
+        return resolve_player_id(weekly, player, team)
+    key = (player, team)
+    if key not in memo.pids:
+        memo.pids[key] = resolve_player_id(weekly, player, team, name_index=memo.name_index(weekly))
+    return memo.pids[key]
+
+
+def _defense_rates_for(
+    rates_cache: dict | None,
+    weekly: pd.DataFrame,
+    stat: str | StatSpec,
+    seasons: list[int],
+    window: int,
+    shrink_games: float,
+    teams: list[str],
+    as_of=None,
+) -> pd.DataFrame:
+    """:func:`defense_allowed` for ``teams``, memoized per run.
+
+    ``defense_allowed`` computes league-wide rates and only then filters to the
+    requested teams, so within a run the expensive per-stat scan of the weekly
+    frame (row-wise apply, ~70 ms) can be shared by every target with the same
+    stat; only the cheap row filter repeats per matchup. The full table is
+    cached keyed by everything that can vary inside one run (stat, seasons,
+    window, shrinkage, as-of), and filtered views keyed additionally by the
+    teams-set — results are byte-identical to calling ``defense_allowed``
+    directly.
+    """
+    if rates_cache is None:
+        return defense_allowed(
+            stat, seasons=seasons, teams=teams,
+            window=window, fetcher=lambda s: weekly,
+            shrink_games=shrink_games, as_of=as_of,
+        )
+
+    spec_key = get_stat(stat).key
+    cutoff_key = str(as_of) if as_of is not None else None
+    full_key = (
+        spec_key, tuple(sorted(int(s) for s in seasons)),
+        int(window), float(shrink_games), cutoff_key,
+    )
+    full = rates_cache.get(full_key)
+    if full is None:
+        full = defense_allowed(
+            stat, seasons=seasons, teams=None,
+            window=window, fetcher=lambda s: weekly,
+            shrink_games=shrink_games, as_of=as_of,
+        )
+        rates_cache[full_key] = full
+
+    wanted = tuple(sorted({str(t).upper() for t in teams}))
+    filter_key = full_key + (wanted,)
+    filtered = rates_cache.get(filter_key)
+    if filtered is None:
+        # Same filter defense_allowed applies for teams=[...] before its final reset_index.
+        filtered = full[full["team"].isin(wanted)].reset_index(drop=True)
+        rates_cache[filter_key] = filtered
+    return filtered
+
+
 def _project_one(
     target: dict, weekly: pd.DataFrame, lines_provider, weights: ModelWeights, args,
     priors: dict[str, float] | None = None,
+    memo: RunMemo | None = None,
     known_codes: set[str] | None = None,
     history_cutoff=None,
-    rates_cache: dict[str, pd.DataFrame] | None = None,
 ) -> Projection:
     player, stat = target["player"], target["stat"]
     # Normalize fantasy/broadcast spellings (LAR→LA, JAX→JAC, …) at the
@@ -296,30 +388,15 @@ def _project_one(
     opponent = normalize_team_code(target.get("opponent") or "", known_codes)
     seasons = args.seasons or default_seasons()
 
-    pid = resolve_player_id(weekly, player, team)
+    pid = _resolve_pid(memo, weekly, player, team)
     prior = target.get("prior")
     lines = lines_provider.fetch(team, opponent) if lines_provider else None
     gs = script_adjustment(team, opponent, lines)
-
-    # Defense rates per stat are shared across the batch: compute the
-    # league-wide table once and slice the two teams we need per target.
-    spec = get_stat(stat)
-    if rates_cache is not None:
-        if spec.key not in rates_cache:
-            rates_cache[spec.key] = defense_allowed(
-                spec, seasons=seasons, window=args.n_games,
-                fetcher=lambda s: weekly, shrink_games=weights.opp_shrink,
-                as_of=history_cutoff,
-            )
-        all_rates = rates_cache[spec.key]
-        wanted = {team.upper(), opponent.upper()}
-        rates = all_rates[all_rates["team"].isin(wanted)] if not all_rates.empty else all_rates
-    else:
-        rates = defense_allowed(
-            spec, seasons=seasons, teams=[team, opponent],
-            window=args.n_games, fetcher=lambda s: weekly,
-            shrink_games=weights.opp_shrink, as_of=history_cutoff,
-        )
+    rates = _defense_rates_for(
+        memo.rates if memo is not None else None, weekly, stat, seasons=seasons,
+        window=args.n_games, shrink_games=weights.opp_shrink,
+        teams=[team, opponent], as_of=history_cutoff,
+    )
     opp = opponent_factor(opponent, rates)
 
     def _get_prior() -> float | None:
@@ -356,7 +433,7 @@ def _project_one(
 
     pos_prior = None
     if priors is not None:
-        key = spec.key
+        key = get_stat(stat).key
         if key not in priors:
             # The prior must respect the as-of cut too — a walk-forward
             # projection can't lean on position averages that include the
@@ -446,13 +523,12 @@ def main(argv: list[str] | None = None) -> int:
     # contract of this CLI. The failure names its cause in refused_reason.
     projections: list[Projection] = []
     priors: dict[str, float] = {}
-    rates_cache: dict[str, pd.DataFrame] = {}
+    memo = RunMemo()
     for i, t in enumerate(targets):
         try:
             projections.append(_project_one(
                 t, weekly, lines_provider, weights, args, priors,
-                known_codes=known_codes, history_cutoff=history_cutoff,
-                rates_cache=rates_cache,
+                memo=memo, known_codes=known_codes, history_cutoff=history_cutoff,
             ))
         except Exception as e:  # noqa: BLE001 — keep the batch alive
             logger.error(
