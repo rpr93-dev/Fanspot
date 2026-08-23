@@ -1,22 +1,29 @@
 import { NextResponse } from 'next/server'
-import { execFile } from 'child_process'
-import { promisify } from 'util'
 import path from 'path'
 import os from 'os'
 import fs from 'fs/promises'
+import {
+  CACHE_DIR,
+  PYTHON,
+  eventDateToAsOf,
+  isColdStartFailure,
+  runModelCli,
+  warmPropModel,
+} from '@/lib/propModel'
 
 /**
  * Runs the Python prop-projection model (prop-model/propmodel) on demand.
  *
  * POST /api/prop-model
- *   { targets: [{ player, stat, team, opponent }, ...], lines?: { [team]: { total, spread, favorite } } }
+ *   { targets: [{ player, stat, team, opponent }, ...],
+ *     lines?: { [team]: { total, spread, favorite } },
+ *     eventDate?: "YYYYMMDD" }   // projections use only data before this date
  *
  * Shells out to the venv CLI (`python -m propmodel.cli --input ... --output ...`),
- * which downloads the nflverse weekly file once (then serves it from its disk
- * cache at prop-model/cache, so repeat calls are fast). Returns the projections
- * table rows the CLI emits.
+ * which reads the nflverse weekly file from its disk cache at prop-model/cache
+ * (the first-ever run downloads it; a background warm-up also runs on server
+ * boot). Returns the projections table rows the CLI emits.
  */
-const execFileAsync = promisify(execFile)
 
 const STAT_LABELS: Record<string, { label: string; unit: string }> = {
   passing_yards: { label: 'Passing Yards', unit: 'yds' },
@@ -26,12 +33,12 @@ const STAT_LABELS: Record<string, { label: string; unit: string }> = {
   tds: { label: 'Touchdowns', unit: 'td' },
 }
 
-const MODEL_DIR = path.join(process.cwd(), 'prop-model')
-const PYTHON = process.platform === 'win32'
-  ? path.join(MODEL_DIR, '.venv', 'Scripts', 'python.exe')
-  : path.join(MODEL_DIR, '.venv', 'bin', 'python')
+const WARMING_MESSAGE =
+  'The prop model is warming up — its first run downloads NFL data. Try again in a minute.'
 
 export async function POST(request: Request) {
+  warmPropModel()
+
   let body: any
   try {
     body = await request.json()
@@ -40,12 +47,13 @@ export async function POST(request: Request) {
   }
 
   const targets = body?.targets
-  if (!Array.isArray(targets) || targets.length === 0 || targets.length > 12) {
+  if (!Array.isArray(targets) || targets.length === 0 || targets.length > 40) {
     return NextResponse.json(
-      { error: 'targets must be a non-empty array of { player, stat, team, opponent } (max 12)' },
+      { error: 'targets must be a non-empty array of { player, stat, team, opponent } (max 40)' },
       { status: 400 },
     )
   }
+  const asOf = eventDateToAsOf(body?.eventDate)
 
   try {
     await fs.access(PYTHON)
@@ -68,8 +76,9 @@ export async function POST(request: Request) {
       '-m', 'propmodel.cli',
       '--input', batchPath,
       '--output', outPath,
-      '--cache-dir', path.join(MODEL_DIR, 'cache'),
+      '--cache-dir', CACHE_DIR,
     ]
+    if (asOf) args.push('--as-of', asOf)
     if (body?.preseason) args.push('--preseason')
     const lines = body?.lines
     if (lines && typeof lines === 'object' && Object.keys(lines).length > 0) {
@@ -77,11 +86,7 @@ export async function POST(request: Request) {
       await fs.writeFile(linesPath, JSON.stringify(lines))
       args.push('--lines-json', linesPath)
     }
-    await execFileAsync(PYTHON, args, {
-      cwd: MODEL_DIR,
-      timeout: 170000,
-      maxBuffer: 64 * 1024 * 1024,
-    })
+    await runModelCli(args)
     const out = JSON.parse(await fs.readFile(outPath, 'utf-8'))
     const projections = (Array.isArray(out) ? out : []).map((r: any) => ({
       player: r.player,
@@ -98,12 +103,24 @@ export async function POST(request: Request) {
       script_factor: r.script_factor,
       refused_reason: r.refused_reason,
       note: r.note ?? null,
+      last_updated: r.last_updated ?? null,
     }))
     return NextResponse.json({ projections, source: 'prop-model' })
   } catch (err: any) {
-    const detail = (err?.stderr || err?.message || String(err)).toString().slice(-2000)
-    console.error('[prop-model] run failed:', detail)
-    return NextResponse.json({ error: `Prop model run failed: ${detail}` }, { status: 500 })
+    const detail = (err?.stderr || err?.message || String(err)).toString()
+    console.error('[prop-model] run failed:', detail.slice(-2000))
+    if (await isColdStartFailure(err)) {
+      // Cold start (empty cache → multi-MB download) or a stale data pull:
+      // a friendly retry beats a Python traceback tail. The warm-up fetch has
+      // been kicked off in the background; the next click usually succeeds.
+      warmPropModel()
+      return NextResponse.json({ error: WARMING_MESSAGE, warmingUp: true }, { status: 503 })
+    }
+    const lastLine = detail.trim().split('\n').filter(Boolean).pop() ?? 'unknown error'
+    return NextResponse.json(
+      { error: `Prop model run failed: ${lastLine}` },
+      { status: 500 },
+    )
   } finally {
     fs.rm(tmp, { recursive: true, force: true }).catch(() => {})
   }

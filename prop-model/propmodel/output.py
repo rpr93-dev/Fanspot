@@ -24,9 +24,16 @@ TABLE_COLUMNS = [
 def projections_table(
     projections: list[Projection],
     as_of: date | None = None,
+    data_through: date | None = None,
 ) -> pd.DataFrame:
-    """One row per projection with the dashboard schema."""
-    as_of = as_of or date.today()
+    """One row per projection with the dashboard schema.
+
+    ``last_updated`` stamps the **data vintage** (the newest gameday in the
+    input frame, ``data_through``), not the wall-clock run time — a projection
+    computed off a days-old cache must say so. Falls back to ``as_of``/today
+    only when the frame carries no dates.
+    """
+    stamp = data_through or as_of or date.today()
     rows = []
     for p in projections:
         d = p.to_dict()
@@ -37,7 +44,7 @@ def projections_table(
             "market_line": None,
             "edge": None,
             "confidence": d["confidence"],
-            "last_updated": f"{as_of.isoformat()}T00:00:00",
+            "last_updated": f"{stamp.isoformat()}T00:00:00",
             "low": d["low"],
             "high": d["high"],
             "n_games": d["n_games"],

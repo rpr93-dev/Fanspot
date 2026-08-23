@@ -301,6 +301,18 @@ def _played(row: pd.Series, stat: StatSpec) -> bool:
     return _stat_value(row, stat) is not None
 
 
+def data_vintage(weekly: pd.DataFrame) -> date | None:
+    """The most recent gameday present in a weekly frame — the honest
+    "data through" stamp for output (a projection is only as fresh as its
+    input frame, not the moment it was computed)."""
+    if weekly is None or len(weekly) == 0 or COL_GAMEDAY not in weekly.columns:
+        return None
+    days = pd.to_datetime(weekly[COL_GAMEDAY], errors="coerce").dropna()
+    if days.empty:
+        return None
+    return days.max().date()
+
+
 def fetch_player_history(
     player_id: str,
     stat: str | StatSpec,
@@ -309,6 +321,7 @@ def fetch_player_history(
     max_age_days: int = 21,
     min_games: int = 3,
     fetcher: Callable[[Iterable[int]], pd.DataFrame] | None = None,
+    as_of: str | date | None = None,
 ) -> PlayerHistory:
     """Fetch + validate the last ``n_games`` played games for ``player_id``'s stat.
 
@@ -322,6 +335,10 @@ def fetch_player_history(
     max_age_days : games older than this many days trigger a STALE flag.
     min_games : fewer played games than this is INSUFFICIENT_HISTORY (error).
     fetcher : injectable ``(seasons) -> weekly DataFrame`` for tests/offline runs.
+    as_of : inclusive last usable gameday; later games are excluded so a
+        projection for an upcoming event never sees games from that event's
+        week or later (walk-forward-safe). Staleness is also measured against
+        this date instead of today. None = use every game in the frame.
 
     Returns
     -------
@@ -363,6 +380,10 @@ def fetch_player_history(
 
     if COL_GAMEDAY in rows.columns:
         rows[COL_GAMEDAY] = pd.to_datetime(rows[COL_GAMEDAY], errors="coerce")
+
+    if as_of is not None and COL_GAMEDAY in rows.columns:
+        cutoff = pd.Timestamp(as_of)
+        rows = rows[rows[COL_GAMEDAY].isna() | (rows[COL_GAMEDAY] <= cutoff)]
 
     def _name(col: str, fallback: str, last: bool = False) -> str:
         series = rows[col].dropna()
@@ -455,7 +476,10 @@ def fetch_player_history(
 
     if not history.empty:
         last_date = pd.Timestamp(history[COL_GAMEDAY].max()).date()
-        age_days = (date.today() - last_date).days
+        # Measure staleness against the projection date when one is given
+        # (walk-forward runs would otherwise read every past game as stale).
+        today = pd.Timestamp(as_of).date() if as_of is not None else date.today()
+        age_days = (today - last_date).days
         if age_days > max_age_days:
             # Offseason gaps (> ~90 days) are expected and informational; a long
             # gap *during* the season usually means injury and is worth warning on.
@@ -470,6 +494,19 @@ def fetch_player_history(
             "MISSED_GAMES", "warn",
             f"{len(missed)} roster week(s) without a game inside the history window (injury/scratch)",
         ))
+
+    # Calendar-gap proxy (absence honesty): production frames carry no DNP rows,
+    # so missed weeks are invisible there. The window's calendar span still
+    # exposes them — 8 games over 11+ weeks reads differently than 8 straight.
+    if len(history) >= 2:
+        span_days = int((history[COL_GAMEDAY].max() - history[COL_GAMEDAY].min()).days)
+        straight = 7 * (len(history) - 1)
+        if span_days > straight + 6:  # more slack than a bye week
+            flags.append(QualityFlag(
+                "CALENDAR_GAP", "info",
+                f"History spans {span_days} days for {len(history)} games "
+                f"(~{span_days - straight} extra gap days)",
+            ))
 
     return PlayerHistory(
         stat=stat, player_id=pid, player_name=player_name, position=position,
