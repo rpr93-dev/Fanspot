@@ -1,0 +1,23 @@
+{
+  "name": "fanspot-draft-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Playwright auction draft bot for Yahoo Fantasy, powered by Fanspot's auction valuation engine",
+  "type": "module",
+  "scripts": {
+    "bot": "tsx src/cli.ts bot",
+    "inspect": "tsx src/cli.ts inspect",
+    "values": "tsx src/cli.ts values",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "playwright": "^1.51.1",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.3",
+    "typescript": "^5.9.2",
+    "vitest": "^3.2.4"
+  }
+}
