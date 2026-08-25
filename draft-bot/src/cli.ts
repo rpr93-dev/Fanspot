@@ -6,6 +6,7 @@ import { normalizeName } from './names'
 import { selectorsFromEnv, bodyText, locatorFor } from './yahoo/selectors'
 import { banner } from './notify'
 import { runBot } from './controller'
+import { runAssist } from './assist'
 import { loadEnv } from './env'
 
 loadEnv()
@@ -14,6 +15,7 @@ const USAGE = `
 Fanspot auction draft bot
 
 Commands:
+  assist   Interactive manual assistant — you feed it the room, it tells you what to do
   bot      Run the draft bot (watches the Yahoo draft room, auto-bids, pauses for big bids)
   values   Build the player value index and spot-check name matching (no browser needed)
   inspect  Open the draft room and dump what the bot sees, for tuning selectors
@@ -89,6 +91,10 @@ async function main(): Promise<void> {
       await cmdValues()
     } else if (cmd === 'inspect') {
       await cmdInspect()
+    } else if (cmd === 'assist') {
+      const cfg = configFromEnv({ requireLeague: false })
+      const values = await buildValues(auctionSettings(cfg), cfg.starters, { season: cfg.season, source: cfg.valueSource })
+      await runAssist(cfg, values)
     } else if (cmd === 'bot') {
       const cfg = configFromEnv()
       const values = await buildValues(auctionSettings(cfg), cfg.starters, { season: cfg.season, source: cfg.valueSource })

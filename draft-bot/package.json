@@ -5,6 +5,7 @@
   "description": "Playwright auction draft bot for Yahoo Fantasy, powered by Fanspot's auction valuation engine",
   "type": "module",
   "scripts": {
+    "assist": "tsx src/cli.ts assist",
     "bot": "tsx src/cli.ts bot",
     "inspect": "tsx src/cli.ts inspect",
     "values": "tsx src/cli.ts values",
