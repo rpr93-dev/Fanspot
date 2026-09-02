@@ -443,9 +443,7 @@ export default function TeamDashboard() {
 
   return (
     <div className="min-h-screen fs-page" style={{ '--glow': `${team.colors.primary}1c` } as React.CSSProperties}>
-      {/* pb-28 clears the fixed AI-nalyst button, which otherwise sits on top of the
-          last card on a phone. */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10 pb-28 sm:pb-10">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
         <Link href={`/${sport}`} className="hover-lift fs-meta hover:text-fs-text inline-block mb-8" style={{ '--card-color': team.colors.primary } as React.CSSProperties}>&larr; {config.name}</Link>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">

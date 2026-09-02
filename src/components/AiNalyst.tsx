@@ -156,7 +156,7 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
     <>
       <button
         onClick={() => setOpen(v => !v)}
-        className="fixed bottom-4 right-4 sm:bottom-8 sm:right-8 z-50 gen-btn-glow flex items-center gap-2.5 px-4 py-2.5 sm:px-5 sm:py-3 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200"
+        className="fixed top-4 right-4 sm:top-6 sm:right-6 z-50 gen-btn-glow flex items-center gap-2.5 px-4 py-2.5 sm:px-5 sm:py-3 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200"
         style={{ backgroundColor: teamColor, '--glow': `${teamColor}88` } as any}
         title="The AI-nalyst"
       >
