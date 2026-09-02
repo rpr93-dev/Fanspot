@@ -16,6 +16,10 @@ export const PYTHON = process.platform === 'win32'
   ? path.join(MODEL_DIR, '.venv', 'Scripts', 'python.exe')
   : path.join(MODEL_DIR, '.venv', 'bin', 'python')
 export const CACHE_DIR = path.join(MODEL_DIR, 'cache')
+export const TUNED_ESPN = path.join(CACHE_DIR, 'tuned_weights_avg.json')
+export const TUNED_NFLVERSE = path.join(CACHE_DIR, 'tuned_weights_avg.json')
+export const TUNED_ESPN_RAW = path.join(CACHE_DIR, 'tuned_weights_espn.json')
+export const TUNED_NFLVERSE_RAW = path.join(CACHE_DIR, 'tuned_weights_nflverse.json')
 
 /** Run the CLI with the shared timeout/buffer contract. */
 export function runModelCli(args: string[]): Promise<{ stdout: string }> {
@@ -24,6 +28,23 @@ export function runModelCli(args: string[]): Promise<{ stdout: string }> {
     timeout: 170000,
     maxBuffer: 64 * 1024 * 1024,
   })
+}
+
+/** Pick tuned weights file if present — ESPN-trained preferred. */
+export async function tunedWeightsPath(): Promise<string | null> {
+  for (const p of [TUNED_ESPN, TUNED_NFLVERSE]) {
+    try { await fs.access(p); return p } catch {}
+  }
+  return null
+}
+
+/** Resolve CLI --data-source from cache state: ESPN if its parquet exists. */
+export async function preferredDataSource(): Promise<'espn' | 'nflverse'> {
+  try {
+    const files = await fs.readdir(CACHE_DIR)
+    if (files.some(f => f.startsWith('espn_weekly_') && f.endsWith('.parquet'))) return 'espn'
+  } catch {}
+  return 'nflverse'
 }
 
 /** The panel's event date ("YYYYMMDD" or ISO) → the CLI's --as-of form. */

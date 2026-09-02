@@ -33,7 +33,7 @@ const scoreboardConfig: Record<string, {
   postseasonRange: string
   extraCurrentMonths: number[]
 }> = {
-  NFL: { preseasonMonths: [8], postseasonRange: '0101-0228', extraCurrentMonths: [8] },
+  NFL: { preseasonMonths: [8], postseasonRange: '0101-0228', extraCurrentMonths: [8, 9] },
   NBA: { preseasonMonths: [10], postseasonRange: '0415-0630', extraCurrentMonths: [7, 10] },
   NHL: { preseasonMonths: [9, 10], postseasonRange: '0415-0630', extraCurrentMonths: [9, 10] },
   MLB: { preseasonMonths: [2, 3], postseasonRange: '1001-1105', extraCurrentMonths: [2, 3] },
@@ -45,7 +45,11 @@ export function getEspnAbbr(teamId: string, teamAbbreviation: string): string {
 
 function getSeasonYears(sport: string, year: number, month: number): number[] {
   switch (sport) {
-    case 'NFL':  return [year - 1]
+    case 'NFL':
+      // NFL season Y spans Aug (preseason) – Feb Y+1. Jan-Feb belong to prior season's playoffs.
+      // Mar onward the upcoming season is current year; return both to keep Last 5 populated
+      // through the offseason, and crucially to surface September Week 1 in-season.
+      return month <= 2 ? [year - 1] : [year, year - 1]
     case 'NBA': case 'NHL': return [year, year - 1]
     case 'MLB':  return [year]
     default:     return [year - 1]
@@ -183,6 +187,15 @@ export async function fetchTeamSchedule(
       for (const mon of cfg.extraCurrentMonths) {
         sbTasks.push(fetchScoreboard(`${currentYear}${String(mon).padStart(2, '0')}`, existingIds))
       }
+
+      // In-season guarantee: always fetch scoreboard for current and next month.
+      // This covers NFL September (regular season) which is neither a preseason month
+      // nor the original extraCurrentMonths [8], and future-proofs Oct-Dec without
+      // hardcoding every month.
+      sbTasks.push(fetchScoreboard(`${currentYear}${String(month).padStart(2, '0')}`, existingIds))
+      const nextMonth = month === 12 ? 1 : month + 1
+      const nextMonthYear = month === 12 ? currentYear + 1 : currentYear
+      sbTasks.push(fetchScoreboard(`${nextMonthYear}${String(nextMonth).padStart(2, '0')}`, existingIds))
 
       // Run all scoreboard fetches in parallel
       await Promise.all(sbTasks)

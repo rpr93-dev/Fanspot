@@ -7,7 +7,9 @@ import {
   PYTHON,
   eventDateToAsOf,
   isColdStartFailure,
+  preferredDataSource,
   runModelCli,
+  tunedWeightsPath,
   warmPropModel,
 } from '@/lib/propModel'
 
@@ -72,12 +74,18 @@ export async function POST(request: Request) {
   const outPath = path.join(tmp, 'out.json')
   try {
     await fs.writeFile(batchPath, JSON.stringify(targets))
+    const dataSource = body?.dataSource === 'espn' || body?.dataSource === 'nflverse'
+      ? body.dataSource as string
+      : await preferredDataSource()
+    const weightsPath = body?.weightsJson || await tunedWeightsPath()
     const args = [
       '-m', 'propmodel.cli',
       '--input', batchPath,
       '--output', outPath,
       '--cache-dir', CACHE_DIR,
+      '--data-source', dataSource,
     ]
+    if (weightsPath) args.push('--weights-json', weightsPath)
     if (asOf) args.push('--as-of', asOf)
     if (body?.preseason) args.push('--preseason')
     const lines = body?.lines

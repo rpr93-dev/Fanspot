@@ -65,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--n-games", type=int, default=8, help="recent games to model (default 8)")
     p.add_argument("--seasons", nargs="*", type=int, help="seasons to pull, e.g. 2025 2026")
     p.add_argument("--weekly", help="offline weekly file (csv/pkl/parquet) instead of nfl_data_py")
+    p.add_argument("--data-source", choices=["nflverse", "espn"], default="nflverse", help="history source: nflverse (nfl_data_py) or espn (scoreboard+summaries, dashboard-native)")
     p.add_argument("--lines-json", help="static Vegas lines JSON {'HOU': {total, spread, favorite}}")
     p.add_argument("--weights-json", help="ModelWeights override JSON (halflife, opponent, game_script, min_games)")
     p.add_argument("--preseason", action="store_true", help="scale projections to preseason playing time (starters play a fraction of snaps)")
@@ -128,6 +129,15 @@ def _load_weekly(args) -> pd.DataFrame:
         # A wrong-schema file (different export, renamed columns) used to sail
         # through and read as "every player missing". Fail here with the cause.
         return validate_weekly(normalize_weekly(df), source=f"Weekly file {path}")
+    if getattr(args, "data_source", "nflverse") == "espn":
+        from .espn_fetcher import fetch_weekly_espn_cached
+
+        seasons = args.seasons or default_seasons()
+        # ESPN needs at least one full season; default_seasons already spans 4 years.
+        df = fetch_weekly_espn_cached(seasons, cache_dir=args.cache_dir)
+        if df.empty:
+            raise ValueError(f"ESPN fetch for seasons {seasons} returned 0 rows — scoreboard/summary may be down or seasons not started")
+        return validate_weekly(normalize_weekly(df), source="ESPN weekly data")
     # Live pull via nfl_data_py, wrapped in the disk cache + retry. Validation
     # runs *before* the frame is cached so a bad pull never poisons the cache,
     # and cached hits are re-checked so a stale/garbage entry triggers a

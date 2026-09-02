@@ -359,25 +359,13 @@ export default function NextGamePanel({
     <div className="animate-fade-in-up mt-4 pt-3" style={{ borderTop: `1px solid ${teamColor}20` }}>
       <div className="flex items-center justify-between gap-2 mb-3">
         <h3 className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Next Game Preview</h3>
-        <div className="flex items-center gap-2">
-          {sport.toUpperCase() === 'NFL' && (ourProjected.length > 0 || oppProjected.length > 0) && (
-            <button
-              onClick={runModel}
-              disabled={modelLoading}
-              className="hover-bright text-xs font-semibold px-4 py-2 rounded-lg text-fs-bg disabled:opacity-50 shadow-sm"
-              style={{ backgroundColor: teamColor, '--card-color': teamColor } as React.CSSProperties}
-            >
-              {modelLoading ? 'Running…' : modelResults ? '↻ Re-run model' : '▶ Run model'}
-            </button>
-          )}
-          <button
-            onClick={onBack}
-            className="hover-bright text-xs px-2 py-1 rounded text-fs-muted hover:text-fs-text"
-            style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}
-          >
-            &larr; Back
-          </button>
-        </div>
+        <button
+          onClick={onBack}
+          className="hover-bright text-xs px-2 py-1 rounded text-fs-muted hover:text-fs-text"
+          style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}
+        >
+          &larr; Back
+        </button>
       </div>
 
       <p className="text-sm text-fs-muted mb-4">
@@ -591,21 +579,19 @@ export default function NextGamePanel({
         </div>
       )}
 
-      {/* Prop Model projections (Python pipeline) */}
+      {/* Prop Model projections (Python pipeline) — Run Model lives here now */}
       {sport.toUpperCase() === 'NFL' && (ourProjected.length > 0 || oppProjected.length > 0) && (
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Prop Model</p>
-            {modelResults && modelResults.length > 0 && (
-              <button
-                onClick={runModel}
-                disabled={modelLoading}
-                className="hover-bright text-[11px] font-semibold px-3 py-1.5 rounded-lg text-fs-bg disabled:opacity-50"
-                style={{ backgroundColor: teamColor, '--card-color': teamColor } as React.CSSProperties}
-              >
-                {modelLoading ? 'Running…' : '↻ Re-run'}
-              </button>
-            )}
+            <button
+              onClick={runModel}
+              disabled={modelLoading}
+              className="hover-bright text-xs font-semibold px-4 py-2 rounded-lg text-fs-bg disabled:opacity-50 shadow-sm"
+              style={{ backgroundColor: teamColor, '--card-color': teamColor } as React.CSSProperties}
+            >
+              {modelLoading ? 'Running…' : modelResults ? '↻ Re-run model' : '▶ Run model'}
+            </button>
           </div>
           <p className="text-xs text-fs-muted-2 mb-2">
             {modelResults
