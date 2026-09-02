@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 
 interface PropLine {
   market: string
@@ -236,6 +236,18 @@ export default function NextGamePanel({
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
 
+  // Starter name sets — only project starters (not depth-chart backups).
+  const ourStarterNames = useMemo(() => {
+    const s = new Set<string>()
+    for (const st of (ourStarters ?? [])) { if (st.player && !st.unsettled) s.add(st.player.name) }
+    return s
+  }, [ourStarters])
+  const oppStarterNames = useMemo(() => {
+    const s = new Set<string>()
+    for (const st of (oppStarters ?? [])) { if (st.player && !st.unsettled) s.add(st.player.name) }
+    return s
+  }, [oppStarters])
+
   // Markets modeled per position group (yards + volume + TD markets).
   const MARKETS_FOR_POS: Record<string, string[]> = {
     QB: ['passing_yards', 'tds'],
@@ -257,7 +269,11 @@ export default function NextGamePanel({
     const codes = modelTeamCodes()
     const out: { player: string; stat: string; team: string; opponent: string; prior?: number }[] = []
     const add = (players: { name: string; position: string }[], team: string, opponent: string) => {
-      for (const p of players.slice(0, 6)) {
+      for (const p of players) {
+        // Only model confirmed starters (not backups).
+        const ourTeam = team === codes.our
+        const starterSet = ourTeam ? ourStarterNames : oppStarterNames
+        if (!starterSet.has(p.name)) continue
         // One target per modeled market (yards + receptions + TDs).
         for (const stat of statForPos(p.position)) {
           // ESPN projected line as a prior: lets rookies / thin-history players
@@ -334,7 +350,10 @@ export default function NextGamePanel({
     const idx = POS_ORDER.indexOf(p.startsWith('WR') ? 'WR' : p)
     return idx === -1 ? 99 : idx
   }
-  const sortedModel = [...(modelResults ?? [])].sort((a, b) => posFor(a.player) - posFor(b.player) || a.player.localeCompare(b.player))
+  const sortedModel = [...(modelResults ?? [])].filter((r) => {
+    // Only show model results for confirmed starters.
+    return ourStarterNames.has(r.player) || oppStarterNames.has(r.player)
+  }).sort((a, b) => posFor(a.player) - posFor(b.player) || a.player.localeCompare(b.player))
 
   // Group by player for the "player + sub-lines" view requested — one player header
   // with its modeled markets (yards / receptions / TDs) as sub-rows.
