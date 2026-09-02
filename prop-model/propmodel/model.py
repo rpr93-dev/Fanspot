@@ -104,6 +104,7 @@ class Projection:
     refused_reason: str | None = None
     note: str | None = None      # e.g. "ESPN prior — no NFL history (rookie)"
     pred_sd: float | None = None  # predictive std behind [low, high] (not serialized)
+    reliability_score: int = 0    # 0-100 composite reliability (not serialized, added at API layer)
 
     def to_dict(self) -> dict:
         return {
@@ -121,6 +122,7 @@ class Projection:
             "script_factor": self.script_factor,
             "refused_reason": self.refused_reason,
             "note": self.note,
+            "reliability": self.reliability_score,
         }
 
 
@@ -155,24 +157,79 @@ def _confidence(
     opp_ok: bool,
     stale_warn: bool,
     min_games: int,
+    espn_lines: int = 0,
+    total_markets: int = 0,
 ) -> str:
     """Rule-based confidence: high / medium / low.
 
-    Only *warn*-severity staleness downgrades confidence. Offseason runs are
-    always informationally "stale" (the last game is months old) — treating
-    that as a confidence killer would make every August projection low.
-
-    Missing Vegas lines do NOT gate the tiers here: line absence is a normal
-    posture (offseason, keyless runs), not lower model certainty. It is
-    reported as a separate note on the projection instead.
+    ESPN line coverage boosts the score — a starter with 4/5 ESPN lines
+    backed by 8 NFL games earns high even when opponent data is thin.
+    Offseason runs are always informationally "stale" (the last game is
+    months old) — treating that as a confidence killer would make every
+    August projection low.
     """
     if not history_ok or n_games < min_games:
         return "low"
+
+    # ESPN line coverage ratio (how many stats the player has ESPN projections for)
+    coverage_ratio = espn_lines / max(total_markets, 1)
+
     if n_games >= 8 and opp_ok and not stale_warn:
         return "high"
     if n_games >= 5 and opp_ok and not stale_warn:
         return "medium"
+    if n_games >= 4 and coverage_ratio >= 0.6:
+        return "medium"
+    if n_games >= 3 and coverage_ratio >= 0.8:
+        return "medium"
     return "low"
+
+
+def reliability_score(
+    n_games: int,
+    history_ok: bool,
+    opp_ok: bool,
+    stale_warn: bool,
+    min_games: int,
+    espn_lines: int = 0,
+    total_markets: int = 0,
+) -> float:
+    """Composite reliability 0–100 from history quality, opponent data, and ESPN line coverage.
+
+    Returned as an integer for display as a reliability badge alongside
+    the confidence tier.
+    """
+    score = 0.0
+
+    # History size (0–40 pts)
+    if n_games >= 12:
+        score += 40
+    elif n_games >= 8:
+        score += 35
+    elif n_games >= 5:
+        score += 25
+    elif n_games >= 3:
+        score += 15
+    else:
+        score += 5
+
+    # History quality (0–20 pts)
+    if history_ok:
+        score += 20
+
+    # Opponent data (0–20 pts)
+    if opp_ok:
+        score += 20
+
+    # ESPN line coverage (0–20 pts)
+    coverage = espn_lines / max(total_markets, 1)
+    score += int(coverage * 20)
+
+    # Staleness penalty
+    if stale_warn:
+        score = max(0, score - 10)
+
+    return min(100, max(0, int(round(score))))
 
 
 def position_guard_reason(position: str, stat: StatSpec) -> str | None:
@@ -243,6 +300,7 @@ def project(
     script_factor: dict | float,
     weights: ModelWeights | None = None,
     position_prior: float | None = None,
+    espn_prior: float | None = None,
 ) -> Projection:
     """Project the next game value for ``history``'s player+stat.
 
@@ -251,6 +309,8 @@ def project(
     ``position_prior`` is the position-level average per player-game for this
     stat (e.g. from the same weekly frame); when given, thin histories shrink
     toward it instead of trusting a tiny raw sample.
+    ``espn_prior`` is an ESPN projected line used as an additional fallback
+    when the player has sparse NFL history (rookie / thin sample).
     """
     weights = weights or ModelWeights()
     opp_f, opp_ok = _factor_value(opponent_factor)
@@ -313,6 +373,14 @@ def project(
     pred_sd = core_std * math.sqrt(1.0 + 1.0 / ess) * sd_mult if ess > 0 else core_std * sd_mult
 
     projection = baseline * (opp_f**w_opp) * (gs_f**weights.game_script)
+
+    # When history is thin (n_games < min_games * 2) and we have an ESPN prior,
+    # blend it toward the model projection for a more reliable number.
+    if espn_prior is not None and n < weights.min_games * 2:
+        blend = 0.3 if n >= 1 else 0.6  # more ESPN for fewer games
+        projection = projection * (1 - blend) + espn_prior * blend
+        if not notes:
+            notes.append("ESPN-prior blended (thin NFL history)")
 
     # Honest-input notes: line absence is reported separately from confidence
     # (D9), and absence-honesty flags surface in the note column.

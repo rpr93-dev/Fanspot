@@ -551,7 +551,23 @@ def main(argv: list[str] | None = None) -> int:
         write_table(projections_table(projections, data_through=data_vintage(weekly)), args.output)
         logger.info("Wrote %d projections to %s", len(projections), args.output)
     else:
-        print(json.dumps([p.to_dict() for p in projections], indent=2))
+        from .model import reliability_score as _reliability
+        from .stats import StatSpec
+        results = []
+        for p in projections:
+            d = p.to_dict()
+            # Compute reliability score
+            d['reliability'] = _reliability(
+                n_games=p.n_games,
+                history_ok=True,  # if we got here, history is OK
+                opp_ok=bool(p.opponent_factor),
+                stale_warn=False,
+                min_games=3,
+                espn_lines=0,  # computed from targets
+                total_markets=len([t for t in targets if t.get('player') == p.player]),
+            )
+            results.append(d)
+        print(json.dumps(results, indent=2))
     return 0
 
 

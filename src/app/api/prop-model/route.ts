@@ -112,6 +112,7 @@ export async function POST(request: Request) {
       refused_reason: r.refused_reason,
       note: r.note ?? null,
       last_updated: r.last_updated ?? null,
+      reliability: r.reliability ?? 0,
     }))
     return NextResponse.json({ projections, source: 'prop-model' })
   } catch (err: any) {

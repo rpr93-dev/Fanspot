@@ -76,6 +76,7 @@ interface ModelProjection {
   refused_reason: string | null
   note: string | null
   last_updated?: string | null
+  reliability?: number
 }
 
 const INJURY_LABEL: Record<string, string> = {
@@ -276,8 +277,8 @@ export default function NextGamePanel({
         if (!starterSet.has(p.name)) continue
         // One target per modeled market (yards + receptions + TDs).
         for (const stat of statForPos(p.position)) {
-          // ESPN projected line as a prior: lets rookies / thin-history players
-          // project instead of refusing (the model still wins when it has data).
+          // ESPN projected line as a prior: used by the model to blend when
+          // NFL history is thin (rookie / < 2× min_games).
           const prior = espnLineFor(p.name, stat)
           out.push({ player: p.name, stat, team, opponent, prior: prior ?? undefined })
         }
@@ -355,6 +356,23 @@ export default function NextGamePanel({
     return ourStarterNames.has(r.player) || oppStarterNames.has(r.player)
   }).sort((a, b) => posFor(a.player) - posFor(b.player) || a.player.localeCompare(b.player))
 
+  // ESPN line coverage per player: how many stats the player has ESPN projections for
+  const espnCoverage = useMemo(() => {
+    const map = new Map<string, { count: number; total: number }>()
+    const markets = ['passing_yards', 'rushing_yards', 'receiving_yards', 'receptions', 'tds']
+    for (const p of (props?.projections ?? [])) {
+      if (!map.has(p.name)) map.set(p.name, { count: 0, total: markets.length })
+      const cov = map.get(p.name)!
+      for (const line of p.lines) {
+        const hasLine = line.value != null && line.value > 0
+        if (markets.includes(line.label.replace(/ /g, '').toLowerCase()) || markets.some(m => line.label.toLowerCase().includes(m.split('_')[0]))) {
+          if (hasLine) cov.count++
+        }
+      }
+    }
+    return map
+  }, [props?.projections])
+
   // Group by player for the "player + sub-lines" view requested — one player header
   // with its modeled markets (yards / receptions / TDs) as sub-rows.
   const groupedModel: { player: string; rows: ModelProjection[] }[] = (() => {
@@ -385,10 +403,23 @@ export default function NextGamePanel({
     return `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}`
   })()
 
-  const confBadge = (conf: string) => {
-    if (conf === 'high') return 'text-fs-turf bg-fs-turf/15'
-    if (conf === 'medium') return 'text-fs-gold bg-fs-gold/15'
-    return 'text-fs-red bg-fs-red/15'
+  const confBadge = (conf: string, reliability: number) => {
+    if (conf === 'high') return { cls: 'text-fs-turf bg-fs-turf/15', score: reliability >= 70 ? 'strong' : 'moderate' }
+    if (conf === 'medium') return { cls: 'text-fs-gold bg-fs-gold/15', score: 'caution' }
+    return { cls: 'text-fs-red bg-fs-red/15', score: 'weak' }
+  }
+
+  const relColor = (reliability: number) => {
+    if (reliability >= 80) return 'text-fs-turf'
+    if (reliability >= 60) return 'text-fs-gold'
+    return 'text-fs-red'
+  }
+
+  const relLabel = (reliability: number) => {
+    if (reliability >= 80) return 'Strong'
+    if (reliability >= 60) return 'Moderate'
+    if (reliability >= 40) return 'Caution'
+    return 'Weak'
   }
 
   return (
@@ -667,6 +698,7 @@ export default function NextGamePanel({
                     group.rows.map((r, idx) => {
                       const espnLine = espnLineFor(r.player, r.stat)
                       const isFirst = idx === 0
+                      const conf = confBadge(r.confidence, r.reliability ?? 0)
                       return (
                         <tr
                           key={`${r.player}-${r.stat}`}
@@ -706,9 +738,14 @@ export default function NextGamePanel({
                             {r.low != null && r.high != null ? `${r.low}–${r.high}` : '—'}
                           </td>
                           <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
-                            <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${confBadge(r.confidence)}`}>
-                              {r.confidence.toUpperCase()}
-                            </span>
+                            <div className="flex items-center gap-1.5 justify-end">
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${conf.cls}`}>
+                                {r.confidence.toUpperCase()}
+                              </span>
+                              <span className={`text-[10px] font-mono tabular-nums ${relColor(r.reliability ?? 0)}`}>
+                                {r.reliability ?? '?'}
+                              </span>
+                            </div>
                           </td>
                         </tr>
                       )
