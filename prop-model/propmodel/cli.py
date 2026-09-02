@@ -542,16 +542,19 @@ def main(argv: list[str] | None = None) -> int:
     priors: dict[str, float] = {}
     memo = RunMemo()
     # Track ESPN prior usage per player for reliability scoring
-    # Count unique stats per player as total_markets, and ESPN-prior stats as espn_lines
-    _player_stats: dict[str, set[str]] = {}  # player -> set of stats
-    _player_espn_stats: dict[str, set[str]] = {}  # player -> set of stats with ESPN prior
+    # ESPN prior *passed* vs ESPN prior *used* (blended in) — the latter
+    # indicates thinner actual history and should score lower.
+    _espn_passed: dict[str, int] = {}  # player -> count of targets where ESPN prior was provided
+    _espn_used: dict[str, int] = {}   # player -> count of targets where ESPN prior was actually blended
+    _total_stats: dict[str, int] = {}  # player -> total stats modeled
     for t in targets:
         player = t.get("player", "")
         stat = t.get("stat", "")
-        if stat:
-            _player_stats.setdefault(player, set()).add(stat)
-            if t.get("prior") is not None:
-                _player_espn_stats.setdefault(player, set()).add(stat)
+        _total_stats[player] = _total_stats.get(player, 0) + 1
+        _espn_passed.setdefault(player, 0)
+        _espn_used.setdefault(player, 0)
+        if t.get("prior") is not None:
+            _espn_passed[player] = _espn_passed.get(player, 0) + 1
         try:
             result = _project_one(
                 t, weekly, lines_provider, weights, args, priors,
@@ -564,8 +567,8 @@ def main(argv: list[str] | None = None) -> int:
             projections.append(result)
         except Exception as e:  # noqa: BLE001 — keep the batch alive
             logger.error(
-                "Target %d/%d (%s, %s) failed: %s",
-                i + 1, len(targets), t.get("player"), t.get("stat"), e,
+                "Target (%s, %s) failed: %s",
+                t.get("player"), t.get("stat"), e,
             )
             projections.append(_failed_projection(t, e))
 

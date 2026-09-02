@@ -198,52 +198,55 @@ def reliability_score(
     """Composite reliability 0–100 from history quality, opponent data, and ESS.
 
     Returned as an integer for display as a reliability badge alongside
-    the confidence tier.
+    the confidence tier. The formula is designed to differentiate between
+    players with the same game count but different data quality.
     """
     score = 0.0
 
-    # History size (0–40 pts)
+    # History size (0–30 pts): 12+ = 30, 8+ = 25, 5+ = 15, 3+ = 5
     if n_games >= 12:
-        score += 40
+        score += 30
     elif n_games >= 8:
-        score += 35
-    elif n_games >= 5:
         score += 25
-    elif n_games >= 3:
+    elif n_games >= 5:
         score += 15
-    else:
+    elif n_games >= 3:
         score += 5
 
-    # History quality (0–25 pts)
+    # History quality (0–30 pts): passes validation + no stale flags
     if history_ok:
         score += 25
+    else:
+        score += 0
+    if not stale_warn:
+        score += 5
 
-    # Opponent data (0–25 pts)
+    # Opponent data (0–15 pts)
     if opp_ok:
-        score += 25
+        score += 15
 
-    # ESPN coverage (0–5 pts) — small bonus, since we always pass ESPN priors
+    # ESPN coverage (0–10 pts): fraction of markets with ESPN projections
     coverage = espn_lines / max(total_markets, 1)
-    score += int(coverage * 5)
+    score += int(coverage * 10)
 
-    # ESS (effective sample size) — how spread out the games are (0–10 pts)
-    # A 8-game window spread across 8 games (no byes) has higher ESS than
-    # 8 games crammed into 4 weeks. ESS >= 5 = full marks.
+    # ESS (effective sample size) — how spread out the games are (0–15 pts)
+    # Higher ESS = games spread across more weeks (less clumping byes/short weeks)
+    # This is the primary differentiator between players with the same n_games.
     if ess is not None:
-        if ess >= 5.0:
-            score += 10
-        elif ess >= 3.0:
+        if ess >= 7.0:
+            score += 15
+        elif ess >= 5.5:
+            score += 13
+        elif ess >= 4.5:
+            score += 11
+        elif ess >= 3.5:
+            score += 9
+        elif ess >= 2.5:
             score += 7
-        elif ess >= 2.0:
+        elif ess >= 1.5:
             score += 4
-        elif ess >= 1.0:
-            score += 2
         else:
-            score += 0
-
-    # Staleness penalty
-    if stale_warn:
-        score = max(0, score - 10)
+            score += 1
 
     return min(100, max(0, int(round(score))))
 
@@ -394,15 +397,15 @@ def project(
 
     # When history is thin (n_games < min_games * 2) and we have an ESPN prior,
     # blend it toward the model projection for a more reliable number.
+    # Only set has_espn_prior=True when blending actually happened — this signals
+    # thinner actual history and should score lower in reliability.
+    has_espn_prior = False
     if espn_prior is not None and n < weights.min_games * 2:
         blend = 0.3 if n >= 1 else 0.6  # more ESPN for fewer games
         projection = projection * (1 - blend) + espn_prior * blend
+        has_espn_prior = True
         if not notes:
             notes.append("ESPN-prior blended (thin NFL history)")
-
-    # Note: ESPN prior availability (regardless of blending) boosts confidence
-    # and reliability — it signals the projection has external validation.
-    has_espn_prior = espn_prior is not None
 
     # Honest-input notes: line absence is reported separately from confidence
     # (D9), and absence-honesty flags surface in the note column.
@@ -412,6 +415,8 @@ def project(
     absence = _absence_note(history)
     if absence:
         notes.append(absence)
+
+    _rel = reliability_score(n, history.ok, opp_ok, stale_warn, weights.min_games, 1 if has_espn_prior else 0, 1, ess=ess)
 
     return Projection(
         player_name=history.player_name,
