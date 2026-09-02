@@ -236,6 +236,7 @@ def _prior_projection(
     prior's pseudo-games — a raw unadjusted prior would silently ignore both.
     The band stays a wide ±50%: honest uncertainty, not false precision.
     """
+    from .model import reliability_score
     spec = get_stat(stat)
     if hist is not None:
         guard = position_guard_reason(hist.position, spec)
@@ -248,6 +249,7 @@ def _prior_projection(
                 opponent_factor=round(float(opp.get("factor", 1.0)), 3),
                 script_factor=round(float(gs.get("factor", 1.0)), 3),
                 refused_reason=guard,
+                reliability_score=reliability_score(n, False, bool(opp.get("factor")), False, 3, 0, 1),
             )
     n = hist.n_games if hist is not None else 0
     if n > 0:
@@ -256,9 +258,11 @@ def _prior_projection(
         blended = (n * player_mean + m * prior) / (n + m)
         center = _apply_factors(blended, opp, gs, weights)
         note = "ESPN prior — blended with thin NFL history"
+        rel = reliability_score(n, hist.ok, bool(opp.get("factor")), any(f.code == "STALE" for f in hist.flags), weights.min_games, 1, 1)
     else:
         center = _apply_factors(prior, opp, gs, weights)
         note = "ESPN prior — no NFL history (rookie)"
+        rel = reliability_score(0, False, bool(opp.get("factor")), False, 3, 1, 1)
     return Projection(
         player_name=player, stat=get_stat(stat),
         projection=center, baseline=center,
@@ -268,6 +272,7 @@ def _prior_projection(
         script_factor=round(float(gs.get("factor", 1.0)), 3),
         refused_reason=None,
         note=note,
+        reliability_score=rel,
     )
 
 
@@ -277,6 +282,7 @@ def _failed_projection(target: dict, exc: Exception) -> Projection:
     One bad target must not abort the batch — it becomes an explicit failure
     row (projection null + reason naming the error) while the rest still run.
     """
+    from .model import reliability_score
     stat_key = str(target.get("stat") or "")
     return Projection(
         player_name=str(target.get("player") or "?"),
@@ -289,6 +295,7 @@ def _failed_projection(target: dict, exc: Exception) -> Projection:
         opponent_factor=None, script_factor=None,
         refused_reason=f"{type(exc).__name__}: {exc}",
         note="target failed — see logs",
+        reliability_score=0,
     )
 
 
@@ -455,7 +462,7 @@ def _project_one(
             priors[key] = position_prior(prior_frame, stat)
         pos_prior = priors[key]
 
-    proj = project(hist, opp, gs, weights, position_prior=pos_prior)
+    proj = project(hist, opp, gs, weights, position_prior=pos_prior, espn_prior=_get_prior())
     if proj.player_name != player:
         # Keep the caller's display name (the dashboard built targets from full
         # names like "C.J. Stroud"; the nflverse file abbreviates to "C.Stroud",
@@ -534,12 +541,25 @@ def main(argv: list[str] | None = None) -> int:
     projections: list[Projection] = []
     priors: dict[str, float] = {}
     memo = RunMemo()
+    # Track ESPN prior usage per player for reliability scoring
+    _espn_used: dict[str, int] = {}  # player -> count of targets that used ESPN prior
+    _total_targets: dict[str, int] = {}  # player -> total targets
+    _has_espn_input: dict[str, int] = {}  # player -> count of targets with ESPN prior input
     for i, t in enumerate(targets):
+        player = t.get("player", "")
+        _total_targets[player] = _total_targets.get(player, 0) + 1
+        _espn_used.setdefault(player, 0)
+        if t.get("prior") is not None:
+            _has_espn_input[player] = _has_espn_input.get(player, 0) + 1
         try:
-            projections.append(_project_one(
+            result = _project_one(
                 t, weekly, lines_provider, weights, args, priors,
                 memo=memo, known_codes=known_codes, history_cutoff=history_cutoff,
-            ))
+            )
+            # Track if ESPN prior was actually used (note mentions ESPN blending)
+            if result.note and "ESPN" in result.note:
+                _espn_used[player] = _espn_used.get(player, 0) + 1
+            projections.append(result)
         except Exception as e:  # noqa: BLE001 — keep the batch alive
             logger.error(
                 "Target %d/%d (%s, %s) failed: %s",
@@ -552,19 +572,20 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("Wrote %d projections to %s", len(projections), args.output)
     else:
         from .model import reliability_score as _reliability
-        from .stats import StatSpec
         results = []
         for p in projections:
             d = p.to_dict()
-            # Compute reliability score
-            d['reliability'] = _reliability(
+            # Count how many of this player's targets had ESPN priors
+            total = _total_targets.get(p.player_name, 1)
+            with_espn = _espn_used.get(p.player_name, 0)
+            d["reliability"] = _reliability(
                 n_games=p.n_games,
-                history_ok=True,  # if we got here, history is OK
+                history_ok=p.refused_reason is None,
                 opp_ok=bool(p.opponent_factor),
-                stale_warn=False,
+                stale_warn=p.note is not None and "STALE" in str(p.note),
                 min_games=3,
-                espn_lines=0,  # computed from targets
-                total_markets=len([t for t in targets if t.get('player') == p.player]),
+                espn_lines=_has_espn_input.get(p.player_name, 0),
+                total_markets=total,
             )
             results.append(d)
         print(json.dumps(results, indent=2))

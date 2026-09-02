@@ -335,6 +335,7 @@ def project(
             confidence="low", n_games=n,
             opponent_factor=round(opp_f, 3), script_factor=round(gs_f, 3),
             refused_reason=_refusal_reason(history, weights.min_games),
+            reliability_score=reliability_score(n, False, opp_ok, stale_warn, weights.min_games, 0, 0),
         )
 
     # Position guard: refuse the impossible request loudly instead of
@@ -347,6 +348,7 @@ def project(
             confidence="low", n_games=n,
             opponent_factor=round(opp_f, 3), script_factor=round(gs_f, 3),
             refused_reason=guard,
+            reliability_score=reliability_score(n, False, opp_ok, stale_warn, weights.min_games, 0, 0),
         )
 
     stale_warn = any(
@@ -381,6 +383,9 @@ def project(
         projection = projection * (1 - blend) + espn_prior * blend
         if not notes:
             notes.append("ESPN-prior blended (thin NFL history)")
+        has_espn_prior = True
+    else:
+        has_espn_prior = False
 
     # Honest-input notes: line absence is reported separately from confidence
     # (D9), and absence-honesty flags surface in the note column.
@@ -398,12 +403,13 @@ def project(
         baseline=baseline,
         low=max(0.0, projection - pred_sd),
         high=projection + pred_sd,
-        confidence=_confidence(n, history.ok, opp_ok, stale_warn, weights.min_games),
+        confidence=_confidence(n, history.ok, opp_ok, stale_warn, weights.min_games, 1 if has_espn_prior else 0, 1),
         n_games=n,
         opponent_factor=round(opp_f, 3),
         script_factor=round(gs_f, 3),
         pred_sd=pred_sd,
         note=" · ".join(notes) if notes else None,
+        reliability_score=reliability_score(n, history.ok, opp_ok, stale_warn, weights.min_games, 1 if has_espn_prior else 0, 1),
     )
 
 

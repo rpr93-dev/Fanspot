@@ -17,7 +17,7 @@ from .model import Projection
 TABLE_COLUMNS = [
     "player", "stat", "my_projection", "market_line", "edge",
     "confidence", "last_updated", "low", "high", "n_games",
-    "baseline", "opponent_factor", "script_factor", "refused_reason", "note",
+    "baseline", "opponent_factor", "script_factor", "refused_reason", "note", "reliability",
 ]
 
 
@@ -53,6 +53,7 @@ def projections_table(
             "script_factor": d["script_factor"],
             "refused_reason": d["refused_reason"],
             "note": d.get("note"),
+            "reliability": d.get("reliability", 0),
         })
     return pd.DataFrame(rows, columns=TABLE_COLUMNS)
 
