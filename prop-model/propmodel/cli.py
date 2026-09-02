@@ -542,15 +542,16 @@ def main(argv: list[str] | None = None) -> int:
     priors: dict[str, float] = {}
     memo = RunMemo()
     # Track ESPN prior usage per player for reliability scoring
-    _espn_used: dict[str, int] = {}  # player -> count of targets that used ESPN prior
-    _total_targets: dict[str, int] = {}  # player -> total targets
-    _has_espn_input: dict[str, int] = {}  # player -> count of targets with ESPN prior input
-    for i, t in enumerate(targets):
+    # Count unique stats per player as total_markets, and ESPN-prior stats as espn_lines
+    _player_stats: dict[str, set[str]] = {}  # player -> set of stats
+    _player_espn_stats: dict[str, set[str]] = {}  # player -> set of stats with ESPN prior
+    for t in targets:
         player = t.get("player", "")
-        _total_targets[player] = _total_targets.get(player, 0) + 1
-        _espn_used.setdefault(player, 0)
-        if t.get("prior") is not None:
-            _has_espn_input[player] = _has_espn_input.get(player, 0) + 1
+        stat = t.get("stat", "")
+        if stat:
+            _player_stats.setdefault(player, set()).add(stat)
+            if t.get("prior") is not None:
+                _player_espn_stats.setdefault(player, set()).add(stat)
         try:
             result = _project_one(
                 t, weekly, lines_provider, weights, args, priors,
@@ -558,7 +559,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             # Track if ESPN prior was actually used (note mentions ESPN blending)
             if result.note and "ESPN" in result.note:
-                _espn_used[player] = _espn_used.get(player, 0) + 1
+                _espn_used.setdefault(p.player_name, 0)
+                _espn_used[p.player_name] = _espn_used.get(p.player_name, 0) + 1
             projections.append(result)
         except Exception as e:  # noqa: BLE001 — keep the batch alive
             logger.error(
@@ -575,17 +577,19 @@ def main(argv: list[str] | None = None) -> int:
         results = []
         for p in projections:
             d = p.to_dict()
-            # Count how many of this player's targets had ESPN priors
-            total = _total_targets.get(p.player_name, 1)
-            with_espn = _espn_used.get(p.player_name, 0)
+            # ESPN coverage: how many of this player's markets have ESPN priors
+            all_stats = _player_stats.get(p.player_name, set())
+            espn_stats = _player_espn_stats.get(p.player_name, set())
+            total_markets = len(all_stats) if all_stats else 1
+            espn_lines = len(espn_stats) if espn_stats else 0
             d["reliability"] = _reliability(
                 n_games=p.n_games,
                 history_ok=p.refused_reason is None,
                 opp_ok=bool(p.opponent_factor),
                 stale_warn=p.note is not None and "STALE" in str(p.note),
                 min_games=3,
-                espn_lines=_has_espn_input.get(p.player_name, 0),
-                total_markets=total,
+                espn_lines=espn_lines,
+                total_markets=total_markets,
             )
             results.append(d)
         print(json.dumps(results, indent=2))

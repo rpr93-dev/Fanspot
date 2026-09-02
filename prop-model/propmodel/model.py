@@ -193,8 +193,9 @@ def reliability_score(
     min_games: int,
     espn_lines: int = 0,
     total_markets: int = 0,
+    ess: float | None = None,
 ) -> float:
-    """Composite reliability 0–100 from history quality, opponent data, and ESPN line coverage.
+    """Composite reliability 0–100 from history quality, opponent data, and ESS.
 
     Returned as an integer for display as a reliability badge alongside
     the confidence tier.
@@ -213,17 +214,32 @@ def reliability_score(
     else:
         score += 5
 
-    # History quality (0–20 pts)
+    # History quality (0–25 pts)
     if history_ok:
-        score += 20
+        score += 25
 
-    # Opponent data (0–20 pts)
+    # Opponent data (0–25 pts)
     if opp_ok:
-        score += 20
+        score += 25
 
-    # ESPN line coverage (0–20 pts)
+    # ESPN coverage (0–5 pts) — small bonus, since we always pass ESPN priors
     coverage = espn_lines / max(total_markets, 1)
-    score += int(coverage * 20)
+    score += int(coverage * 5)
+
+    # ESS (effective sample size) — how spread out the games are (0–10 pts)
+    # A 8-game window spread across 8 games (no byes) has higher ESS than
+    # 8 games crammed into 4 weeks. ESS >= 5 = full marks.
+    if ess is not None:
+        if ess >= 5.0:
+            score += 10
+        elif ess >= 3.0:
+            score += 7
+        elif ess >= 2.0:
+            score += 4
+        elif ess >= 1.0:
+            score += 2
+        else:
+            score += 0
 
     # Staleness penalty
     if stale_warn:
@@ -383,9 +399,10 @@ def project(
         projection = projection * (1 - blend) + espn_prior * blend
         if not notes:
             notes.append("ESPN-prior blended (thin NFL history)")
-        has_espn_prior = True
-    else:
-        has_espn_prior = False
+
+    # Note: ESPN prior availability (regardless of blending) boosts confidence
+    # and reliability — it signals the projection has external validation.
+    has_espn_prior = espn_prior is not None
 
     # Honest-input notes: line absence is reported separately from confidence
     # (D9), and absence-honesty flags surface in the note column.
@@ -409,7 +426,7 @@ def project(
         script_factor=round(gs_f, 3),
         pred_sd=pred_sd,
         note=" · ".join(notes) if notes else None,
-        reliability_score=reliability_score(n, history.ok, opp_ok, stale_warn, weights.min_games, 1 if has_espn_prior else 0, 1),
+        reliability_score=_rel,
     )
 
 

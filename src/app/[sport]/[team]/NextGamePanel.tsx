@@ -236,6 +236,8 @@ export default function NextGamePanel({
   const [modelResults, setModelResults] = useState<ModelProjection[] | null>(null)
   const [modelLoading, setModelLoading] = useState(false)
   const [modelError, setModelError] = useState<string | null>(null)
+  const [modelRunDate, setModelRunDate] = useState<string | null>(null)
+  const [prevModelDataThrough, setPrevModelDataThrough] = useState<string | null>(null)
 
   // Starter name sets — only project starters (not depth-chart backups).
   const ourStarterNames = useMemo(() => {
@@ -303,6 +305,9 @@ export default function NextGamePanel({
   const runModel = async () => {
     setModelLoading(true)
     setModelError(null)
+    // Remember data vintage before run so we can tell if it changed
+    setPrevModelDataThrough(modelDataThrough)
+    setModelRunDate(new Date().toISOString().slice(5, 16))
     const targets = buildTargets()
     if (!targets.length) {
       setModelError('No skill players available to project')
@@ -402,6 +407,9 @@ export default function NextGamePanel({
     if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null
     return `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}`
   })()
+
+  // Only show refresh button when the model's data vintage changed since last run
+  const showRefreshButton = modelRunDate != null && modelDataThrough != null && modelDataThrough !== prevModelDataThrough
 
   const confBadge = (conf: string, reliability: number) => {
     if (conf === 'high') return { cls: 'text-fs-turf bg-fs-turf/15', score: reliability >= 70 ? 'strong' : 'moderate' }
@@ -651,14 +659,29 @@ export default function NextGamePanel({
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Prop Model</p>
-            <button
-              onClick={runModel}
-              disabled={modelLoading}
-              className="hover-bright text-xs font-semibold px-4 py-2 rounded-lg text-fs-bg disabled:opacity-50 shadow-sm"
-              style={{ backgroundColor: teamColor, '--card-color': teamColor } as React.CSSProperties}
-            >
-              {modelLoading ? 'Running…' : modelResults ? '↻ Re-run model' : '▶ Run model'}
-            </button>
+            {modelLoading ? (
+              <span className="text-xs font-semibold px-4 py-2 rounded-lg shadow-sm" style={{ backgroundColor: `${teamColor}20`, color: teamColor }}>
+                Running…
+              </span>
+            ) : modelResults && showRefreshButton ? (
+              <button
+                onClick={runModel}
+                className="hover-bright text-xs font-semibold px-4 py-2 rounded-lg text-fs-bg shadow-sm"
+                style={{ backgroundColor: teamColor, '--card-color': teamColor } as React.CSSProperties}
+              >
+                ↻ Refresh (new data)
+              </button>
+            ) : modelResults ? (
+              <span className="text-xs text-fs-muted-2">Current</span>
+            ) : (
+              <button
+                onClick={runModel}
+                className="hover-bright text-xs font-semibold px-4 py-2 rounded-lg text-fs-bg shadow-sm"
+                style={{ backgroundColor: teamColor, '--card-color': teamColor } as React.CSSProperties}
+              >
+                ▶ Run model
+              </button>
+            )}
           </div>
           <p className="text-xs text-fs-muted-2 mb-2">
             {modelResults
