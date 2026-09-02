@@ -156,12 +156,17 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
     <>
       <button
         onClick={() => setOpen(v => !v)}
-        className="fixed top-4 right-4 sm:top-6 sm:right-6 z-50 gen-btn-glow flex items-center gap-2.5 px-4 py-2.5 sm:px-5 sm:py-3 rounded-full shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200"
+        className={`fixed top-4 right-4 sm:top-6 sm:right-6 z-50 gen-btn-glow shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200 flex items-center justify-center ${
+          open
+            ? 'gap-2.5 px-4 py-2.5 sm:px-5 sm:py-3 rounded-full'
+            : 'w-11 h-11 sm:w-12 sm:h-12 rounded-full p-0'
+        }`}
         style={{ backgroundColor: teamColor, '--glow': `${teamColor}88` } as any}
         title="The AI-nalyst"
+        aria-label="The AI-nalyst"
       >
         <SportIcon sport={sport} />
-        <span className="text-sm font-bold tracking-wide text-white drop-shadow-sm">The AI-nalyst</span>
+        {open && <span className="text-sm font-bold tracking-wide text-white drop-shadow-sm">The AI-nalyst</span>}
       </button>
 
       {open && (

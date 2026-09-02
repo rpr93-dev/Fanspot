@@ -336,6 +336,23 @@ export default function NextGamePanel({
   }
   const sortedModel = [...(modelResults ?? [])].sort((a, b) => posFor(a.player) - posFor(b.player) || a.player.localeCompare(b.player))
 
+  // Group by player for the "player + sub-lines" view requested — one player header
+  // with its modeled markets (yards / receptions / TDs) as sub-rows.
+  const groupedModel: { player: string; rows: ModelProjection[] }[] = (() => {
+    if (!sortedModel.length) return []
+    const map = new Map<string, ModelProjection[]>()
+    for (const r of sortedModel) {
+      const list = map.get(r.player)
+      if (list) list.push(r)
+      else map.set(r.player, [r])
+    }
+    // Preserve the QB→WR sort via first occurrence in sortedModel
+    const seen = new Set<string>()
+    const ordered: string[] = []
+    for (const r of sortedModel) if (!seen.has(r.player)) { seen.add(r.player); ordered.push(r.player) }
+    return ordered.map((player) => ({ player, rows: map.get(player)! }))
+  })()
+
   // Data-vintage stamp from the model (max gameday in its input frame) — the
   // honest freshness signal, not when the run happened.
   const modelDataThrough = (() => {
@@ -613,7 +630,7 @@ export default function NextGamePanel({
             <div className="rounded-lg p-3 text-sm text-fs-red" style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}14` }}>
               {modelError}
             </div>
-          ) : sortedModel && sortedModel.length > 0 ? (
+          ) : groupedModel.length > 0 ? (
             <div className="overflow-x-auto rounded-lg" style={{ border: `1px solid ${teamColor}16` }}>
               <table className="w-full text-xs">
                 <thead>
@@ -627,34 +644,57 @@ export default function NextGamePanel({
                   </tr>
                 </thead>
                 <tbody>
-                  {sortedModel.map((r) => {
-                    const espnLine = espnLineFor(r.player, r.stat)
-                    return (
-                      <tr key={`${r.player}-${r.stat}`} className="text-fs-text/75" style={{ borderTop: `1px solid ${teamColor}0c` }}>
-                        <td className="px-2.5 py-1.5 whitespace-nowrap">
-                          <span className="font-medium text-fs-text/90">{r.player}</span>
-                          {r.note ? (
-                            <span className="block text-[10px] text-fs-muted-2" title={r.note}>{r.note}</span>
+                  {groupedModel.map((group) =>
+                    group.rows.map((r, idx) => {
+                      const espnLine = espnLineFor(r.player, r.stat)
+                      const isFirst = idx === 0
+                      return (
+                        <tr
+                          key={`${r.player}-${r.stat}`}
+                          className="text-fs-text/75"
+                          style={{
+                            borderTop: isFirst ? `1px solid ${teamColor}16` : `1px solid ${teamColor}0c`,
+                            backgroundColor: isFirst ? `${teamColor}04` : undefined,
+                          }}
+                        >
+                          {isFirst ? (
+                            <td
+                              rowSpan={group.rows.length}
+                              className="px-2.5 py-2 align-top whitespace-nowrap border-r"
+                              style={{ borderColor: `${teamColor}10`, backgroundColor: `${teamColor}06` }}
+                            >
+                              <span className="font-medium text-fs-text/90">{group.player}</span>
+                              <span className="block text-[10px] text-fs-muted-2">
+                                {props?.projections?.find((x) => x.name === group.player)?.position ?? ''}
+                              </span>
+                            </td>
                           ) : null}
-                        </td>
-                        <td className="px-2 py-1.5 whitespace-nowrap text-fs-muted">{r.stat_label}</td>
-                        <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-text">
-                          {r.projection != null ? r.projection : <span className="text-fs-muted-2">refused</span>}
-                        </td>
-                        <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
-                          {espnLine != null ? espnLine : '—'}
-                        </td>
-                        <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
-                          {r.low != null && r.high != null ? `${r.low}–${r.high}` : '—'}
-                        </td>
-                        <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
-                          <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${confBadge(r.confidence)}`}>
-                            {r.confidence.toUpperCase()}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  })}
+                          <td className="px-2 py-1.5 whitespace-nowrap text-fs-muted">
+                            {r.stat_label}
+                            {r.note ? (
+                              <span className="block text-[10px] text-fs-muted-2 max-w-[16ch] truncate" title={r.note}>
+                                {r.note}
+                              </span>
+                            ) : null}
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-text">
+                            {r.projection != null ? r.projection : <span className="text-fs-muted-2">refused</span>}
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
+                            {espnLine != null ? espnLine : '—'}
+                          </td>
+                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
+                            {r.low != null && r.high != null ? `${r.low}–${r.high}` : '—'}
+                          </td>
+                          <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
+                            <span className={`inline-block text-[10px] font-bold px-1.5 py-0.5 rounded ${confBadge(r.confidence)}`}>
+                              {r.confidence.toUpperCase()}
+                            </span>
+                          </td>
+                        </tr>
+                      )
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
