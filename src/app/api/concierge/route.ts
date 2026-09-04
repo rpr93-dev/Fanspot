@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { buildConciergeContext } from '@/lib/concierge'
-import { generateAIAnalysis } from '@/lib/services/aiService'
+import { generateAIAnalysis, AnalystUnavailableError } from '@/lib/services/aiService'
 import { getCached, setCached, isFresh } from '@/lib/cache/cacheService'
 import { TTL } from '@/lib/cache/ttl'
 
@@ -38,6 +38,15 @@ export async function POST(request: Request) {
       headers: { 'Cache-Control': 'public, s-maxage=300' },
     })
   } catch (err) {
+    // Every configured model attempt timed out or failed: a known degraded state the
+    // client renders distinctly — not a raw 500 string dump into the output box.
+    if (err instanceof AnalystUnavailableError) {
+      console.warn('[concierge] analyst unavailable:', err.cause)
+      return NextResponse.json(
+        { error: 'analyst-unavailable', message: err.message },
+        { status: 503 },
+      )
+    }
     console.error('[concierge] Error:', err)
     return NextResponse.json({ error: String(err) }, { status: 500 })
   }

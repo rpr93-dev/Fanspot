@@ -90,6 +90,12 @@ export async function getTeamSchedule(
   const espnResult = await espn.fetchTeamSchedule(sport, teamId, teamAbbreviation, origin)
   const espnEvents = espnResult.events as EspnEvent[]
 
+  // A failed sub-fetch is a provider problem, not "no games": report it so an
+  // empty Next-Game/Last-5 render is traceable to a failure instead of looking real.
+  if (espnResult.problems.length > 0) {
+    log('ESPN', sport, teamAbbr, espnResult.problems.join('; '))
+  }
+
   let espnHasUpcoming = hasUpcomingGame(espnEvents)
   let espnHasCompleted = hasCompletedGames(espnEvents)
 

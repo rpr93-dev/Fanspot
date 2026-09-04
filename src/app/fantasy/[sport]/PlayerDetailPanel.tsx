@@ -26,7 +26,17 @@ export interface PlayerDetail {
   injury: { injured: boolean; status: string }
   projection: { points: number; line: string } | null
   lastSeason: { year?: number; points: number } | null
-  market: { adpRank?: number; ownedPct: number; startedPct: number; auctionValue: number }
+  market: {
+    /** Within-position ADP rank — same semantics as the board's field bar. */
+    adpRank?: number
+    /** League-wide rank; shown alongside so the two figures can't be confused. */
+    overallAdpRank?: number
+    /** Ready-made labelled form, e.g. "QB #12 - overall #102". */
+    adpLabel?: string
+    ownedPct: number
+    startedPct: number
+    auctionValue: number
+  }
   vegas: { teamImpliedPoints: number } | null
   news: PlayerNews[]
 }
@@ -77,6 +87,9 @@ export function DetailPanel({
         {b.college && <Stat label="College" value={b.college} />}
         {b.depthChartOrder != null && <Stat label="Depth" value={`${d.pos}${b.depthChartOrder}`} />}
         <Stat label="Status" value={d.injury.status} alert={d.injury.injured || d.injury.status !== 'ACTIVE'} />
+        {(d.market.adpLabel || d.market.adpRank != null) && (
+          <Stat label="ADP" value={d.market.adpLabel ?? `#${d.market.adpRank}`} />
+        )}
         <Stat label="Rostered" value={`${d.market.ownedPct}%`} />
         <Stat label="Started" value={`${d.market.startedPct}%`} />
         {!hideAuctionStat && d.market.auctionValue > 0 && (

@@ -179,6 +179,7 @@ export default function TeamDashboard() {
 
   const [showRoster, setShowRoster] = useState(false)
   const [rosterData, setRosterData] = useState<any[] | null>(null)
+  const [rosterStatsSeason, setRosterStatsSeason] = useState<number | null>(null)
   const [rosterLoading, setRosterLoading] = useState(false)
   const [selectedGameId, setSelectedGameId] = useState<string | null>(null)
   const [boxScoreData, setBoxScoreData] = useState<any>(null)
@@ -254,6 +255,7 @@ export default function TeamDashboard() {
       .then((r) => r.ok ? r.json() : null)
       .then((res) => {
         setRosterData(res?.athletes ?? null)
+        setRosterStatsSeason(res?.statsSeason ?? null)
         setRosterLoading(false)
       })
       .catch((e) => { console.error('[roster fetch]', e); setRosterLoading(false) })
@@ -601,6 +603,7 @@ export default function TeamDashboard() {
           <RosterPanel
             team={team}
             roster={rosterData}
+            statsSeason={rosterStatsSeason}
             loading={rosterLoading}
             onBack={() => setShowRoster(false)}
           />
@@ -1093,7 +1096,7 @@ function renderNflStats(stats: Record<string, string> | null, pos: string): { sc
   return { schema, values }
 }
 
-function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any[] | null; loading: boolean; onBack: () => void }) {
+function RosterPanel({ team, roster, statsSeason, loading, onBack }: { team: any; roster: any[] | null; statsSeason: number | null; loading: boolean; onBack: () => void }) {
   const posOrder: { key: string; name: string }[] = []
   const posRank: Record<string, number> = {}
   const order = sportPositionOrder[team.sport] ?? []
@@ -1117,7 +1120,12 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
     <div className="animate-fade-in-up">
       <div className="fs-panel p-6 overflow-hidden" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}20` } as React.CSSProperties}>
         <div className="flex items-center justify-between mb-6">
-          <h2 className="fs-eyebrow" style={{ '--tint': team.colors.primary } as React.CSSProperties}>Roster</h2>
+          <h2 className="fs-eyebrow" style={{ '--tint': team.colors.primary } as React.CSSProperties}>
+            Roster
+            {statsSeason != null && (
+              <span className="text-fs-muted-2/60 normal-case tracking-normal font-normal"> &middot; {statsSeason} season stats</span>
+            )}
+          </h2>
           <button onClick={onBack}
             className="hover-bright text-xs px-3 py-1.5 rounded-full text-fs-muted hover:text-fs-text"
             style={{ backgroundColor: `${team.colors.primary}15`, border: `1px solid ${team.colors.primary}25`, '--card-color': team.colors.primary } as React.CSSProperties}>
@@ -1167,6 +1175,12 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
                                 </div>
                               ))}
                             </div>
+                          )}
+                          {(nflSchema?.length || (!isNfl && hasStats && relevantStats[team.sport])) &&
+                            hasStats && statsSeason != null && athlete.seasonStatsYear != null && athlete.seasonStatsYear !== statsSeason && (
+                            <span className="text-xs text-fs-muted-2 flex-shrink-0" title={`Stats are from the ${athlete.seasonStatsYear} season`}>
+                              &rsquo;{String(athlete.seasonStatsYear).slice(2)}
+                            </span>
                           )}
                           {!isNfl && hasStats && relevantStats[team.sport] && (
                             <div className="flex items-center gap-1.5 sm:gap-2 font-mono tabular-nums flex-shrink-0" style={{ fontVariantNumeric: 'tabular-nums' }}>

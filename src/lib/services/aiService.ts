@@ -6,7 +6,33 @@ const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || 'http://100.112.124.101:11434
 // Smaller model than llama3.1:70b-instruct-q4_K_M for faster load + generation.
 // Qwen3.5 emits a reasoning preamble (data.thinking) before its response (data.response);
 // num_predict must be large enough to cover thinking + final answer together.
-const MODEL = process.env.OLLAMA_ANALYST_MODEL || 'qwen3.5:9b'
+export const DEFAULT_ANALYST_MODEL = 'qwen3.5:9b'
+const MODEL = process.env.OLLAMA_ANALYST_MODEL || DEFAULT_ANALYST_MODEL
+// When an operator overrides the analyst model via OLLAMA_ANALYST_MODEL, the pinned
+// default becomes a last-resort second attempt — and vice versa there is nothing else
+// to try, so failures surface as a graceful "analyst unavailable" state.
+const FALLBACK_MODEL = MODEL !== DEFAULT_ANALYST_MODEL ? DEFAULT_ANALYST_MODEL : undefined
+
+/**
+ * Per-attempt budget. Two attempts plus context building must fit inside the client's
+ * ~90 s window so the fallback answer can actually be delivered before the browser
+ * gives up; a hung shared Ollama node usually shows its hand within seconds anyway.
+ */
+const ATTEMPT_TIMEOUT_MS = 30_000
+
+/** Raised when every configured attempt failed or timed out — mapped to a 503 by the concierge route. */
+export class AnalystUnavailableError extends Error {
+  cause?: unknown
+  constructor(cause?: unknown) {
+    super('The analyst is unavailable right now — please try again later.')
+    this.name = 'AnalystUnavailableError'
+    this.cause = cause
+  }
+}
+
+function isTimeout(err: unknown): boolean {
+  return err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')
+}
 
 const STYLE_PROMPTS: Record<string, string> = {
   Normal: '',
@@ -200,36 +226,26 @@ function buildPrompt(
   return lines.join('\n')
 }
 
-export async function generateAIAnalysis(
-  pageType: string,
-  focusAreas: string[],
-  context: any,
-  style: string,
-  customQuestion?: string,
+/** One Ollama chat attempt: fetch, parse, clean. Throws on transport/HTTP failure or timeout. */
+async function requestAnalysis(
+  model: string,
+  systemPrompt: string,
+  userMessage: string,
+  temperature: number,
 ): Promise<string> {
-  // Include team + sport so analyses for different teams never collide in the cache —
-  // otherwise one team's write-up would be served to another.
-  const cacheKey = `ai:${context.sport}:${context.teamAbbr}:${pageType}:${[...focusAreas].sort().join(',')}:${style}:${customQuestion || 'none'}`
-
-  const cached = getCached<string>(cacheKey)
-  if (cached && isFresh(cached.ts, TTL.AI_RESPONSE)) return cached.data
-
-  const systemPrompt = BASE_PROMPTS[pageType] ?? BASE_PROMPTS.team
-  const userMessage = buildPrompt(pageType, focusAreas, context, customQuestion, style)
-
   const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    signal: AbortSignal.timeout(120000),
+    signal: AbortSignal.timeout(ATTEMPT_TIMEOUT_MS),
     body: JSON.stringify({
-      model: MODEL,
+      model,
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userMessage },
       ],
       stream: false,
       options: {
-        temperature: getTemperature(style),
+        temperature,
         // Qwen emits a long reasoning preamble (message.thinking) before its final
         // answer (message.content). num_predict + num_ctx must cover BOTH or content
         // comes back empty (the model otherwise hits its context cap mid-reasoning).
@@ -260,9 +276,46 @@ export async function generateAIAnalysis(
     if (/^\s*\*{0,2}\s*(?:(?:Here['’]s|Let['’]s|Now I|I will|I need|Wait|However|Actually|To be|The prompt|Step|Decision|Safety|Note|Point|Standard|Sentence|This move))/i.test(t)) return false
     return true
   })
-  let cleaned = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
-  const result = cleaned || 'No analysis could be generated with the available data.'
+  const cleaned = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
+  return cleaned || 'No analysis could be generated with the available data.'
+}
 
-  setCached(cacheKey, result)
-  return result
+export async function generateAIAnalysis(
+  pageType: string,
+  focusAreas: string[],
+  context: any,
+  style: string,
+  customQuestion?: string,
+): Promise<string> {
+  // Include team + sport so analyses for different teams never collide in the cache —
+  // otherwise one team's write-up would be served to another.
+  const cacheKey = `ai:${context.sport}:${context.teamAbbr}:${pageType}:${[...focusAreas].sort().join(',')}:${style}:${customQuestion || 'none'}`
+
+  const cached = getCached<string>(cacheKey)
+  if (cached && isFresh(cached.ts, TTL.AI_RESPONSE)) return cached.data
+
+  const systemPrompt = BASE_PROMPTS[pageType] ?? BASE_PROMPTS.team
+  const userMessage = buildPrompt(pageType, focusAreas, context, customQuestion, style)
+  const temperature = getTemperature(style)
+
+  let primaryError: unknown
+  try {
+    const result = await requestAnalysis(MODEL, systemPrompt, userMessage, temperature)
+    setCached(cacheKey, result)
+    return result
+  } catch (err) {
+    // Only a hung/timed-out attempt earns a second try on the fallback model — a
+    // hard HTTP error means the node itself is unhappy and retrying won't help.
+    if (!isTimeout(err) || !FALLBACK_MODEL) throw new AnalystUnavailableError(err)
+    primaryError = err
+  }
+
+  try {
+    const result = await requestAnalysis(FALLBACK_MODEL, systemPrompt, userMessage, temperature)
+    setCached(cacheKey, result)
+    return result
+  } catch (err) {
+    console.error(`[ai] analyst unavailable: primary ${MODEL} and fallback ${FALLBACK_MODEL} both failed`, { primaryError, fallbackError: err })
+    throw new AnalystUnavailableError(err)
+  }
 }

@@ -2,6 +2,7 @@ import type { FantasyPlayerEnriched, ScoringFormat } from '@/lib/fantasy-types'
 import { getPositionMultipliers, formatPoints } from './steal-engine'
 import { resolveInjuryTier, type InjuryTier } from './injury-gate'
 import { SCORING_FORMATS } from '@/lib/providers/fantasy-constants'
+import { clampInt } from './clamp-int'
 
 /**
  * Auction valuation.
@@ -131,12 +132,6 @@ export function clampSettings(s: AuctionSettingsInput): AuctionSettings {
     rosterSize: clampInt(s.rosterSize, 1, 40, d.rosterSize),
     scoringFormat: (SCORING_FORMATS as readonly string[]).includes(fmt) ? (fmt as ScoringFormat) : d.scoringFormat,
   }
-}
-
-function clampInt(v: unknown, min: number, max: number, fallback: number): number {
-  const n = typeof v === 'string' ? Number(v) : typeof v === 'number' ? v : NaN
-  if (!Number.isFinite(n)) return fallback
-  return Math.max(min, Math.min(max, Math.round(n)))
 }
 
 function posOf(p: FantasyPlayerEnriched): string {

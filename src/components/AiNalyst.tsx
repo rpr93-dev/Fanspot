@@ -21,6 +21,9 @@ const PAST_GAME_AREAS: Record<string, string[]> = {
 
 const STYLES = ['Normal', 'Stephen A. Smith', 'Nick Wright', 'Skip Bayless', 'Pat McAfee', 'Bill Simmons'] as const
 
+/** The analyst must answer inside this window; the server's own attempts budget stays below it. */
+const ANALYST_TIMEOUT_MS = 90_000
+
 function getPastGameAreas(sport: string): string[] {
   return PAST_GAME_AREAS[sport.toUpperCase()] ?? PAST_GAME_AREAS.MLB
 }
@@ -82,9 +85,12 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
+  // Failures render here — a DISTINCT state from the generated-content box, never into it.
+  const [error, setError] = useState<string | null>(null)
   const [selectedStyle, setSelectedStyle] = useState('Normal')
   const [customQuestion, setCustomQuestion] = useState('')
   const outputRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
 
   const areas = pageType === 'past-game' ? getPastGameAreas(sport) : pageType === 'next-game' ? NEXT_GAME_AREAS : TEAM_AREAS
 
@@ -92,6 +98,7 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
     if (open) {
       setSelected(new Set(areas))
       setOutput(null)
+      setError(null)
       setCustomQuestion('')
       setSelectedStyle('Normal')
     }
@@ -117,10 +124,16 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
     if (!canGenerate) return
     setLoading(true)
     setOutput(null)
+    setError(null)
+    const controller = new AbortController()
+    abortRef.current = controller
+    // Hard client ceiling: no more staring at the spinner for minutes with no escape.
+    const timer = setTimeout(() => controller.abort('timeout'), ANALYST_TIMEOUT_MS)
     try {
       const res = await fetch('/api/concierge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
         body: JSON.stringify({
           sport,
           teamId,
@@ -133,18 +146,40 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
         }),
       })
       if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: res.statusText }))
-        setOutput(`Error: ${err.error ?? 'Unknown error'}`)
+        const err = await res.json().catch(() => ({}))
+        if (res.status === 503 && err.error === 'analyst-unavailable') {
+          setError(err.message || 'The analyst is unavailable right now — please retry later.')
+        } else {
+          setError(err.message ?? err.error ?? `Request failed (${res.status})`)
+        }
       } else {
         const data = await res.json()
         setOutput(data.content ?? 'No response generated')
       }
     } catch (err: any) {
-      setOutput(`Error: ${err.message ?? 'Request failed'}`)
+      if (controller.signal.aborted) {
+        // User-initiated cancel just returns to idle; a timeout explains itself.
+        if (controller.signal.reason === 'timeout') {
+          setError('The analyst did not respond in time. The model may be busy — please retry later.')
+        }
+      } else {
+        setError(err?.message ?? 'Request failed')
+      }
     } finally {
+      clearTimeout(timer)
+      abortRef.current = null
       setLoading(false)
     }
   }
+
+  const handleCancel = () => {
+    abortRef.current?.abort('cancel')
+  }
+
+  // Dismissing the modal abandons any in-flight generation.
+  useEffect(() => {
+    if (!open) abortRef.current?.abort('cancel')
+  }, [open])
 
   useEffect(() => {
     if (output && outputRef.current) {
@@ -255,30 +290,55 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
                 />
               </div>
 
-              <button
-                onClick={handleGenerate}
-                disabled={!canGenerate || loading}
-                className={`w-full text-sm font-medium py-2.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed ${canGenerate && !loading ? 'gen-btn-glow' : ''}`}
-                style={{
-                  backgroundColor: canGenerate && !loading ? teamColor : `${teamColor}15`,
-                  color: canGenerate && !loading ? 'white' : 'rgba(255,255,255,0.3)',
-                  '--glow': canGenerate && !loading ? `${teamColor}66` : 'transparent',
-                  transition: 'all 0.25s ease',
-                } as any}
-              >
-                {loading ? (
-                  <div className="flex items-center justify-center gap-2">
-                    <div className="flex items-center gap-1.5">
-                      <span className="loader-dot w-2 h-2 rounded-full" style={{ backgroundColor: teamColor }} />
-                      <span className="loader-dot w-2 h-2 rounded-full" style={{ backgroundColor: teamColor }} />
-                      <span className="loader-dot w-2 h-2 rounded-full" style={{ backgroundColor: teamColor }} />
+              <div className="flex gap-2">
+                <button
+                  onClick={handleGenerate}
+                  disabled={!canGenerate || loading}
+                  className={`flex-1 text-sm font-medium py-2.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed ${canGenerate && !loading ? 'gen-btn-glow' : ''}`}
+                  style={{
+                    backgroundColor: canGenerate && !loading ? teamColor : `${teamColor}15`,
+                    color: canGenerate && !loading ? 'white' : 'rgba(255,255,255,0.3)',
+                    '--glow': canGenerate && !loading ? `${teamColor}66` : 'transparent',
+                    transition: 'all 0.25s ease',
+                  } as any}
+                >
+                  {loading ? (
+                    <div className="flex items-center justify-center gap-2">
+                      <div className="flex items-center gap-1.5">
+                        <span className="loader-dot w-2 h-2 rounded-full" style={{ backgroundColor: teamColor }} />
+                        <span className="loader-dot w-2 h-2 rounded-full" style={{ backgroundColor: teamColor }} />
+                        <span className="loader-dot w-2 h-2 rounded-full" style={{ backgroundColor: teamColor }} />
+                      </div>
+                      <span className="text-xs opacity-60">Generating...</span>
                     </div>
-                    <span className="text-xs opacity-60">Generating...</span>
-                  </div>
-                ) : (
-                  'Generate Analysis'
+                  ) : (
+                    'Generate Analysis'
+                  )}
+                </button>
+                {loading && (
+                  <button
+                    onClick={handleCancel}
+                    className="text-sm font-medium py-2.5 px-4 rounded-xl text-fs-muted hover:text-fs-text transition-colors"
+                    style={{
+                      backgroundColor: 'transparent',
+                      border: '1px solid rgba(255,255,255,0.18)',
+                    }}
+                  >
+                    Cancel
+                  </button>
                 )}
-              </button>
+              </div>
+
+              {error && (
+                <div
+                  role="alert"
+                  className="rounded-xl p-3.5 text-sm leading-relaxed"
+                  style={{ backgroundColor: 'rgba(220,38,38,0.10)', border: '1px solid rgba(248,113,113,0.35)', color: '#fca5a5' }}
+                >
+                  <span className="font-semibold">The AI-nalyst is unavailable.</span>{' '}
+                  <span className="opacity-90">{error}</span>
+                </div>
+              )}
 
               {output && (
                 <div

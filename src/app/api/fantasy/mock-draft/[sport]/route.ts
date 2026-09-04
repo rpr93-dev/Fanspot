@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { SUPPORTED_SPORTS, isFantasySportLive } from '@/lib/providers/fantasy-constants'
 import { buildUnifiedDatabase, unifiedToFantasyPlayerEnriched } from '@/lib/fantasy/unified-db'
 import { buildDraftPool, DEFAULT_MOCK_SETTINGS, MOCK_POSITIONS } from '@/lib/fantasy/mock-draft'
+import { clampInt } from '@/lib/fantasy/clamp-int'
 import type { StarterSlots } from '@/lib/fantasy/mock-draft'
 import type { FantasySport, FantasyPlayerEnriched } from '@/lib/fantasy-types'
 
@@ -130,12 +131,6 @@ if (!(ADP_PLATFORMS as readonly string[]).includes(adpPlatform)) {
       { status: 500 },
     )
   }
-}
-
-function clampInt(value: string | null, min: number, max: number, fallback: number): number {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return fallback
-  return Math.max(min, Math.min(max, Math.round(n)))
 }
 
 function scoring(value: string | undefined): 'ppr' | 'half-ppr' | 'standard' {
