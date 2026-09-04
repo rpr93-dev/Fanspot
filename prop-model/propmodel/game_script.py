@@ -42,8 +42,22 @@ logger = logging.getLogger(__name__)
 # matchup adjustment so both sides of the app tell the same story.
 LEAGUE_AVG_TEAM_TOTAL = 22.0
 
-SCRIPT_FACTOR_MIN = 0.6
-SCRIPT_FACTOR_MAX = 1.4
+SCRIPT_FACTOR_MIN = 0.75
+SCRIPT_FACTOR_MAX = 1.25
+
+# Stat-specific game script multipliers:
+# Different stats respond differently to game context.
+# A +10 spread increases passing volume more than rushing volume.
+STAT_SCRIPT_WEIGHTS: dict[str, float] = {
+    "passing_yards": 1.0,       # full game-script effect on passing
+    "passing_tds": 1.0,
+    "receiving_yards": 0.9,     # slightly less than passing (recipients vary)
+    "receptions": 0.8,          # volume stat, less sensitive to game state
+    "rushing_yards": 0.6,       # heavy underdogs run less, heavy favorites run more
+    "rushing_tds": 0.5,
+    "receiving_tds": 0.7,       # somewhat sensitive to scoring context
+    "tds": 0.7,
+}
 
 
 @dataclass(frozen=True)
@@ -57,28 +71,46 @@ class LineProvider(Protocol):
     def fetch(self, home: str, away: str) -> GameLines | None: ...
 
 
-def script_factor_for_team(lines: GameLines, team: str) -> float:
+def script_factor_for_team(
+    lines: GameLines, team: str, stat_key: str = "",
+) -> float:
     """Pace/volume multiplier for one team given the game's lines.
 
     The favorite's implied total is (total + spread) / 2; the underdog's is
     (total - spread) / 2. ``team`` is a 3-letter code; pick'em splits the total.
+
+    When ``stat_key`` is provided, the factor is modulated by stat-specific
+    game-script sensitivity (passing responds more to game state than rushing).
     """
     is_fav = lines.favorite is not None and lines.favorite.upper() == str(team).upper()
     margin = lines.spread if is_fav else -lines.spread
     implied = (lines.total + margin) / 2
-    return max(SCRIPT_FACTOR_MIN, min(SCRIPT_FACTOR_MAX, implied / LEAGUE_AVG_TEAM_TOTAL))
+    raw_factor = max(SCRIPT_FACTOR_MIN, min(SCRIPT_FACTOR_MAX, implied / LEAGUE_AVG_TEAM_TOTAL))
+
+    # Stat-specific modulation: pull toward 1.0 for stats that are less
+    # sensitive to game state (rushing on a big favorite, etc.)
+    if stat_key:
+        weight = STAT_SCRIPT_WEIGHTS.get(stat_key, 1.0)
+        # Blend: weight * raw_factor + (1 - weight) * 1.0
+        return max(SCRIPT_FACTOR_MIN, min(SCRIPT_FACTOR_MAX, weight * raw_factor + (1.0 - weight)))
+
+    return raw_factor
 
 
 def script_adjustment(
     team: str,
     opponent: str,
     lines: GameLines | None,
+    stat_key: str = "",
 ) -> dict:
     """Structured game-script adjustment for ``team`` facing ``opponent``.
 
     Returns ``{"available", "factor", "total", "spread", "implied_total"}`` with
     a neutral ``factor == 1.0`` when no lines are available (callers can log it
     as low-confidence rather than crash).
+
+    When ``stat_key`` is provided, the factor is modulated by stat-specific
+    game-script sensitivity.
     """
     if lines is None:
         return {
@@ -88,15 +120,12 @@ def script_adjustment(
             "spread": None,
             "implied_total": None,
         }
-    is_fav = lines.favorite is not None and lines.favorite.upper() == str(team).upper()
-    margin = lines.spread if is_fav else -lines.spread
-    implied = (lines.total + margin) / 2
     return {
         "available": True,
-        "factor": script_factor_for_team(lines, team),
+        "factor": script_factor_for_team(lines, team, stat_key=stat_key),
         "total": float(lines.total),
         "spread": float(lines.spread),
-        "implied_total": round(implied, 1),
+        "implied_total": round((lines.total + (lines.spread if lines.favorite and lines.favorite.upper() == str(team).upper() else -lines.spread)) / 2, 1),
     }
 
 

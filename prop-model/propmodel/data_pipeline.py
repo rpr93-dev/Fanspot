@@ -352,7 +352,8 @@ def fetch_player_history(
     if not seasons:
         raise ValueError("At least one season is required")
 
-    empty = pd.DataFrame(columns=["season", "week", "game_id", "date", "opponent", "value"])
+    opp_cols_init = list(stat.opportunity_columns)
+    empty = pd.DataFrame(columns=["season", "week", "game_id", "date", "opponent", "value"] + opp_cols_init)
 
     def _empty_history(reason: str) -> PlayerHistory:
         return PlayerHistory(
@@ -415,7 +416,7 @@ def fetch_player_history(
 
     def _game_record(r: pd.Series) -> dict:
         value = _stat_value(r, stat)
-        return {
+        rec: dict = {
             "season": int(r[COL_SEASON]),
             "week": int(r[COL_WEEK]),
             "game_id": r.get(COL_GAME_ID),
@@ -423,6 +424,11 @@ def fetch_player_history(
             "opponent": r.get(COL_OPPONENT),
             "value": value,
         }
+        # Opportunity columns (targets, carries, attempts) for decomposition
+        for col in stat.opportunity_columns:
+            v = r.get(col)
+            rec[col] = float(v) if v is not None and not pd.isna(v) else None
+        return rec
 
     records = [_game_record(r) for _, r in history.iterrows()]
     # A played week with *no recorded value* must never silently enter the
@@ -438,10 +444,12 @@ def fetch_player_history(
     else:
         kept_records = [rec for rec in records if rec["value"] is not None]
 
+    opp_cols = list(stat.opportunity_columns)
+    games_cols = ["season", "week", "game_id", "date", "opponent", "value"] + opp_cols
     games_df = (
-        pd.DataFrame(kept_records, columns=["season", "week", "game_id", "date", "opponent", "value"])
+        pd.DataFrame(kept_records, columns=games_cols)
         if kept_records
-        else empty.copy()
+        else pd.DataFrame(columns=games_cols)
     )
     n_modeled = len(games_df)
     n_unrecorded = len(records) - len(kept_records)

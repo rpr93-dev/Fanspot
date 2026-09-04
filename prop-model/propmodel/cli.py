@@ -44,7 +44,7 @@ from .data_pipeline import (
     weekly_is_usable,
 )
 from .game_script import GameLines, OddsApiLineProvider, StaticLineProvider, script_adjustment
-from .model import ModelWeights, Projection, position_guard_reason, project
+from .model import FullProjection, ModelWeights, Projection, position_guard_reason, project
 from .opponent import defense_allowed, opponent_factor
 from .output import projections_table, write_table
 from .players import normalized_names, resolve_player_id
@@ -228,7 +228,7 @@ def _apply_factors(value: float, opp: dict, gs: dict, weights: ModelWeights) -> 
 def _prior_projection(
     player: str, stat: str, prior: float, hist: PlayerHistory | None,
     opp: dict, gs: dict, weights: ModelWeights,
-) -> Projection:
+) -> FullProjection:
     """Project from an ESPN-style prior line when NFL history is missing/thin.
 
     The prior is adjusted for matchup and game context like any other
@@ -236,15 +236,16 @@ def _prior_projection(
     prior's pseudo-games — a raw unadjusted prior would silently ignore both.
     The band stays a wide ±50%: honest uncertainty, not false precision.
     """
-    from .model import reliability_score
+    from .model import build_distribution, reliability_score
     spec = get_stat(stat)
     if hist is not None:
         guard = position_guard_reason(hist.position, spec)
         if guard:
             n = hist.n_games
-            return Projection(
+            return FullProjection(
                 player_name=player, stat=spec,
                 projection=None, baseline=None, low=None, high=None,
+                p10=None, p25=None, p50=None, p75=None, p90=None, pred_sd=None,
                 confidence="low", n_games=n,
                 opponent_factor=round(float(opp.get("factor", 1.0)), 3),
                 script_factor=round(float(gs.get("factor", 1.0)), 3),
@@ -263,11 +264,17 @@ def _prior_projection(
         center = _apply_factors(prior, opp, gs, weights)
         note = "ESPN prior — no NFL history (rookie)"
         rel = reliability_score(0, False, bool(opp.get("factor")), False, 3, 1, 1)
-    return Projection(
+    # Prior path has no empirical residuals — use a wide distribution
+    pred_sd = center * 0.5 if center else None
+    dist = build_distribution(center, pred_sd, spec.kind, max(n, 1), 1.0) if pred_sd else {}
+    return FullProjection(
         player_name=player, stat=get_stat(stat),
         projection=center, baseline=center,
         low=round(center * 0.5, 1), high=round(center * 1.5, 1),
-        confidence="low", n_games=n,
+        p10=dist.get("p10"), p25=dist.get("p25"), p50=dist.get("p50"),
+        p75=dist.get("p75"), p90=dist.get("p90"),
+        pred_sd=pred_sd, confidence="low", confidence_score=0.15,
+        n_games=n,
         opponent_factor=round(float(opp.get("factor", 1.0)), 3),
         script_factor=round(float(gs.get("factor", 1.0)), 3),
         refused_reason=None,
@@ -276,22 +283,23 @@ def _prior_projection(
     )
 
 
-def _failed_projection(target: dict, exc: Exception) -> Projection:
+def _failed_projection(target: dict, exc: Exception) -> FullProjection:
     """A refusal row for a target whose projection raised (e.g. unknown stat).
 
     One bad target must not abort the batch — it becomes an explicit failure
     row (projection null + reason naming the error) while the rest still run.
     """
-    from .model import reliability_score
     stat_key = str(target.get("stat") or "")
-    return Projection(
+    return FullProjection(
         player_name=str(target.get("player") or "?"),
         stat=StatSpec(
             key=stat_key or "?", label=stat_key or "?", unit="",
             columns=(), positions=(), kind="continuous",
         ),
         projection=None, baseline=None, low=None, high=None,
-        confidence="low", n_games=0,
+        p10=None, p25=None, p50=None, p75=None, p90=None, pred_sd=None,
+        confidence="low", confidence_score=0.0,
+        n_games=0,
         opponent_factor=None, script_factor=None,
         refused_reason=f"{type(exc).__name__}: {exc}",
         note="target failed — see logs",
@@ -397,7 +405,7 @@ def _project_one(
     memo: RunMemo | None = None,
     known_codes: set[str] | None = None,
     history_cutoff=None,
-) -> Projection:
+) -> FullProjection:
     player, stat = target["player"], target["stat"]
     # Normalize fantasy/broadcast spellings (LAR→LA, JAX→JAC, …) at the
     # boundary so resolution and rate lookups see nflverse codes.
@@ -473,16 +481,24 @@ def _project_one(
         # regular-season-calibrated projection down (same 0.4 factor the
         # /api/props ESPN lines use, keeping both on the same scale).
         f = 0.4
-        proj = Projection(
+        # Scale distribution percentiles too
+        def _s(v):
+            return v * f if v is not None else None
+        proj = FullProjection(
             player_name=proj.player_name, stat=proj.stat,
-            projection=proj.projection * f,
-            baseline=proj.baseline * f if proj.baseline is not None else None,
-            low=proj.low * f if proj.low is not None else None,
-            high=proj.high * f if proj.high is not None else None,
-            confidence=proj.confidence, n_games=proj.n_games,
+            projection=_s(proj.projection),
+            baseline=_s(proj.baseline),
+            low=_s(proj.low), high=_s(proj.high),
+            p10=_s(proj.p10), p25=_s(proj.p25), p50=_s(proj.p50), p75=_s(proj.p75), p90=_s(proj.p90),
+            pred_sd=_s(proj.pred_sd),
+            confidence=proj.confidence, confidence_score=proj.confidence_score,
+            n_games=proj.n_games, effective_sample_size=proj.effective_sample_size,
             opponent_factor=proj.opponent_factor, script_factor=proj.script_factor,
+            role_factor=proj.role_factor, recent_form_factor=proj.recent_form_factor,
             refused_reason=proj.refused_reason,
             note=(proj.note + " · " if proj.note else "") + "preseason-adjusted",
+            warnings=proj.warnings, inputs=proj.inputs,
+            reliability_score=proj.reliability_score,
         )
 
     if proj.confidence == "low":
@@ -538,7 +554,7 @@ def main(argv: list[str] | None = None) -> int:
     # Per-target isolation: one bad target (unknown stat, bad prior, …) becomes
     # an explicit failure row instead of aborting the batch — the documented
     # contract of this CLI. The failure names its cause in refused_reason.
-    projections: list[Projection] = []
+    projections: list[FullProjection] = []
     priors: dict[str, float] = {}
     memo = RunMemo()
     # Track ESPN prior usage per player for reliability scoring
@@ -562,8 +578,8 @@ def main(argv: list[str] | None = None) -> int:
             )
             # Track if ESPN prior was actually used (note mentions ESPN blending)
             if result.note and "ESPN" in result.note:
-                _espn_used.setdefault(p.player_name, 0)
-                _espn_used[p.player_name] = _espn_used.get(p.player_name, 0) + 1
+                _espn_used.setdefault(result.player_name, 0)
+                _espn_used[result.player_name] = _espn_used.get(result.player_name, 0) + 1
             projections.append(result)
         except Exception as e:  # noqa: BLE001 — keep the batch alive
             logger.error(
@@ -571,6 +587,38 @@ def main(argv: list[str] | None = None) -> int:
                 t.get("player"), t.get("stat"), e,
             )
             projections.append(_failed_projection(t, e))
+
+    # Phase 8: Team-level volume guard — sum same-team same-stat projections and warn if exceeds realistic team total
+    from collections import defaultdict
+    team_stat_totals: dict[tuple[str, str], float] = defaultdict(float)
+    team_stat_counts: dict[tuple[str, str], int] = defaultdict(int)
+    for p in projections:
+        if p.projection is not None and p.refused_reason is None:
+            key = (p.stat.key, str(getattr(p, 'stat', '') and getattr(p, 'team', '')))
+            # Use the target team if available — look up from original targets list
+            team = ""
+            for t in targets:
+                if t.get("player") == p.player_name and t.get("stat") == p.stat.key:
+                    team = str(t.get("team") or "").upper()
+                    break
+            if team:
+                k = (team, p.stat.key)
+                team_stat_totals[k] += float(p.projection)
+                team_stat_counts[k] += 1
+    # Realistic caps (generous — only flag extreme impossible aggregates)
+    _TEAM_CAPS = {"receiving_yards": 380, "receptions": 30, "rushing_yards": 220, "passing_yards": 420, "tds": 6}
+    for (team, stat_key), total in team_stat_totals.items():
+        cap = _TEAM_CAPS.get(stat_key)
+        if cap and total > cap:
+            warn_msg = f"team_volume_high: {team} {stat_key} total {total:.1f} exceeds realistic team cap {cap}"
+            for p in projections:
+                for t in targets:
+                    if t.get("player") == p.player_name and t.get("stat") == p.stat.key and str(t.get("team") or "").upper() == team:
+                        if not p.warnings:
+                            p.warnings = []
+                        if warn_msg not in p.warnings:
+                            p.warnings.append(warn_msg)
+                        break
 
     if args.output:
         write_table(projections_table(projections, data_through=data_vintage(weekly)), args.output)
@@ -580,11 +628,9 @@ def main(argv: list[str] | None = None) -> int:
         results = []
         for p in projections:
             d = p.to_dict()
-            # ESPN coverage: how many of this player's markets have ESPN priors
-            all_stats = _player_stats.get(p.player_name, set())
-            espn_stats = _player_espn_stats.get(p.player_name, set())
-            total_markets = len(all_stats) if all_stats else 1
-            espn_lines = len(espn_stats) if espn_stats else 0
+            # ESPN coverage: how many of this player's modeled stats have ESPN priors
+            total_markets = _total_stats.get(p.player_name, 1)
+            espn_lines = _espn_used.get(p.player_name, 0)
             d["reliability"] = _reliability(
                 n_games=p.n_games,
                 history_ok=p.refused_reason is None,

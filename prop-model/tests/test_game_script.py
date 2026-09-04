@@ -45,9 +45,9 @@ def test_script_adjustment_shape():
 
 def test_factor_clamped_at_extremes():
     lines = GameLines(total=70.0, spread=20.0, favorite="HOU")  # implied 45 → 2.05
-    assert script_factor_for_team(lines, "HOU") == 1.4
-    lines2 = GameLines(total=20.0, spread=2.0, favorite="HOU")  # implied 11 → 0.5 → clamp 0.6
-    assert script_factor_for_team(lines2, "HOU") == 0.6
+    assert script_factor_for_team(lines, "HOU") == 1.25  # clamped to max
+    lines2 = GameLines(total=20.0, spread=2.0, favorite="HOU")  # implied 11 → 0.5 → clamp 0.75
+    assert script_factor_for_team(lines2, "HOU") == 0.75
 
 
 def test_static_provider_lookup():

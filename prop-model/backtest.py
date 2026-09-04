@@ -42,7 +42,7 @@ from propmodel.data_pipeline import (
     _stat_value,
 )
 from propmodel.game_script import script_adjustment
-from propmodel.model import ModelWeights, project
+from propmodel.model import ModelWeights, project, recency_weights, effective_sample_size
 from propmodel.opponent import DEFAULT_OPP_SHRINK, _allowed_per_team_week, team_week_rates
 from propmodel.stats import get_stat
 
@@ -66,6 +66,7 @@ class Eval:
     baseline_proj: float | None = None   # opponent/game-script neutral twin
     pred_sd: float | None = None
     covered: bool | None = None
+    baselines: dict[str, float] | None = None  # simple baseline projections
 
 
 def load_cached_frames(cache_dir: str) -> pd.DataFrame:
@@ -125,7 +126,26 @@ def _bucket_table(scored: pd.DataFrame) -> str:
     return g.to_string()
 
 
-def run_stat(weekly: pd.DataFrame, stat_key: str, weights: ModelWeights,
+
+def ewma_projection(values: np.ndarray, alpha: float = 0.3) -> float:
+    """EWMA projection from historical values."""
+    if len(values) == 0:
+        return 0.0
+    result = values[0]
+    for v in values[1:]:
+        result = alpha * v + (1 - alpha) * result
+    return result
+
+
+def mean_n_projection(values: np.ndarray, n: int) -> float:
+    """Plain mean of last n values."""
+    if len(values) < n:
+        return float(np.mean(values)) if len(values) > 0 else 0.0
+    return float(np.mean(values[-n:]))
+
+
+def run_stat(weekly: pd.DataFrame
+, stat_key: str, weights: ModelWeights,
              n_games: int, season: int, history_seasons: list[int]) -> dict:
     spec = get_stat(stat_key)
     tw = _allowed_per_team_week(weekly, spec)
@@ -174,20 +194,38 @@ def run_stat(weekly: pd.DataFrame, stat_key: str, weights: ModelWeights,
         neutral_w = ModelWeights(**{**weights.__dict__, "opponent": 0.0, "game_script": 0.0})
         neutral = project(hist, {"factor": 1.0}, {"factor": 1.0}, neutral_w,
                           position_prior=prior_as_of(wk))
+        
+        # Compute simple baselines for comparison
+        raw_values = hist.games["value"].values.astype(float) if not hist.games.empty else np.array([])
+        baselines = {
+            "mean_8": mean_n_projection(raw_values, 8),
+            "mean_5": mean_n_projection(raw_values, 5),
+            "mean_3": mean_n_projection(raw_values, 3),
+            "ewma": ewma_projection(raw_values),
+        }
+        
         if proj.projection is not None:
             ev.projection = proj.projection
             ev.low = proj.low
             ev.high = proj.high
             ev.pred_sd = proj.pred_sd
             ev.baseline_proj = neutral.baseline
+            ev.baselines = baselines
             if actual is not None:
                 ev.covered = bool(proj.low <= actual <= proj.high)
         evals.append(ev)
 
     scored = [e for e in evals if e.projection is not None and e.actual is not None]
+    baselines = {b: [] for b in ["mean_8", "mean_5", "mean_3", "ewma"]}
     refused = [e for e in evals if e.projection is None]
     errs = np.array([e.projection - e.actual for e in scored])
     base_errs = np.array([e.baseline_proj - e.actual for e in scored])
+    for e in scored:
+        if e.baselines:
+            for k, v in e.baselines.items():
+                baselines[k].append(v - e.actual)
+    for k in baselines:
+        baselines[k] = np.array(baselines[k])
     cover = np.array([e.covered for e in scored])
     width = np.array([e.high - e.low for e in scored])
 

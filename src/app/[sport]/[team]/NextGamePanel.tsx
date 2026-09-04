@@ -69,14 +69,25 @@ interface ModelProjection {
   baseline: number | null
   low: number | null
   high: number | null
+  p10: number | null
+  p25: number | null
+  p50: number | null
+  p75: number | null
+  p90: number | null
   confidence: string
+  confidence_score: number | null
   n_games: number
+  effective_sample_size: number | null
   opponent_factor: number | null
   script_factor: number | null
+  role_factor: number | null
+  recent_form_factor: number | null
   refused_reason: string | null
   note: string | null
+  warnings: string[] | null
   last_updated?: string | null
   reliability?: number
+  pred_sd?: number | null
 }
 
 const INJURY_LABEL: Record<string, string> = {
@@ -489,7 +500,7 @@ export default function NextGamePanel({
               {props?.matchup ? (
                 <> &middot; matchup-adjusted via Vegas total {props.matchup.total} ({teamName} {props.matchup.ourTotal} pts, {opponentName} {props.matchup.oppTotal} pts implied)</>
               ) : null}
-              &nbsp;(betting props not posted).
+              &nbsp;(betting props not posted — crude fallback; canonical projections via &ldquo;Prop Model&rdquo; below use recency-weighted history + opponent + game-script + distributions).
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {[ourProjected, oppProjected].map((group, gi) => {
@@ -685,7 +696,7 @@ export default function NextGamePanel({
           </div>
           <p className="text-xs text-fs-muted-2 mb-2">
             {modelResults
-              ? 'Our own projection from the Python model: recent games × opponent defense × game script (nflverse weekly stats).'
+              ? 'Probabilistic projection from the Python model: recency-weighted baseline × opponent defense × game script with role-change detection and distributional uncertainty.'
               : 'Own projection from recent games, opponent defense, and the Vegas game script — compare against the ESPN lines above.'}
             {modelDataThrough && (
               <>
@@ -712,7 +723,7 @@ export default function NextGamePanel({
                     <th className="text-left px-2 py-1.5 font-medium">Stat</th>
                     <th className="text-right px-2 py-1.5 font-medium">Model</th>
                     <th className="text-right px-2 py-1.5 font-medium">ESPN line</th>
-                    <th className="text-right px-2 py-1.5 font-medium">68% Range</th>
+                    <th className="text-right px-2 py-1.5 font-medium">Distribution</th>
                     <th className="text-right px-2.5 py-1.5 font-medium">Conf</th>
                   </tr>
                 </thead>
@@ -743,13 +754,13 @@ export default function NextGamePanel({
                               </span>
                             </td>
                           ) : null}
-                          <td className="px-2 py-1.5 whitespace-nowrap text-fs-muted">
+                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted" title={r.note ?? undefined}>
                             {r.stat_label}
-                            {r.note ? (
-                              <span className="block text-[10px] text-fs-muted-2 max-w-[16ch] truncate" title={r.note}>
+                            {r.note && !r.warnings && (
+                              <span className="block text-[10px] text-fs-muted-2 max-w-[16ch] truncate">
                                 {r.note}
                               </span>
-                            ) : null}
+                            )}
                           </td>
                           <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-text">
                             {r.projection != null ? r.projection : <span className="text-fs-muted-2">refused</span>}
@@ -757,18 +768,34 @@ export default function NextGamePanel({
                           <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
                             {espnLine != null ? espnLine : '—'}
                           </td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
-                            {r.low != null && r.high != null ? `${r.low}–${r.high}` : '—'}
+                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted" title={
+                            [
+                              r.p10 != null ? `p10:${r.p10} p25:${r.p25} p50:${r.p50} p75:${r.p75} p90:${r.p90}` : null,
+                              r.role_factor != null ? `role:${r.role_factor}` : null,
+                              r.recent_form_factor != null ? `form:${r.recent_form_factor}` : null,
+                            ].filter(Boolean).join(' · ') || undefined
+                          }>
+                            {r.p25 != null && r.p75 != null ? `${r.p25}–${r.p75}` : (r.low != null && r.high != null ? `${r.low}–${r.high}` : '—')}
                           </td>
                           <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
                             <div className="flex items-center gap-1.5 justify-end">
-                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${conf.cls}`}>
+                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${conf.cls}`} title={r.confidence_score != null ? `confidence_score:${r.confidence_score}` : undefined}>
                                 {r.confidence.toUpperCase()}
                               </span>
                               <span className={`text-[10px] font-mono tabular-nums ${relColor(r.reliability ?? 0)}`}>
                                 {r.reliability ?? '?'}
                               </span>
                             </div>
+                            {r.warnings && r.warnings.length > 0 && (
+                              <span className="block text-[10px] text-fs-muted-2 max-w-[16ch] truncate" title={r.warnings.join('; ')}>
+                                ⚠ {r.warnings[0]}
+                              </span>
+                            )}
+                            {r.role_factor != null && Math.abs(r.role_factor - 1) > 0.08 && (
+                              <span className="block text-[10px] text-fs-gold max-w-[16ch] truncate" title={`role_factor:${r.role_factor} recent_form:${r.recent_form_factor ?? '—'}`}>
+                                role {r.role_factor > 1 ? '+' : ''}{((r.role_factor - 1) * 100).toFixed(0)}%
+                              </span>
+                            )}
                           </td>
                         </tr>
                       )

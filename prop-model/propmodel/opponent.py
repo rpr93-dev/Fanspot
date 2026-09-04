@@ -65,6 +65,10 @@ DEFAULT_OPP_SHRINK = 6.0
 
 DEFAULT_OPP_WINDOW = 8
 
+# Bounded opponent factor: extreme ratios are almost always small-sample noise.
+OPP_FACTOR_MIN = 0.75
+OPP_FACTOR_MAX = 1.25
+
 
 def _allowed_per_team_week(weekly: pd.DataFrame, stat: StatSpec) -> pd.DataFrame:
     """Sum the stat allowed by each defense per team-week.
@@ -130,7 +134,7 @@ def team_week_rates(
             return 1.0
         raw = r["allowed_per_game"] / league_avg
         weight = r["games"] / (r["games"] + max(0.0, shrink_games))
-        return 1.0 + (raw - 1.0) * weight
+        return max(OPP_FACTOR_MIN, min(OPP_FACTOR_MAX, 1.0 + (raw - 1.0) * weight))
 
     team_agg["ratio"] = team_agg.apply(_ratio, axis=1).round(3)
     return team_agg.reset_index(drop=True)

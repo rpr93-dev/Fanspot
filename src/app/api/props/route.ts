@@ -321,6 +321,13 @@ function projectedLinesFor(player: UnifiedPlayer, teamAbbr: string, multiplier: 
  * Keyless fallback: derive per-game projected lines for the two teams' skill players
  * from the ESPN fantasy projections the unified DB already carries. Ranks by season
  * projection points so the biggest stars surface first.
+ *
+ * @deprecated This is a crude fallback (season_avg / 17 * Vegas multiplier) — the
+ * canonical projection engine is the Python prop-model (POST /api/prop-model) which
+ * uses recency-weighted history + opponent + game-script + distributions. This
+ * fallback is retained for keyless/betting-props-unavailable cases and as a raw
+ * ESPN prior source for the prop-model. See Phase 13: ESPN is now a data source
+ * and sanity check, not a competing projection methodology.
  */
 async function buildProjectedLines(
   teamAbbr: string,

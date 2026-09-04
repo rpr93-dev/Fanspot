@@ -9,20 +9,26 @@ from pathlib import Path
 
 import pandas as pd
 
-from .model import Projection
+from .model import FullProjection, Projection
 
 # Columns the dashboard consumes. market_line / edge are intentionally empty for
 # now (market comparison was deferred); they exist so the schema doesn't change
 # when The Odds API lines are wired in.
+# Canonical projection fields (p10-p90, pred_sd, ESS, confidence_score, role)
+# are appended for forward compat — the legacy projection view still works.
 TABLE_COLUMNS = [
     "player", "stat", "my_projection", "market_line", "edge",
     "confidence", "last_updated", "low", "high", "n_games",
     "baseline", "opponent_factor", "script_factor", "refused_reason", "note", "reliability",
+    # Canonical extension (Phase 2): distribution + diagnostics
+    "p10", "p25", "p50", "p75", "p90", "pred_sd",
+    "effective_sample_size", "confidence_score", "role_factor", "recent_form_factor",
+    "warnings",
 ]
 
 
 def projections_table(
-    projections: list[Projection],
+    projections: list[Projection | FullProjection],
     as_of: date | None = None,
     data_through: date | None = None,
 ) -> pd.DataFrame:
@@ -54,6 +60,18 @@ def projections_table(
             "refused_reason": d["refused_reason"],
             "note": d.get("note"),
             "reliability": d.get("reliability", 0),
+            # Canonical extension
+            "p10": d.get("p10"),
+            "p25": d.get("p25"),
+            "p50": d.get("p50"),
+            "p75": d.get("p75"),
+            "p90": d.get("p90"),
+            "pred_sd": d.get("pred_sd"),
+            "effective_sample_size": d.get("effective_sample_size"),
+            "confidence_score": d.get("confidence_score"),
+            "role_factor": d.get("role_factor"),
+            "recent_form_factor": d.get("recent_form_factor"),
+            "warnings": json.dumps(d["warnings"]) if d.get("warnings") else None,
         })
     return pd.DataFrame(rows, columns=TABLE_COLUMNS)
 

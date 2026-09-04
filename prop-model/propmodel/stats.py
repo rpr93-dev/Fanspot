@@ -23,6 +23,8 @@ class StatSpec:
     columns: tuple[str, ...]
     positions: tuple[str, ...]
     kind: str  # "continuous" | "count"
+    opportunity_columns: tuple[str, ...] = ()  # columns driving volume (targets, carries, attempts)
+    efficiency_denominator: str | None = None  # column to divide value by for per-opportunity efficiency
 
 
 STATS: dict[str, StatSpec] = {
@@ -33,6 +35,8 @@ STATS: dict[str, StatSpec] = {
         columns=("passing_yards",),
         positions=("QB",),
         kind="continuous",
+        opportunity_columns=("attempts",),
+        efficiency_denominator="attempts",
     ),
     "rushing_yards": StatSpec(
         key="rushing_yards",
@@ -41,6 +45,8 @@ STATS: dict[str, StatSpec] = {
         columns=("rushing_yards",),
         positions=("RB", "QB"),
         kind="continuous",
+        opportunity_columns=("carries",),
+        efficiency_denominator="carries",
     ),
     "receiving_yards": StatSpec(
         key="receiving_yards",
@@ -49,6 +55,8 @@ STATS: dict[str, StatSpec] = {
         columns=("receiving_yards",),
         positions=("WR", "TE", "RB"),
         kind="continuous",
+        opportunity_columns=("targets",),
+        efficiency_denominator="targets",
     ),
     "receptions": StatSpec(
         key="receptions",
@@ -57,6 +65,8 @@ STATS: dict[str, StatSpec] = {
         columns=("receptions",),
         positions=("WR", "TE", "RB"),
         kind="continuous",
+        opportunity_columns=("targets",),
+        efficiency_denominator="targets",
     ),
     # "Anytime TD": sum the TD columns that exist for the player. A QB accumulates
     # passing (and occasionally rushing) TDs; a WR only receiving. Treating a
