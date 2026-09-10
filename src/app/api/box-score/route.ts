@@ -183,8 +183,15 @@ export async function GET(request: Request) {
           displayName: t.team?.displayName ?? '',
           logo: t.team?.logo ?? '',
           homeAway: headerComp?.homeAway ?? '',
-          score: headerComp?.score
-            ? { displayValue: headerComp.score.displayValue ?? '' }
+          // ESPN shape varies: summary header uses a plain string ("0"),
+          // other endpoints use { displayValue }. Normalize to { displayValue }.
+          score: headerComp?.score != null && headerComp.score !== ''
+            ? {
+                displayValue:
+                  typeof headerComp.score === 'object'
+                    ? (headerComp.score.displayValue ?? '')
+                    : String(headerComp.score),
+              }
             : undefined,
           linescores,
           statistics: flattenTeamStats(t.statistics ?? []).filter(s =>

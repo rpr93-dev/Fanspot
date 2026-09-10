@@ -157,8 +157,12 @@ function getScore(event: EspnEvent, teamAbbr: string): string {
   const competitors = event.competitions?.[0]?.competitors ?? []
   const team = competitors.find((c) => c.team.abbreviation === teamAbbr)
   const opp = competitors.find((c) => c.team.abbreviation !== teamAbbr)
-  if (!team?.score?.displayValue || !opp?.score?.displayValue) return ''
-  return `${team.score.displayValue}-${opp.score.displayValue}`
+  // ESPN score shape varies: plain string ("0") vs { displayValue }.
+  const disp = (s: any): string => (s == null ? '' : (typeof s === 'object' ? (s.displayValue ?? '') : String(s)))
+  const a = disp(team?.score)
+  const b = disp(opp?.score)
+  if (!a || !b) return ''
+  return `${a}-${b}`
 }
 
 function getResult(event: EspnEvent, teamAbbr: string): 'W' | 'L' {
@@ -996,10 +1000,11 @@ function LiveScoreHeader({ liveBoxScore, upcoming, teamColor }: { liveBoxScore: 
   const home = bsTeams.find((t: any) => t.homeAway === 'home') ?? null
   const away = bsTeams.find((t: any) => t.homeAway === 'away') ?? null
   const status = liveBoxScore?.status?.shortDetail ?? liveBoxScore?.status?.description ?? upcoming?.statusDetail ?? 'Live'
+  const nonEmpty = (v: any): string | null => (v == null || v === '' ? null : String(v))
   const awayAbbr = away?.abbreviation ?? upcoming?.awayAbbr ?? 'Away'
   const homeAbbr = home?.abbreviation ?? upcoming?.homeAbbr ?? 'Home'
-  const awayScore = away?.score?.displayValue ?? upcoming?.awayScore ?? null
-  const homeScore = home?.score?.displayValue ?? upcoming?.homeScore ?? null
+  const awayScore = nonEmpty(away?.score?.displayValue) ?? nonEmpty(upcoming?.awayScore)
+  const homeScore = nonEmpty(home?.score?.displayValue) ?? nonEmpty(upcoming?.homeScore)
 
   return (
     <div className="fs-panel p-4 sm:p-5 mb-5 animate-fade-in-up" style={{ '--tint': teamColor, '--tint-border': `${teamColor}26`, '--card-color': teamColor } as React.CSSProperties}>
@@ -1273,8 +1278,11 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
     if (isLive && comp?.competitors) {
       const home = comp.competitors.find(c => c.homeAway === 'home')
       const away = comp.competitors.find(c => c.homeAway === 'away')
-      homeScore = home?.score?.displayValue
-      awayScore = away?.score?.displayValue
+      // ESPN score shape varies: plain string ("0") vs { displayValue }.
+      const normScore = (s: any): string | undefined =>
+        s == null || s === '' ? undefined : (typeof s === 'object' ? (s.displayValue ?? undefined) : String(s))
+      homeScore = normScore(home?.score)
+      awayScore = normScore(away?.score)
       homeAbbr = home?.team?.abbreviation
       awayAbbr = away?.team?.abbreviation
     }
