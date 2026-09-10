@@ -298,6 +298,7 @@ export default function NextGamePanel({
   const [modelError, setModelError] = useState<string | null>(null)
   const [modelRunDate, setModelRunDate] = useState<string | null>(null)
   const [prevModelDataThrough, setPrevModelDataThrough] = useState<string | null>(null)
+  const [showScraper, setShowScraper] = useState(false)
 
   // Starter name sets — only project starters (not depth-chart backups).
   const ourStarterNames = useMemo(() => {
@@ -941,25 +942,7 @@ export default function NextGamePanel({
       {sport.toUpperCase() === 'NFL' && (ourProjected.length > 0 || oppProjected.length > 0) && (
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center gap-3">
-              <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Scraper</p>
-              {scraperLoading ? (
-                <span className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ backgroundColor: `${teamColor}20`, color: teamColor }}>
-                  ⏳ Auto-scraping…
-                </span>
-              ) : scraperData ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-fs-green font-medium">✓ Scraped {scraperData.totalProps || 0} props</span>
-                  <span className="text-xs text-fs-muted-2">
-                    {scraperData.scrapeTime ? new Date(scraperData.scrapeTime).toLocaleTimeString() : ''}
-                  </span>
-                </div>
-              ) : scraperError ? (
-                <span className="text-xs text-fs-red">⚠ {scraperError}</span>
-              ) : (
-                <span className="text-xs text-fs-muted-2">Scraping next game…</span>
-              )}
-            </div>
+            <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Prop Model</p>
             <div>
             {modelLoading ? (
               <span className="text-xs font-semibold px-4 py-2 rounded-lg shadow-sm" style={{ backgroundColor: `${teamColor}20`, color: teamColor }}>
@@ -986,40 +969,6 @@ export default function NextGamePanel({
             )}
             </div>
           </div>
-          
-          {/* Scraper results */}
-          {scraperError && (
-            <div className="mb-3 rounded-lg p-3 text-sm" style={{ backgroundColor: '#fecaca20', border: '1px solid #f8717130' }}>
-              <span className="text-fs-red">{scraperError}</span>
-            </div>
-          )}
-          
-          {scraperData && scraperData.results && (
-            <div className="mb-3 rounded-lg p-3 text-xs" style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}16` }}>
-              <p className="font-medium mb-1">Scraped from {Object.keys(scraperData.results || {}).length} sportsbooks:</p>
-              {Object.entries(scraperData.results || {}).map(([book, data]: [string, any]) => (
-                <div key={book} className="flex items-center gap-2 mb-1">
-                  <span className="font-medium capitalize">{book}:</span>
-                  <span>{data.count || 0} props</span>
-                  {data.error && (
-                    <span className="text-fs-muted-2 truncate" title={data.error}>
-                      · {data.error}
-                    </span>
-                  )}
-                  {data.timestamp && (
-                    <span className="text-fs-muted-2 ml-auto">
-                      {new Date(data.timestamp).toLocaleTimeString()}
-                    </span>
-                  )}
-                </div>
-              ))}
-              {(scraperData.totalProps ?? 0) === 0 && (
-                <p className="text-fs-muted-2 mt-1">
-                  No lines came back — books block datacenter IPs and the free fallback found nothing. Set ODDS_API_KEY for Odds API lines.
-                </p>
-              )}
-            </div>
-          )}
           
           <p className="text-xs text-fs-muted-2 mb-2">
             {modelResults
@@ -1243,6 +1192,69 @@ export default function NextGamePanel({
           ) : modelResults && modelResults.length === 0 ? (
             <p className="text-sm text-fs-muted-2">No projections returned.</p>
           ) : null}
+
+          {/* Scraped sportsbook lines — collapsed by default */}
+          <div className="mt-2 rounded-lg overflow-hidden" style={{ border: `1px solid ${teamColor}16` }}>
+            <button
+              onClick={() => setShowScraper((v) => !v)}
+              className="hover-bright w-full flex items-center justify-between gap-2 px-3 py-2 text-xs"
+              style={{ backgroundColor: `${teamColor}08`, '--card-color': teamColor } as React.CSSProperties}
+            >
+              <span className="text-fs-muted">
+                {scraperLoading ? (
+                  'Scraping lines…'
+                ) : scraperData ? (
+                  <>Scraped lines · <span className="font-mono text-fs-text">{scraperData.totalProps || 0} props</span> · {Object.keys(scraperData.results || {}).length} books</>
+                ) : scraperError ? (
+                  <span className="text-fs-red">Scraped lines · failed</span>
+                ) : (
+                  'Scraped lines'
+                )}
+              </span>
+              <span className="text-fs-muted-2">{showScraper ? '▾' : '▸'}</span>
+            </button>
+            {showScraper && (
+              <div className="px-3 py-2 text-xs" style={{ borderTop: `1px solid ${teamColor}12` }}>
+                {scraperLoading ? (
+                  <span className="text-fs-muted-2">⏳ Auto-scraping…</span>
+                ) : scraperData ? (
+                  <>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <span className="text-fs-green font-medium">✓ Scraped {scraperData.totalProps || 0} props</span>
+                      <span className="text-fs-muted-2">
+                        {scraperData.scrapeTime ? new Date(scraperData.scrapeTime).toLocaleTimeString() : ''}
+                      </span>
+                    </div>
+                    {Object.entries(scraperData.results || {}).map(([book, data]: [string, any]) => (
+                      <div key={book} className="flex items-center gap-2 mb-1">
+                        <span className="font-medium capitalize">{book}:</span>
+                        <span>{data.count || 0} props</span>
+                        {data.error && (
+                          <span className="text-fs-muted-2 truncate" title={data.error}>
+                            · {data.error}
+                          </span>
+                        )}
+                        {data.timestamp && (
+                          <span className="text-fs-muted-2 ml-auto">
+                            {new Date(data.timestamp).toLocaleTimeString()}
+                          </span>
+                        )}
+                      </div>
+                    ))}
+                    {(scraperData.totalProps ?? 0) === 0 && (
+                      <p className="text-fs-muted-2 mt-1">
+                        No lines came back — books block datacenter IPs and the free fallback found nothing. Set ODDS_API_KEY for Odds API lines.
+                      </p>
+                    )}
+                  </>
+                ) : scraperError ? (
+                  <span className="text-fs-red">{scraperError}</span>
+                ) : (
+                  <span className="text-fs-muted-2">Scraping next game…</span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

@@ -680,16 +680,24 @@ export default function TeamDashboard() {
           />
         ) : selectedGameId ? (
           <>
-            <div className="mb-5">
-              <LastFiveTiles
-                games={data?.lastFive ?? []}
-                selectedId={selectedGameId}
-                onSelect={(id) => setSelectedGameId(id === selectedGameId ? null : id)}
+            {isLiveGame && selectedGameId === liveGameIdRef.current && data?.upcoming?.eventId === selectedGameId ? (
+              <LiveScoreHeader
+                liveBoxScore={liveBoxScore}
+                upcoming={data?.upcoming}
                 teamColor={team.colors.primary}
-                standing={data?.teamStanding}
-                loading={loading}
               />
-            </div>
+            ) : (
+              <div className="mb-5">
+                <LastFiveTiles
+                  games={data?.lastFive ?? []}
+                  selectedId={selectedGameId}
+                  onSelect={(id) => setSelectedGameId(id === selectedGameId ? null : id)}
+                  teamColor={team.colors.primary}
+                  standing={data?.teamStanding}
+                  loading={loading}
+                />
+              </div>
+            )}
             <BoxScorePanel
               data={boxScoreData}
               loading={boxScoreLoading}
@@ -981,6 +989,46 @@ function prettifyName(name: string): string {
     .replace(/([a-z])([A-Z])/g, '$1 $2')
     .replace(/^./, (s) => s.toUpperCase())
     .trim()
+}
+
+function LiveScoreHeader({ liveBoxScore, upcoming, teamColor }: { liveBoxScore: any; upcoming: any; teamColor: string }) {
+  const bsTeams: any[] = liveBoxScore?.teams ?? []
+  const home = bsTeams.find((t: any) => t.homeAway === 'home') ?? null
+  const away = bsTeams.find((t: any) => t.homeAway === 'away') ?? null
+  const status = liveBoxScore?.status?.shortDetail ?? liveBoxScore?.status?.description ?? upcoming?.statusDetail ?? 'Live'
+  const awayAbbr = away?.abbreviation ?? upcoming?.awayAbbr ?? 'Away'
+  const homeAbbr = home?.abbreviation ?? upcoming?.homeAbbr ?? 'Home'
+  const awayScore = away?.score?.displayValue ?? upcoming?.awayScore ?? null
+  const homeScore = home?.score?.displayValue ?? upcoming?.homeScore ?? null
+
+  return (
+    <div className="fs-panel p-4 sm:p-5 mb-5 animate-fade-in-up" style={{ '--tint': teamColor, '--tint-border': `${teamColor}26`, '--card-color': teamColor } as React.CSSProperties}>
+      <div className="flex items-center justify-center gap-2 mb-3">
+        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-bold tracking-wider bg-fs-red/15 text-fs-red">
+          <span className="w-1.5 h-1.5 rounded-full bg-fs-red animate-pulse" />
+          LIVE
+        </span>
+        <span className="text-xs sm:text-sm text-fs-muted">{status}</span>
+      </div>
+      {awayScore != null && homeScore != null ? (
+        <div className="flex items-center justify-center gap-5 sm:gap-8">
+          <div className="flex items-center gap-2.5">
+            {away?.logo && <img src={away.logo} alt="" className="w-8 h-8 object-contain" />}
+            <span className="text-sm font-medium text-fs-muted">{awayAbbr}</span>
+            <span className="text-3xl sm:text-4xl font-bold font-mono text-fs-text tabular-nums">{awayScore}</span>
+          </div>
+          <span className="text-2xl text-fs-muted-2">-</span>
+          <div className="flex items-center gap-2.5">
+            <span className="text-3xl sm:text-4xl font-bold font-mono text-fs-text tabular-nums">{homeScore}</span>
+            <span className="text-sm font-medium text-fs-muted">{homeAbbr}</span>
+            {home?.logo && <img src={home.logo} alt="" className="w-8 h-8 object-contain" />}
+          </div>
+        </div>
+      ) : (
+        <div className="animate-pulse flex justify-center"><div className="fs-skeleton h-10 w-48" /></div>
+      )}
+    </div>
+  )
 }
 
 function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBack }: { data: any; loading: boolean; teamAbbr: string; teamColor: string; sport: string; isLive?: boolean; onBack: () => void }) {
