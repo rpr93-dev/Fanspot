@@ -1,7 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { eventDateToAsOf, extractLiveStats, quartersPlayed, isGameComplete } from '@/lib/propLedger'
+import { eventDateToAsOf, extractLiveStats, quartersPlayed, isGameComplete, namesMatch } from '@/lib/propLedger'
+import { isOutTier, parseRosterInjuries, teamQbs } from '@/lib/injury'
 
 interface PropLine {
   market: string
@@ -57,6 +58,7 @@ interface StarterPlayer {
 interface Starter {
   pos: string
   player: StarterPlayer | null
+  contender?: { playerId: number; name: string } | null
   unsettled?: boolean
   reason?: string
 }
@@ -300,6 +302,22 @@ export default function NextGamePanel({
   const [prevModelDataThrough, setPrevModelDataThrough] = useState<string | null>(null)
   const [showScraper, setShowScraper] = useState(false)
 
+  // ---- Injury awareness ----
+  const [rosterInjuries, setRosterInjuries] = useState<{ name: string; status: string; date: string | null }[] | null>(null)
+  const [backupProjections, setBackupProjections] = useState<ModelProjection[] | null>(null)
+  const [backupLoading, setBackupLoading] = useState(false)
+  // Mid-game QB tracking: refs hold cross-poll state, exits are useState so
+  // the table re-renders (derived fresh every live poll — never latched, so a
+  // returning starter swaps straight back in).
+  const [exitedQbs, setExitedQbs] = useState<Record<string, { backup: string; quarter: number; teamEspn: string }>>({})
+  const exitedQbsRef = useRef<Record<string, { backup: string; quarter: number; teamEspn: string }>>({})
+  const prevQbAttemptsRef = useRef<Map<string, number>>(new Map())
+  const activeQbRef = useRef<Map<string, string>>(new Map())
+  const stallRef = useRef<Map<string, number>>(new Map())
+  const backupProjectedRef = useRef<string | null>(null)
+  const backupInflightRef = useRef(false)
+  const lastSubSigRef = useRef<string | null>(null)
+
   // Starter name sets — only project starters (not depth-chart backups).
   const ourStarterNames = useMemo(() => {
     const s = new Set<string>()
@@ -329,26 +347,48 @@ export default function NextGamePanel({
     opp: (opponentFantasyAbbr || opponentAbbr || '').toUpperCase(),
   })
 
-  const buildTargets = (): { player: string; stat: string; team: string; opponent: string; prior?: number }[] => {
+  // Effective lineup: pre-game Out starters are auto-swapped for their
+  // depth-chart contender (any position). Works for every team — the swap is
+  // driven by the outlook's injuryTier + contender, never by names.
+  const effectiveLineup = useMemo(() => {
+    const lineup: { slotPos: string; starterName: string; effectiveName: string; team: string; opponent: string; substituteFor?: string }[] = []
     const codes = modelTeamCodes()
-    const out: { player: string; stat: string; team: string; opponent: string; prior?: number }[] = []
-    const add = (players: { name: string; position: string }[], team: string, opponent: string) => {
-      for (const p of players) {
-        // Only model confirmed starters (not backups).
-        const ourTeam = team === codes.our
-        const starterSet = ourTeam ? ourStarterNames : oppStarterNames
-        if (!starterSet.has(p.name)) continue
-        // One target per modeled market (yards + receptions + TDs).
-        for (const stat of statForPos(p.position)) {
-          // ESPN projected line as a prior: used by the model to blend when
-          // NFL history is thin (rookie / < 2× min_games).
-          const prior = espnLineFor(p.name, stat)
-          out.push({ player: p.name, stat, team, opponent, prior: prior ?? undefined })
-        }
+    const add = (starters: Starter[] | null, team: string, opponent: string) => {
+      for (const st of (starters ?? [])) {
+        if (!st.player || st.unsettled) continue
+        const sub = isOutTier(st.player.injuryTier) && st.contender?.name ? st.contender.name : null
+        lineup.push({
+          slotPos: st.pos,
+          starterName: st.player.name,
+          effectiveName: sub ?? st.player.name,
+          team,
+          opponent,
+          ...(sub ? { substituteFor: st.player.name } : {}),
+        })
       }
     }
-    add(ourProjected, codes.our, codes.opp)
-    add(oppProjected, codes.opp, codes.our)
+    add(ourStarters, codes.our, codes.opp)
+    add(oppStarters, codes.opp, codes.our)
+    return lineup
+  }, [ourStarters, oppStarters, teamFantasyAbbr, opponentFantasyAbbr, teamAbbr, opponentAbbr])
+
+  const effectiveNames = useMemo(
+    () => new Set(effectiveLineup.map((s) => s.effectiveName)),
+    [effectiveLineup],
+  )
+
+  const buildTargets = (): { player: string; stat: string; team: string; opponent: string; prior?: number }[] => {
+    const out: { player: string; stat: string; team: string; opponent: string; prior?: number }[] = []
+    // One target per modeled market; slot position drives the markets so a
+    // swapped-in contender (absent from ESPN projections) still gets lines.
+    for (const slot of effectiveLineup) {
+      for (const stat of statForPos(slot.slotPos)) {
+        // ESPN projected line as a prior: used by the model to blend when
+        // NFL history is thin (rookie / < 2× min_games).
+        const prior = espnLineFor(slot.effectiveName, stat)
+        out.push({ player: slot.effectiveName, stat, team: slot.team, opponent: slot.opponent, prior: prior ?? undefined })
+      }
+    }
     return out
   }
 
@@ -440,20 +480,56 @@ export default function NextGamePanel({
     return () => { cancelled = true }
   }, [sport, eventDate, teamFantasyAbbr, opponentFantasyAbbr])
 
+  // Roster injury feed (ESPN): live mid-game statuses (Questionable/Out with
+  // today's date) for exit detection. ~350KB per team — only fetch when it can
+  // matter: live games or kickoff within ±2 days.
+  useEffect(() => {
+    if (sport.toUpperCase() !== 'NFL' || !eventDate || !/^\d{8}$/.test(eventDate)) return
+    const dayMs = 24 * 60 * 60 * 1000
+    const now = new Date()
+    const todayUtc = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())
+    const gameUtc = Date.UTC(+eventDate.slice(0, 4), +eventDate.slice(4, 6) - 1, +eventDate.slice(6, 8))
+    const daysOut = (gameUtc - todayUtc) / dayMs
+    if (!isLive && (daysOut > 2 || daysOut < -1)) return
+    let cancelled = false
+    ;(async () => {
+      try {
+        const abbrs = [teamAbbr, opponentAbbr].filter(Boolean)
+        const results = await Promise.all(abbrs.map(async (abbr) => {
+          const res = await fetch(`/api/roster?sport=NFL&team=${abbr}`, { signal: AbortSignal.timeout(20000) })
+          if (!res.ok) return []
+          return parseRosterInjuries(await res.json().catch(() => null))
+        }))
+        if (!cancelled) setRosterInjuries(results.flat())
+      } catch {
+        if (!cancelled) setRosterInjuries([])
+      }
+    })()
+    return () => { cancelled = true }
+  }, [sport, eventDate, isLive, teamAbbr, opponentAbbr])
+
+  // Latest roster injury flag for a player (fuzzy name match).
+  const rosterFlagFor = (name: string): { status: string; date: string | null } | null => {
+    if (!rosterInjuries?.length) return null
+    const hit = rosterInjuries.find((r) => namesMatch(r.name, name))
+    return hit ? { status: hit.status, date: hit.date } : null
+  }
+
   // Save the pre-game projection snapshot (skipped when one already exists).
   const recordPreSnapshot = (projs: ModelProjection[]) => {
     if (!eventDate || !projs.length || ledger?.pre) return
     try {
       const [t1, t2] = ledgerPair()
-      const codes = modelTeamCodes()
-      const teamFor = (name: string) =>
-        (ourProjected.some((p) => p.name === name) ? codes.our : codes.opp)
+      const slotFor = (name: string) => effectiveLineup.find((s) => s.effectiveName === name)
+      const teamFor = (name: string) => slotFor(name)?.team ?? modelTeamCodes().opp
+      const subFor = (name: string) => slotFor(name)?.substituteFor ?? null
       const rows = projs.map((r) => {
         const scraped = scrapedLineFor(r.player, r.stat)
         const edge = scraped ? computeOverUnderEdge(r.projection, r.pred_sd ?? null, scraped.line) : null
         return {
           ...r,
           team: teamFor(r.player),
+          substituteFor: subFor(r.player),
           line: scraped?.line ?? null,
           book: scraped?.book ?? null,
           over: scraped?.over ?? null,
@@ -521,12 +597,13 @@ export default function NextGamePanel({
 
   // ---- Live comparison: model snapshot vs ESPN box score ----
   const liveStats = useMemo(() => {
-    if (!isLive || !liveBoxScore || !(modelResults ?? []).length) return null
-    const names = Array.from(new Set((modelResults ?? []).map((r) => r.player))).map((name) => ({ name }))
+    const allRows = [...(modelResults ?? []), ...(backupProjections ?? [])]
+    if (!isLive || !liveBoxScore || !allRows.length) return null
+    const names = Array.from(new Set(allRows.map((r) => r.player))).map((name) => ({ name }))
     try {
       return extractLiveStats(liveBoxScore, names)
     } catch { return null }
-  }, [isLive, liveBoxScore, modelResults])
+  }, [isLive, liveBoxScore, modelResults, backupProjections])
   const liveQuarters = liveBoxScore ? quartersPlayed(liveBoxScore) : 0
   const gameFinal = liveBoxScore ? isGameComplete(liveBoxScore) : false
   const liveStatusLabel = liveBoxScore?.status?.shortDetail ?? liveBoxScore?.status?.description ?? null
@@ -541,13 +618,25 @@ export default function NextGamePanel({
     const points = Array.isArray(ledger?.live) ? ledger.live : []
     const maxQ = points.reduce((m: number, p: any) => Math.max(m, p?.quarters ?? 0), 0)
     const hasFinal = points.some((p: any) => p?.final)
-    if (!(liveQuarters > maxQ || (gameFinal && !hasFinal))) return
+    const codes = modelTeamCodes()
+    const subs = Object.entries(exitedQbs).map(([out, e]) => ({
+      team: e.teamEspn === teamAbbr ? codes.our : codes.opp,
+      out,
+      in: e.backup,
+      quarter: e.quarter,
+    }))
+    const subSig = JSON.stringify(subs)
+    const subChanged = subs.length > 0 && subSig !== lastSubSigRef.current
+    if (!(liveQuarters > maxQ || (gameFinal && !hasFinal) || subChanged)) return
+    lastSubSigRef.current = subSig
     const point = {
       quarters: liveQuarters,
       state: liveBoxScore?.status?.state ?? null,
       clock: liveStatusLabel,
       ...(gameFinal ? { final: true } : {}),
       rows: liveStats,
+      ...(subs.length ? { substitutions: subs } : {}),
+      ...(backupProjections?.length ? { backupProjections } : {}),
     }
     fetch('/api/prop-ledger', {
       method: 'POST',
@@ -562,7 +651,106 @@ export default function NextGamePanel({
         }
       })
       .catch(() => {})
-  }, [isLive, liveBoxScore, liveStats, ledgerChecked, ledger, liveQuarters, gameFinal, eventDate])
+  }, [isLive, liveBoxScore, liveStats, ledgerChecked, ledger, liveQuarters, gameFinal, eventDate, exitedQbs, backupProjections, teamAbbr])
+
+  // Project a mid-game backup QB through the same pipeline (single-target
+  // run; no ESPN prior for backups, so the model leans on position history —
+  // correctly low confidence). Runs at most once per backup per game view.
+  const runBackupProjection = async (backupName: string, teamCode: string, oppCode: string) => {
+    if (backupInflightRef.current || backupProjectedRef.current === backupName) return
+    backupInflightRef.current = true
+    setBackupLoading(true)
+    try {
+      const targets = MARKETS_FOR_POS.QB.map((stat) => {
+        const prior = espnLineFor(backupName, stat)
+        return { player: backupName, stat, team: teamCode, opponent: oppCode, prior: prior ?? undefined }
+      })
+      const res = await fetch('/api/prop-model', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets, lines: buildLines(), preseason: !!isPreseason, eventDate }),
+        signal: AbortSignal.timeout(180000),
+      })
+      const json = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(json.error ?? `Model API returned ${res.status}`)
+      const projs = Array.isArray(json.projections) ? json.projections : []
+      // Only keep the rows if this backup is still the one under center.
+      if (Object.values(exitedQbsRef.current).some((e) => e.backup === backupName)) {
+        backupProjectedRef.current = backupName
+        setBackupProjections(projs)
+      }
+    } catch {
+      // Silent: the backup's accumulating live stats still show in the table.
+    } finally {
+      backupInflightRef.current = false
+      setBackupLoading(false)
+    }
+  }
+
+  // Mid-game QB substitution tracking — fully derived every live poll, for
+  // every team, so a returning starter swaps straight back in:
+  //  - active QB = whoever's attempts grew since the last poll (sticky).
+  //  - EXITED when another QB has held the job 2+ polls AND the starter has
+  //    a roster injury flag, or never threw while the backup has 8+ attempts
+  //    past Q1 (surprise scratch). Garbage-time mop-up without an injury
+  //    flag does NOT trigger — both QBs' live numbers just show.
+  //  - swap-back the moment the starter's attempts move again.
+  useEffect(() => {
+    if (!isLive || !liveBoxScore || sport.toUpperCase() !== 'NFL') return
+    const codes = modelTeamCodes()
+    const next: Record<string, { backup: string; quarter: number; teamEspn: string }> = { ...exitedQbsRef.current }
+    let mutated = false
+    for (const slot of effectiveLineup) {
+      if (slot.slotPos !== 'QB') continue
+      const espnTeam = slot.team === codes.our ? teamAbbr : opponentAbbr
+      if (!espnTeam) continue
+      const qbs = teamQbs(liveBoxScore, espnTeam)
+      if (!qbs.length) continue
+      const byName = new Map(qbs.map((q) => [q.name, q]))
+      const starter = byName.get(slot.effectiveName)
+        ?? qbs.find((q) => namesMatch(q.name, slot.effectiveName)) ?? null
+      const starterName = starter?.name ?? slot.effectiveName
+      const prevActive = activeQbRef.current.get(espnTeam)
+      let mover: string | null = null
+      for (const q of qbs) {
+        const prev = prevQbAttemptsRef.current.get(q.name) ?? 0
+        if (q.attempts > prev) mover = q.name
+        prevQbAttemptsRef.current.set(q.name, q.attempts)
+      }
+      if (mover && mover !== prevActive) {
+        activeQbRef.current.set(espnTeam, mover)
+      }
+      const active = activeQbRef.current.get(espnTeam)
+        ?? (starter ? starterName : qbs[0].name)
+      if (!activeQbRef.current.get(espnTeam)) activeQbRef.current.set(espnTeam, active)
+      stallRef.current.set(starterName, active === starterName ? 0 : (stallRef.current.get(starterName) ?? 0) + 1)
+      const stall = stallRef.current.get(starterName) ?? 0
+
+      // Swap-back: the starter is throwing again.
+      if (next[starterName] && mover === starterName) {
+        delete next[starterName]
+        mutated = true
+        continue
+      }
+      if (next[starterName]) continue // still out; backup already handled
+      const flag = rosterFlagFor(starterName)
+      const starterAtt = starter?.attempts ?? 0
+      const activeQb = byName.get(active) ?? qbs.find((q) => namesMatch(q.name, active)) ?? null
+      const injuryExit = !!flag && active !== starterName && stall >= 2
+      const scratchExit = starterAtt === 0 && (activeQb?.attempts ?? 0) >= 8 && liveQuarters >= 2 && active !== starterName
+      if ((injuryExit || scratchExit) && active) {
+        next[starterName] = { backup: active, quarter: liveQuarters, teamEspn: espnTeam }
+        mutated = true
+        const teamCode = slot.team
+        const oppCode = slot.opponent
+        void runBackupProjection(active, teamCode, oppCode)
+      }
+    }
+    if (mutated) {
+      exitedQbsRef.current = next
+      setExitedQbs(next)
+    }
+  }, [isLive, liveBoxScore, rosterInjuries, effectiveLineup, sport, teamAbbr, opponentAbbr])
 
   // Scraped prop line for a model row: matches Action Network/Odds API props by
   // normalized player name + exact stat. Only real over/under lines qualify —
@@ -630,15 +818,18 @@ export default function NextGamePanel({
   }
 
   // Sort model rows QB → RB → WR → TE (same order as the player-lines tables),
-  // using the ESPN projection positions the targets were built from.
+  // using the ESPN projection positions the targets were built from, falling
+  // back to the lineup slot (covers swapped-in contenders).
   const posFor = (name: string): number => {
-    const p = props?.projections?.find((x) => x.name === name)?.position ?? ''
+    const p = props?.projections?.find((x) => x.name === name)?.position
+      ?? effectiveLineup.find((s) => s.effectiveName === name)?.slotPos ?? ''
     const idx = POS_ORDER.indexOf(p.startsWith('WR') ? 'WR' : p)
     return idx === -1 ? 99 : idx
   }
   const sortedModel = [...(modelResults ?? [])].filter((r) => {
-    // Only show model results for confirmed starters.
-    return ourStarterNames.has(r.player) || oppStarterNames.has(r.player)
+    // Only show model results for the effective lineup (Out starters are
+    // replaced by their contender before the run).
+    return effectiveNames.has(r.player)
   }).sort((a, b) => posFor(a.player) - posFor(b.player) || a.player.localeCompare(b.player))
 
   // ESPN line coverage per player: how many stats the player has ESPN projections for
@@ -661,7 +852,7 @@ export default function NextGamePanel({
   // Group by player for the "player + sub-lines" view requested — one player header
   // with its modeled markets (yards / receptions / TDs) as sub-rows.
   const groupedModel: { player: string; rows: ModelProjection[] }[] = (() => {
-    if (!sortedModel.length) return []
+    if (!sortedModel.length && !(backupProjections ?? []).length) return []
     const map = new Map<string, ModelProjection[]>()
     for (const r of sortedModel) {
       const list = map.get(r.player)
@@ -672,7 +863,16 @@ export default function NextGamePanel({
     const seen = new Set<string>()
     const ordered: string[] = []
     for (const r of sortedModel) if (!seen.has(r.player)) { seen.add(r.player); ordered.push(r.player) }
-    return ordered.map((player) => ({ player, rows: map.get(player)! }))
+    const groups = ordered.map((player) => ({ player, rows: map.get(player)! }))
+    // Splice mid-game backup projections directly after the exited starter.
+    for (const [starter, exit] of Object.entries(exitedQbs)) {
+      const rows = (backupProjections ?? []).filter((r) => r.player === exit.backup)
+      if (!rows.length || groups.some((g) => g.player === exit.backup)) continue
+      const idx = groups.findIndex((g) => g.player === starter)
+      if (idx >= 0) groups.splice(idx + 1, 0, { player: exit.backup, rows })
+      else groups.push({ player: exit.backup, rows })
+    }
+    return groups
   })()
 
   // Data-vintage stamp from the model (max gameday in its input frame) — the
@@ -993,6 +1193,7 @@ export default function NextGamePanel({
                 ) : (
                   <span> · locking pre-game snapshot…</span>
                 )}
+                {backupLoading ? <span> · projecting backup…</span> : null}
               </>
             ) : null}
           </p>
@@ -1051,8 +1252,37 @@ export default function NextGamePanel({
                             >
                               <span className="font-medium text-fs-text/90">{group.player}</span>
                               <span className="block text-[10px] text-fs-muted-2">
-                                {props?.projections?.find((x) => x.name === group.player)?.position ?? ''}
+                                {props?.projections?.find((x) => x.name === group.player)?.position
+                                  ?? effectiveLineup.find((s) => s.effectiveName === group.player)?.slotPos
+                                  ?? (Object.values(exitedQbs).some((e) => e.backup === group.player) ? 'QB' : '')}
                               </span>
+                              {(() => {
+                                const isOut = !!exitedQbs[group.player]
+                                const isBackup = Object.values(exitedQbs).some((e) => e.backup === group.player)
+                                const sub = effectiveLineup.find((s) => s.effectiveName === group.player)?.substituteFor
+                                const flag = rosterFlagFor(group.player)
+                                if (!isOut && !isBackup && !sub && !flag) return null
+                                return (
+                                  <span className="mt-0.5 flex flex-wrap gap-1">
+                                    {isOut ? (
+                                      <span className="px-1.5 py-px rounded text-[10px] font-bold bg-fs-red/15 text-fs-red">EXITED</span>
+                                    ) : null}
+                                    {isBackup ? (
+                                      <span className="px-1.5 py-px rounded text-[10px] font-bold bg-fs-turf/15 text-fs-turf">IN · BACKUP</span>
+                                    ) : null}
+                                    {sub && !isBackup ? (
+                                      <span className="px-1.5 py-px rounded text-[10px] text-fs-gold bg-fs-gold/15" title={`Starting for ${sub} (out)`}>
+                                        FOR {sub.split(' ').pop()?.toUpperCase()}
+                                      </span>
+                                    ) : null}
+                                    {flag ? (
+                                      <span className="px-1.5 py-px rounded text-[10px] text-fs-muted bg-white/5" title={`${flag.status}${flag.date ? ` · ${flag.date}` : ''}`}>
+                                        {flag.status.toUpperCase().slice(0, 4)}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                )
+                              })()}
                             </td>
                           ) : null}
                           <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted" title={r.note ?? undefined}>
