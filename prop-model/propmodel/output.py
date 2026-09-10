@@ -71,7 +71,9 @@ def projections_table(
             "confidence_score": d.get("confidence_score"),
             "role_factor": d.get("role_factor"),
             "recent_form_factor": d.get("recent_form_factor"),
-            "warnings": json.dumps(d["warnings"]) if d.get("warnings") else None,
+            # Native list: the JSON writer serializes it as an array for the
+            # dashboard. The CSV branch stringifies it (see write_table).
+            "warnings": d.get("warnings") or None,
         })
     return pd.DataFrame(rows, columns=TABLE_COLUMNS)
 
@@ -86,7 +88,13 @@ def write_table(df: pd.DataFrame, path: str | Path) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
     if path.suffix.lower() == ".csv":
-        df.to_csv(tmp, index=False)
+        # Lists don't survive CSV round-trips: encode them as JSON strings so
+        # a CSV reader sees the same shape the JSON writer emits natively.
+        out = df.copy()
+        for col in out.columns:
+            if out[col].map(lambda v: isinstance(v, (list, dict))).any():
+                out[col] = out[col].map(lambda v: json.dumps(v) if isinstance(v, (list, dict)) else v)
+        out.to_csv(tmp, index=False)
     elif path.suffix.lower() == ".json":
         # NaN → null: Python's json module would otherwise emit bare `NaN`
         # tokens, which aren't valid JSON (the dashboard's JSON.parse rejects them).

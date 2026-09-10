@@ -1,8 +1,33 @@
-# Project agent memory
+# Fanspot Project Agent Memory
 
-This file is the project's committed home for project-intrinsic agent knowledge: build, test, release, architecture, and sharp-edge notes that should travel with the code.
+## ALWAYS USE GRAPHIFY FIRST
 
-- Add durable project-specific notes here as they are discovered through real work.
+This project uses [Graphify](https://github.com/Graphify-Labs/graphify) for codebase understanding. The knowledge graph is the authoritative source for architecture and code relationships.
+
+### If graphify is not installed:
+```bash
+uv tool install graphifyy
+graphify install --project --platform opencode
+```
+
+### After any code change:
+```bash
+graphify update .
+```
+
+### Always query the graph before grepping:
+- `graphify query "<question>"` — scoped subgraph for a question
+- `graphify path "<A>" "<B>"` — shortest path between two concepts
+- `graphify explain "<concept>"` — detailed node explanation with source locations
+
+### Files:
+- `graphify-out/graph.json` — full knowledge graph (query directly)
+- `graphify-out/GRAPH_REPORT.md` — architecture overview, god nodes, communities
+- `graphify-out/graph.html` — interactive visualization (open in browser)
+
+The graph is automatically rebuilt on `git commit` and `git checkout` via git hooks.
+
+---
 
 ## prop-model (Python)
 
@@ -16,6 +41,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - Cache entries from different vintages can carry different raw schemas (e.g. gameday native vs derived). Always `normalize_weekly` each entry BEFORE concatenating frames — concat-then-normalize poisons mixed-dtype columns with NaT (this bit the walk-forward gate loader).
 - As-of convention: `--as-of DATE` projects an event on DATE using strictly-prior data; internally the CLI subtracts one day and `fetch_player_history(as_of)` / `defense_allowed(as_of)` treat the cutoff as inclusive last-usable gameday.
 - Backtest/validation: `.venv/bin/python backtest.py --help` — walks a cached season as-of each week. Interval calibration constants (`model.CALIBRATED_SD_MULT_*`) were fitted on 2024+2025 walk-forwards; refit via the quantile method in the backtest if the interval formula changes (they were re-checked after the 2026-08 shrinkage retune: coverage 0.71 continuous / 0.72 count).
+- Game-day ledger: `prop-model/propmodel/ledger.py` + `prop-model-ledger.py` CLI (`pre`/`live`/`get`/`list`), data in git-ignored `prop-model/ledger/ledger.json`, served by `src/app/api/prop-ledger/route.ts`. NextGamePanel auto-runs the model once per game, saves the pre snapshot (model + book line + pick), then records one live point per quarter from the ESPN box score; the model table shows a Live/Final column vs the frozen snapshot. Client-safe stat parsing lives in `src/lib/propLedger.ts` — never import `@/lib/propModel` (it pulls in `child_process`) from a client component; `eventDateToAsOf` now lives in `propLedger.ts` and is re-exported by `propModel.ts`.
+
+---
 
 ## Maintaining this file
 

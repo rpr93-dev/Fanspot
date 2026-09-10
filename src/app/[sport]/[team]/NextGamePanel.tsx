@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { eventDateToAsOf, extractLiveStats, quartersPlayed, isGameComplete } from '@/lib/propLedger'
 
 interface PropLine {
   market: string
@@ -107,6 +108,42 @@ function formatPrice(p: number | null): string {
   return p > 0 ? `+${p}` : `${p}`
 }
 
+/** Approximation of the standard normal CDF using the rational approximation. */
+function normalCdf(x: number): number {
+  // Abramowitz & Stegun approximation
+  const sign = x >= 0 ? 1 : -1
+  const ax = Math.abs(x)
+  const t = 1.0 / (1.0 + 0.2316419 * ax)
+  const d = 0.3989422804014327
+  const pdf = d * Math.exp(-ax * ax / 2)
+  const cdf = 1.0 - pdf * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
+  return x < 0 ? 1.0 - cdf : cdf
+}
+
+/** Compute P(over) from a model projection with distribution and a given line. */
+function computeOverUnderEdge(modelProj: number | null, predSd: number | null, lineArg: unknown): { pick: string; prob: number; edge: number; strong: boolean } | null {
+  const line = typeof lineArg === 'number' ? lineArg : NaN
+  if (isNaN(line) || line <= 0) return null
+  if (modelProj == null || predSd == null || predSd <= 0) return { pick: 'fair', prob: 0.5, edge: 0, strong: false }
+  const mean = modelProj
+  const sd = Math.max(predSd, 0.01)
+  const edge = mean - line
+  const overProb = 1.0 - normalCdf((line - mean) / sd)
+  const absZ = Math.abs(edge / sd)
+  let pick: string
+  if (absZ < 0.3) pick = 'fair'
+  else pick = edge > 0 ? 'over' : 'under'
+  // Strong when confidence is decent and edge is meaningful
+  const strong = absZ >= 0.5 && ((pick === 'over' && overProb >= 0.65) || (pick === 'under' && overProb <= 0.35))
+  return { pick, prob: overProb, edge, strong }
+}
+
+const EDGE_STYLES: Record<string, { label: string; bg: string; fg: string; strongBg: string; strongFg: string }> = {
+  over: { label: 'OVER', bg: 'bg-fs-turf/15', fg: 'text-fs-turf', strongBg: 'bg-fs-turf', strongFg: 'text-fs-bg' },
+  under: { label: 'UNDER', bg: 'bg-fs-red/15', fg: 'text-fs-red', strongBg: 'bg-fs-red', strongFg: 'text-fs-bg' },
+  fair: { label: 'FAIR', bg: 'bg-fs-muted-2/10', fg: 'text-fs-muted-2', strongBg: 'bg-fs-muted-2/10', strongFg: 'text-fs-muted-2' },
+}
+
 /** Stat columns shown per position group in the projected-lines tables. */
 const PROJ_COLUMNS: Record<string, { label: string; stat: string }[]> = {
   QB: [
@@ -164,6 +201,12 @@ export default function NextGamePanel({
   odds,
   isPreseason,
   onBack,
+  scraperLoading,
+  scraperData,
+  scraperError,
+  liveBoxScore,
+  isLive,
+  compact,
 }: {
   sport: string
   teamAbbr: string
@@ -178,6 +221,12 @@ export default function NextGamePanel({
   odds: any
   isPreseason?: boolean
   onBack: () => void
+  scraperLoading?: boolean
+  scraperData?: any
+  scraperError?: string | null
+  liveBoxScore?: any | null
+  isLive?: boolean
+  compact?: boolean
 }) {
   const [props, setProps] = useState<PropsResponse | null>(null)
   const [propsLoading, setPropsLoading] = useState(true)
@@ -334,7 +383,11 @@ export default function NextGamePanel({
       })
       const json = await res.json().catch(() => ({}))
       if (!res.ok) throw new Error(json.error ?? `Model API returned ${res.status}`)
-      setModelResults(Array.isArray(json.projections) ? json.projections : [])
+      const projs = Array.isArray(json.projections) ? json.projections : []
+      setModelResults(projs)
+      // Persist the pre-game snapshot once per game (the ledger replaces, never
+      // appends, so a repeat run can't create a second "pre" — runs-once rule).
+      recordPreSnapshot(projs)
     } catch (e: any) {
       setModelError(e?.message ?? 'Model run failed')
     } finally {
@@ -358,6 +411,221 @@ export default function NextGamePanel({
       return known.length ? Math.round(known.reduce((a, b) => a + b, 0) * 10) / 10 : null
     }
     return null
+  }
+
+  // ---- Game-day ledger: one pre-game snapshot + live stat points per game ----
+  // The snapshot is what the model said BEFORE the game; live points are what
+  // actually happened. Together they are the training signal for tuning the
+  // prop engine. Stored server-side in prop-model/ledger/ledger.json.
+  const [ledger, setLedger] = useState<any | null>(null)
+  const [ledgerChecked, setLedgerChecked] = useState(false)
+  const autoRanRef = useRef(false)
+
+  // Canonical game key: sorted team pair so both teams' pages share one record.
+  const ledgerPair = (): [string, string] => {
+    const codes = modelTeamCodes()
+    return [codes.our, codes.opp].sort() as [string, string]
+  }
+
+  // Load any existing snapshot for this game.
+  useEffect(() => {
+    if (sport.toUpperCase() !== 'NFL' || !eventDate) { setLedgerChecked(true); return }
+    let cancelled = false
+    const [t1, t2] = ledgerPair()
+    fetch(`/api/prop-ledger?team=${t1}&opponent=${t2}&eventDate=${eventDate}`, { signal: AbortSignal.timeout(10000) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!cancelled) { setLedger(j?.game ?? null); setLedgerChecked(true) } })
+      .catch(() => { if (!cancelled) setLedgerChecked(true) })
+    return () => { cancelled = true }
+  }, [sport, eventDate, teamFantasyAbbr, opponentFantasyAbbr])
+
+  // Save the pre-game projection snapshot (skipped when one already exists).
+  const recordPreSnapshot = (projs: ModelProjection[]) => {
+    if (!eventDate || !projs.length || ledger?.pre) return
+    try {
+      const [t1, t2] = ledgerPair()
+      const codes = modelTeamCodes()
+      const teamFor = (name: string) =>
+        (ourProjected.some((p) => p.name === name) ? codes.our : codes.opp)
+      const rows = projs.map((r) => {
+        const scraped = scrapedLineFor(r.player, r.stat)
+        const edge = scraped ? computeOverUnderEdge(r.projection, r.pred_sd ?? null, scraped.line) : null
+        return {
+          ...r,
+          team: teamFor(r.player),
+          line: scraped?.line ?? null,
+          book: scraped?.book ?? null,
+          over: scraped?.over ?? null,
+          under: scraped?.under ?? null,
+          books: scraped?.books ?? 0,
+          pick: edge?.pick ?? null,
+          prob: edge?.prob ?? null,
+          edge: edge?.edge ?? null,
+        }
+      })
+      const stamps = projs
+        .map((r) => r.last_updated)
+        .filter((v): v is string => !!v)
+        .map((v) => v.slice(0, 10))
+        .sort()
+      const iso = stamps[stamps.length - 1]
+      const dataThrough = iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)
+        ? `${iso.slice(5, 7)}/${iso.slice(8, 10)}/${iso.slice(0, 4)}`
+        : null
+      const meta = {
+        asOf: eventDateToAsOf(eventDate),
+        dataThrough,
+        vegas: buildLines(),
+        teams: { a: t1, b: t2 },
+      }
+      fetch('/api/prop-ledger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pre', team: t1, opponent: t2, eventDate, record: { ...meta, rows } }),
+        signal: AbortSignal.timeout(30000),
+      })
+        .then((res) => res.json().catch(() => null))
+        .then((j) => {
+          if (j?.ok) {
+            setLedger((g: any) => ({
+              eventDate, team: t1, opponent: t2,
+              live: g?.live ?? [],
+              pre: { recordedAt: j.recordedAt, rows, meta },
+            }))
+          }
+        })
+        .catch(() => {})
+    } catch {}
+  }
+
+  // Auto-run once per game: hydrate from the saved snapshot when present,
+  // otherwise run the model once now (it only ever reads pre-game data).
+  useEffect(() => {
+    if (sport.toUpperCase() !== 'NFL') return
+    if (autoRanRef.current || modelResults || modelLoading || !ledgerChecked) return
+    if (!ourProjected.length && !oppProjected.length) return
+    if (!ourStarters || !oppStarters) return
+    if (ledger?.pre?.rows?.length) {
+      autoRanRef.current = true
+      setModelResults(ledger.pre.rows)
+      try {
+        setModelRunDate(new Date(ledger.pre.recordedAt).toISOString().slice(5, 16))
+      } catch { setModelRunDate(null) }
+      if (ledger.pre.meta?.dataThrough) setPrevModelDataThrough(ledger.pre.meta.dataThrough)
+      return
+    }
+    autoRanRef.current = true
+    void runModel()
+  }, [sport, ledgerChecked, ledger, modelResults, modelLoading, ourProjected, oppProjected, ourStarters, oppStarters])
+
+  // ---- Live comparison: model snapshot vs ESPN box score ----
+  const liveStats = useMemo(() => {
+    if (!isLive || !liveBoxScore || !(modelResults ?? []).length) return null
+    const names = Array.from(new Set((modelResults ?? []).map((r) => r.player))).map((name) => ({ name }))
+    try {
+      return extractLiveStats(liveBoxScore, names)
+    } catch { return null }
+  }, [isLive, liveBoxScore, modelResults])
+  const liveQuarters = liveBoxScore ? quartersPlayed(liveBoxScore) : 0
+  const gameFinal = liveBoxScore ? isGameComplete(liveBoxScore) : false
+  const liveStatusLabel = liveBoxScore?.status?.shortDetail ?? liveBoxScore?.status?.description ?? null
+  const showLive = liveStats != null
+
+  // Record one live point per quarter (plus the final) — cheap, durable, and
+  // exactly the per-game progression the optimizer needs.
+  useEffect(() => {
+    if (!isLive || !liveBoxScore || !liveStats || !ledgerChecked || !ledger?.pre) return
+    if (!eventDate || liveQuarters <= 0) return
+    const [t1, t2] = ledgerPair()
+    const points = Array.isArray(ledger?.live) ? ledger.live : []
+    const maxQ = points.reduce((m: number, p: any) => Math.max(m, p?.quarters ?? 0), 0)
+    const hasFinal = points.some((p: any) => p?.final)
+    if (!(liveQuarters > maxQ || (gameFinal && !hasFinal))) return
+    const point = {
+      quarters: liveQuarters,
+      state: liveBoxScore?.status?.state ?? null,
+      clock: liveStatusLabel,
+      ...(gameFinal ? { final: true } : {}),
+      rows: liveStats,
+    }
+    fetch('/api/prop-ledger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'live', team: t1, opponent: t2, eventDate, record: point }),
+      signal: AbortSignal.timeout(30000),
+    })
+      .then((res) => res.json().catch(() => null))
+      .then((j) => {
+        if (j?.ok) {
+          setLedger((g: any) => (g ? { ...g, live: [...(g.live ?? []), { ...point, recordedAt: j.recordedAt }] } : g))
+        }
+      })
+      .catch(() => {})
+  }, [isLive, liveBoxScore, liveStats, ledgerChecked, ledger, liveQuarters, gameFinal, eventDate])
+
+  // Scraped prop line for a model row: matches Action Network/Odds API props by
+  // normalized player name + exact stat. Only real over/under lines qualify —
+  // alternates ("25+ Rushing Yards"), milestones ("2+ Passing Touchdowns"),
+  // combo markets ("Pass + Rush Yds") and odds-only markets ("Anytime TD
+  // Scorer", "First Touchdown Scorer") carry no O/U odds and are excluded.
+  // Prefers the Consensus line, else the median across books.
+  const scrapedLineFor = (name: string, stat: string): { line: number; book: string; over: number | null; under: number | null; books: number } | null => {
+    const norm = (n: string) => n.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
+    const want = norm(name)
+    const all: { line: number; book: string; over: number | null; under: number | null }[] = []
+    const results = scraperData?.results
+    if (!results || typeof results !== 'object') return null
+    // Model "tds" is total TDs. The only standard O/U TD market is passing TDs
+    // (QBs); for RB/WR/TE there is no O/U total-TD line — anytime/first/last TD
+    // are odds-only (line 0.0, no over/under). Map QB tds → passing_tds.
+    const pos = props?.projections?.find((x) => x.name === name)?.position ?? ''
+    const wantStats: string[] = (() => {
+      if (stat === 'tds') return pos === 'QB' ? ['passing_tds'] : []
+      if (stat === 'passing_yards') return ['passing_yards', 'pass_yds', 'pass_yards']
+      if (stat === 'rushing_yards') return ['rushing_yards', 'rush_yds', 'rush_yards']
+      if (stat === 'receiving_yards') return ['receiving_yards', 'rec_yds', 'rec_yards']
+      if (stat === 'receptions') return ['receptions']
+      return [stat]
+    })()
+    if (!wantStats.length) return null
+    for (const b of Object.values(results) as any[]) {
+      const list = (b as any)?.props
+      if (!Array.isArray(list)) continue
+      for (const p of list) {
+        const s = (p?.stat ?? '').toLowerCase()
+        if (!wantStats.includes(s)) continue
+        // Real O/U line only: must carry both sides' odds and a positive line.
+        if (typeof p?.line !== 'number' || p.line <= 0) continue
+        if (p?.over == null || p?.under == null) continue
+        // Belt-and-suspenders: drop alternate/combo/leader markets by name.
+        const market = String(p?.market ?? '').toLowerCase()
+        if (market.includes('+') || market.includes('most')) continue
+
+        // Match player name. Token-based: every token of one name must appear
+        // in the other (suffixes like Jr/Sr/III stripped). This rejects
+        // shared-last-name collisions ("Bijan Robinson" vs "Brian Robinson")
+        // while accepting "Michael Pittman" vs "Michael Pittman Jr".
+        const SUFFIX = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v', 'junior', 'senior'])
+        const wantToks = norm(name).split(' ').filter(Boolean).filter((w) => !SUFFIX.has(w))
+        const scrapedToks = norm(p.player ?? '').split(' ').filter(Boolean).filter((w) => !SUFFIX.has(w))
+        const scrapedName = scrapedToks.join(' ')
+        const nameMatch = scrapedName === want
+          || (wantToks.length > 0 && wantToks.every((w) => scrapedName.includes(w)))
+          || (scrapedToks.length > 0 && scrapedToks.every((s) => want.includes(s)))
+          // NFL abbrev: "T.Tagovailoa" → "ttagovailoa", drop the first char →
+          // "tagovailoa" which matches "tua tagovailoa".
+          || (wantToks.length === 1 && want.length > 3 && scrapedName.includes(want.slice(1)))
+        if (nameMatch) {
+          all.push({ line: p.line, book: p.sportsbook ?? '', over: p.over ?? null, under: p.under ?? null })
+        }
+      }
+    }
+    if (!all.length) return null
+    // All entries are real O/U lines now — prefer Consensus, else the median.
+    const cons = all.filter((p) => p.book.toLowerCase().includes('consensus'))
+    const pickable = all
+    const pick = cons.length ? cons[0] : [...pickable].sort((a, b) => a.line - b.line)[Math.floor(pickable.length / 2)]
+    return { ...pick, books: new Set(pickable.map((p) => p.book)).size }
   }
 
   // Sort model rows QB → RB → WR → TE (same order as the player-lines tables),
@@ -444,7 +712,8 @@ export default function NextGamePanel({
   return (
     <div className="animate-fade-in-up mt-4 pt-3" style={{ borderTop: `1px solid ${teamColor}20` }}>
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h3 className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Next Game Preview</h3>
+        <h3 className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>{compact && isLive ? 'Model vs Live' : 'Next Game Preview'}</h3>
+        {!compact ? (
         <button
           onClick={onBack}
           className="hover-bright text-xs px-2 py-1 rounded text-fs-muted hover:text-fs-text"
@@ -452,6 +721,7 @@ export default function NextGamePanel({
         >
           &larr; Back
         </button>
+        ) : null}
       </div>
 
       <p className="text-sm text-fs-muted mb-4">
@@ -460,7 +730,7 @@ export default function NextGamePanel({
       </p>
 
       {/* Game odds: moneyline + spread + total */}
-      {odds ? (
+      {!compact && (odds ? (
         <div className="rounded-lg p-4 mb-4" style={{ backgroundColor: `${teamColor}0a`, border: `1px solid ${teamColor}18` }}>
           <p className="text-xs font-medium uppercase tracking-wider text-fs-muted mb-2">Game Odds &middot; {odds.sportsbook}</p>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -483,9 +753,10 @@ export default function NextGamePanel({
         </div>
       ) : (
         <p className="text-sm text-fs-muted-2 mb-4">Odds not yet posted for this game.</p>
-      )}
+      ))}
 
       {/* Player props */}
+      {!compact && (
       <div className="mb-4">
         <p className="fs-eyebrow mb-2" style={{ '--tint': teamColor } as React.CSSProperties}>Player Lines</p>
         {propsLoading ? (
@@ -502,7 +773,7 @@ export default function NextGamePanel({
               ) : null}
               &nbsp;(betting props not posted — crude fallback; canonical projections via &ldquo;Prop Model&rdquo; below use recency-weighted history + opponent + game-script + distributions).
             </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-4 min-w-0">
               {[ourProjected, oppProjected].map((group, gi) => {
                 if (!group.length) return null
                 const posGroups = groupByPos(group)
@@ -617,15 +888,16 @@ export default function NextGamePanel({
           </div>
         )}
       </div>
+      )}
 
       {/* Fantasy updates for star players */}
-      {sport.toUpperCase() === 'NFL' && (
+      {sport.toUpperCase() === 'NFL' && !compact && (
         <div>
           <p className="fs-eyebrow mb-2" style={{ '--tint': teamColor } as React.CSSProperties}>Fantasy Updates</p>
           {fantasyError && !ourStarters && !oppStarters ? (
             <p className="text-sm text-fs-muted">{fantasyError}</p>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-2.5 sm:gap-4 min-w-0">
               {[ourStarters, oppStarters].map((starters, si) => (
                 <div key={si} className="rounded-lg p-3" style={{ backgroundColor: `${teamColor}0a`, border: `1px solid ${teamColor}16` }}>
                   <p className="text-xs font-medium mb-2 uppercase tracking-wider" style={{ color: si === 0 ? teamColor : undefined, opacity: si === 0 ? 1 : 0.7 }}>
@@ -669,7 +941,26 @@ export default function NextGamePanel({
       {sport.toUpperCase() === 'NFL' && (ourProjected.length > 0 || oppProjected.length > 0) && (
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
-            <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Prop Model</p>
+            <div className="flex items-center gap-3">
+              <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Scraper</p>
+              {scraperLoading ? (
+                <span className="text-xs font-semibold px-3 py-1.5 rounded-lg" style={{ backgroundColor: `${teamColor}20`, color: teamColor }}>
+                  ⏳ Auto-scraping…
+                </span>
+              ) : scraperData ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-fs-green font-medium">✓ Scraped {scraperData.totalProps || 0} props</span>
+                  <span className="text-xs text-fs-muted-2">
+                    {scraperData.scrapeTime ? new Date(scraperData.scrapeTime).toLocaleTimeString() : ''}
+                  </span>
+                </div>
+              ) : scraperError ? (
+                <span className="text-xs text-fs-red">⚠ {scraperError}</span>
+              ) : (
+                <span className="text-xs text-fs-muted-2">Scraping next game…</span>
+              )}
+            </div>
+            <div>
             {modelLoading ? (
               <span className="text-xs font-semibold px-4 py-2 rounded-lg shadow-sm" style={{ backgroundColor: `${teamColor}20`, color: teamColor }}>
                 Running…
@@ -693,17 +984,74 @@ export default function NextGamePanel({
                 ▶ Run model
               </button>
             )}
+            </div>
           </div>
+          
+          {/* Scraper results */}
+          {scraperError && (
+            <div className="mb-3 rounded-lg p-3 text-sm" style={{ backgroundColor: '#fecaca20', border: '1px solid #f8717130' }}>
+              <span className="text-fs-red">{scraperError}</span>
+            </div>
+          )}
+          
+          {scraperData && scraperData.results && (
+            <div className="mb-3 rounded-lg p-3 text-xs" style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}16` }}>
+              <p className="font-medium mb-1">Scraped from {Object.keys(scraperData.results || {}).length} sportsbooks:</p>
+              {Object.entries(scraperData.results || {}).map(([book, data]: [string, any]) => (
+                <div key={book} className="flex items-center gap-2 mb-1">
+                  <span className="font-medium capitalize">{book}:</span>
+                  <span>{data.count || 0} props</span>
+                  {data.error && (
+                    <span className="text-fs-muted-2 truncate" title={data.error}>
+                      · {data.error}
+                    </span>
+                  )}
+                  {data.timestamp && (
+                    <span className="text-fs-muted-2 ml-auto">
+                      {new Date(data.timestamp).toLocaleTimeString()}
+                    </span>
+                  )}
+                </div>
+              ))}
+              {(scraperData.totalProps ?? 0) === 0 && (
+                <p className="text-fs-muted-2 mt-1">
+                  No lines came back — books block datacenter IPs and the free fallback found nothing. Set ODDS_API_KEY for Odds API lines.
+                </p>
+              )}
+            </div>
+          )}
+          
           <p className="text-xs text-fs-muted-2 mb-2">
             {modelResults
               ? 'Probabilistic projection from the Python model: recency-weighted baseline × opponent defense × game script with role-change detection and distributional uncertainty.'
-              : 'Own projection from recent games, opponent defense, and the Vegas game script — compare against the ESPN lines above.'}
+              : 'Own projection from recent games, opponent defense, and the Vegas game script — compare against the scraped prop lines.'}
             {modelDataThrough && (
               <>
                 {' '}· Data through {modelDataThrough}
               </>
             )}
+            {isLive ? (
+              <>
+                {' '}·{' '}
+                <span className="font-bold text-fs-red">
+                  ● LIVE{liveQuarters > 0 ? ` Q${liveQuarters}` : ''}
+                </span>
+                {liveStatusLabel ? <span> · {liveStatusLabel}</span> : null}
+                {ledger?.pre ? (
+                  <span title={`Pre-game snapshot locked ${ledger.pre.recordedAt}`}>
+                    {' '}· snapshot locked{(ledger?.live?.length ?? 0) > 0 ? ` · ${ledger.live.length} live pt${ledger.live.length === 1 ? '' : 's'} saved` : ''}
+                  </span>
+                ) : (
+                  <span> · locking pre-game snapshot…</span>
+                )}
+              </>
+            ) : null}
           </p>
+          {showLive && !gameFinal ? (
+            <p className="text-[11px] text-fs-muted-2 mb-2">
+              Live = ESPN box score · Δ = live − model × Q/4 (green = ahead of model pace)
+            </p>
+          ) : null}
 
           {modelLoading ? (
             <div className="animate-pulse space-y-2">
@@ -722,7 +1070,11 @@ export default function NextGamePanel({
                     <th className="text-left px-2.5 py-1.5 font-medium">Player</th>
                     <th className="text-left px-2 py-1.5 font-medium">Stat</th>
                     <th className="text-right px-2 py-1.5 font-medium">Model</th>
-                    <th className="text-right px-2 py-1.5 font-medium">ESPN line</th>
+                    <th className="text-right px-2 py-1.5 font-medium">Prop line</th>
+                    <th className="text-right px-2 py-1.5 font-medium">Edge</th>
+                    {showLive ? (
+                      <th className="text-right px-2 py-1.5 font-medium">{gameFinal ? 'Final' : 'Live'}</th>
+                    ) : null}
                     <th className="text-right px-2 py-1.5 font-medium">Distribution</th>
                     <th className="text-right px-2.5 py-1.5 font-medium">Conf</th>
                   </tr>
@@ -730,7 +1082,7 @@ export default function NextGamePanel({
                 <tbody>
                   {groupedModel.map((group) =>
                     group.rows.map((r, idx) => {
-                      const espnLine = espnLineFor(r.player, r.stat)
+                      const scraped = scrapedLineFor(r.player, r.stat)
                       const isFirst = idx === 0
                       const conf = confBadge(r.confidence, r.reliability ?? 0)
                       return (
@@ -765,9 +1117,93 @@ export default function NextGamePanel({
                           <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-text">
                             {r.projection != null ? r.projection : <span className="text-fs-muted-2">refused</span>}
                           </td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted">
-                            {espnLine != null ? espnLine : '—'}
+                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted" title={
+                            scraped
+                              ? `${scraped.book} · over ${scraped.over ?? '—'} / under ${scraped.under ?? '—'} · ${scraped.books} book${scraped.books === 1 ? '' : 's'}`
+                              : (!scraperData
+                                ? 'Scrape pending…'
+                                : (r.stat === 'tds' && (props?.projections?.find((x) => x.name === r.player)?.position ?? '') !== 'QB'
+                                  ? 'No O/U total-TD line is posted for non-QBs — books only price anytime/first/last TD as odds.'
+                                  : 'No scraped line for this market — the books have no O/U posted for this player/stat.'))
+                          }>
+                            {scraped != null ? scraped.line : '—'}
                           </td>
+                          <td className="px-2 py-1.5 text-right font-mono tabular-nums">
+                            {(() => {
+                              // Edge badge only when a real sportsbook line exists.
+                              // No scraped line (e.g. non-QB TDs, unposted markets)
+                              // → no badge, just like the Prop line column.
+                              if (!scraped) return <span className="text-fs-muted-2">—</span>
+                              const line = scraped.line
+                              const lineSource = `${scraped.book ?? 'book'} ${scraped.line}`
+                              const picked = computeOverUnderEdge(r.projection, r.pred_sd ?? null, line) as any
+                              if (!picked || r.projection == null || r.pred_sd == null) return <span className="text-fs-muted-2">—</span>
+                              const s = EDGE_STYLES[picked.pick]
+                              // Confidence: pick-direction probability for
+                              // over/under; the majority side for fair (coin-flip).
+                              const confPct = Math.round((picked.pick === 'fair'
+                                ? Math.max(picked.prob, 1 - picked.prob)
+                                : picked.pick === 'over' ? picked.prob : 1 - picked.prob) * 100)
+                              return (
+                                <div className="flex flex-col items-end gap-0.5">
+                                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${picked.strong ? s.strongBg : s.bg} ${picked.strong ? s.strongFg : s.fg} whitespace-nowrap`}
+                                    title={`${s.label} vs ${lineSource}: ${confPct}% confidence, edge ${picked.edge > 0 ? '+' : ''}${picked.edge.toFixed(1)} ${r.unit}`}
+                                  >
+                                    {s.label} {confPct}%
+                                  </span>
+                                  {picked.pick !== 'fair' && (
+                                  <span className={`text-[10px] tabular-nums ${picked.edge > 0 ? 'text-fs-turf' : 'text-fs-red'}`}
+                                    title="Model mean − line (units)"
+                                  >
+                                    {picked.edge > 0 ? '+' : ''}{picked.edge.toFixed(1)}
+                                  </span>
+                                  )}
+                                </div>
+                              )
+                            })()}
+                          </td>
+                          {showLive ? (
+                            <td className="px-2 py-1.5 text-right font-mono tabular-nums" title={
+                              liveStatusLabel ? `ESPN box score · ${liveStatusLabel}` : 'ESPN box score'
+                            }>
+                              {(() => {
+                                const lv = liveStats?.[r.player]?.[r.stat]
+                                if (lv == null) return <span className="text-fs-muted-2">—</span>
+                                if (gameFinal) {
+                                  // Post-game: final actual vs the frozen model number.
+                                  const err = r.projection != null ? lv - r.projection : null
+                                  return (
+                                    <>
+                                      <span className="text-fs-text">{lv}</span>
+                                      {err != null && (
+                                        <span className={`block text-[10px] tabular-nums ${err >= 0 ? 'text-fs-turf' : 'text-fs-red'}`}>
+                                          {err > 0 ? '+' : ''}{err.toFixed(1)}
+                                        </span>
+                                      )}
+                                    </>
+                                  )
+                                }
+                                // Live: accumulated so far + delta vs expected pace
+                                // (expected = model × quarters-played/4).
+                                const frac = Math.min(Math.max(liveQuarters, 1), 4) / 4
+                                const expected = r.projection != null ? r.projection * frac : null
+                                const delta = expected != null ? lv - expected : null
+                                return (
+                                  <>
+                                    <span className="text-fs-text">{lv}</span>
+                                    {delta != null && (
+                                      <span
+                                        className={`block text-[10px] tabular-nums ${delta >= 0 ? 'text-fs-turf' : 'text-fs-red'}`}
+                                        title={`expected ${expected!.toFixed(1)} by Q${liveQuarters} (model × ${frac.toFixed(2)})`}
+                                      >
+                                        {delta > 0 ? '+' : ''}{delta.toFixed(1)}
+                                      </span>
+                                    )}
+                                  </>
+                                )
+                              })()}
+                            </td>
+                          ) : null}
                           <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted" title={
                             [
                               r.p10 != null ? `p10:${r.p10} p25:${r.p25} p50:${r.p50} p75:${r.p75} p90:${r.p90}` : null,
@@ -786,7 +1222,7 @@ export default function NextGamePanel({
                                 {r.reliability ?? '?'}
                               </span>
                             </div>
-                            {r.warnings && r.warnings.length > 0 && (
+                            {Array.isArray(r.warnings) && r.warnings.length > 0 && (
                               <span className="block text-[10px] text-fs-muted-2 max-w-[16ch] truncate" title={r.warnings.join('; ')}>
                                 ⚠ {r.warnings[0]}
                               </span>

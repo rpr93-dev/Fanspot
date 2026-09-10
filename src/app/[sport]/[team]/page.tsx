@@ -29,17 +29,16 @@ function useTeamDashboard(sport: string, teamId: string, teamName: string, teamA
         if (!res.ok) throw new Error(`Dashboard API returned ${res.status}`)
         const dashboard = await res.json()
         if (cancelled) return
-        setData(dashboard)
-      } catch (err) {
-        console.error('[dashboard] Failed to load:', err)
-        if (!cancelled) setData(null)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+      setData(dashboard)
+    } catch (err) {
+      console.error('[dashboard] Failed to load:', err)
+      if (!cancelled) setData(null)
+    } finally {
+      if (!cancelled) setLoading(false)
+    }
     }
 
     load()
-    return () => { cancelled = true }
   }, [teamId, sport, teamName])
 
   return { dashboard: data, loading }
@@ -186,6 +185,10 @@ export default function TeamDashboard() {
   const [liveBoxScore, setLiveBoxScore] = useState<any>(null)
   const [isLiveGame, setIsLiveGame] = useState(false)
   const [showNextGame, setShowNextGame] = useState(false)
+  const [scraperLoading, setScraperLoading] = useState(false)
+  const [scraperData, setScraperData] = useState<any>(null)
+  const [scraperError, setScraperError] = useState<string | null>(null)
+  const [hasAutoScraped, setHasAutoScraped] = useState(false)
   const liveGameIdRef = useRef<string | null>(null)
   const upcomingGameRef = useRef<{ id: string; date: string; kickoff?: string } | null>(null)
 
@@ -258,6 +261,52 @@ export default function TeamDashboard() {
       })
       .catch((e) => { console.error('[roster fetch]', e); setRosterLoading(false) })
   }, [showRoster, team?.id])
+
+  // Reset scraper state when navigating to a different team.
+  useEffect(() => {
+    setHasAutoScraped(false)
+    setScraperData(null)
+    setScraperError(null)
+  }, [teamId, sport])
+
+  // Auto-scrape player lines via Docker the second a team page loads
+  // with an upcoming game. Results flow into NextGamePanel as props.
+  useEffect(() => {
+    if (!team || !data?.upcoming?.eventId || !data.upcoming.opponentAbbr || hasAutoScraped) return
+    let cancelled = false
+    setScraperLoading(true)
+    setScraperError(null)
+
+    fetch('/api/scraper', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        team: getEspnAbbr(team.id, team.abbreviation),
+        opponent: data.upcoming.opponentAbbr,
+        gameDate: (data.upcoming.eventDate ?? data.upcoming.date ?? '').replace(/\D/g, ''),
+        sport: team.sport.toUpperCase(),
+      }),
+      signal: AbortSignal.timeout(120_000),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Scraper returned ${res.status}`)
+        return res.json()
+      })
+      .then((json) => {
+        if (cancelled) return
+        setScraperData(json.results)
+        setHasAutoScraped(true)
+      })
+      .catch((err) => {
+        console.error('[scraper] Auto-scraper failed:', err)
+        if (!cancelled) setScraperError(err?.message || 'Scraper unavailable')
+      })
+      .finally(() => {
+        if (!cancelled) setScraperLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [team?.id, data?.upcoming?.eventId])
 
   // Odds poll — cadence follows the game clock: ~6h out, hourly the day before,
   // live (30s) within an hour of kickoff or while the game is in progress.
@@ -446,7 +495,7 @@ export default function TeamDashboard() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
         <Link href={`/${sport}`} className="hover-lift fs-meta hover:text-fs-text inline-block mb-8" style={{ '--card-color': team.colors.primary } as React.CSSProperties}>&larr; {config.name}</Link>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
+        <div className="hidden md:grid md:grid-cols-2 gap-5 mb-5">
             <div className={`fs-panel p-5 sm:p-6 ${data?.upcoming?.eventId ? 'hover-card cursor-pointer group' : ''}`}
               style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}26`, '--card-color': team.colors.primary } as React.CSSProperties}
               onClick={() => {
@@ -513,8 +562,9 @@ export default function TeamDashboard() {
                   {data.upcoming.seasonTypeName && <span className="inline-block mt-2 px-2 py-0.5 text-xs font-medium bg-fs-gold/10 text-fs-gold rounded">{data.upcoming.seasonTypeName}</span>}
                   {data.oddsInfo ? (
                     <div className="mt-5 pt-4 space-y-3" style={{ borderTop: `1px solid ${team.colors.primary}20` }}>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-fs-muted">
+                      <div className="grid sm:grid-cols-2 gap-x-5 gap-y-3">
+                      <div className="flex items-center justify-between text-sm gap-3">
+                        <span className="text-fs-muted truncate">
                           <span className="text-fs-text font-medium">{data.oddsInfo.our.abbr}</span>
                           {data.oddsInfo.our.isFavorite
                             ? <span className="text-fs-turf ml-1">(Favorite)</span>
@@ -523,10 +573,10 @@ export default function TeamDashboard() {
                               : <span className="text-fs-muted-2 ml-1">(Even)</span>
                           }
                         </span>
-                        <span className="font-mono text-fs-text">{data.oddsInfo.our.moneyline > 0 ? '+' : ''}{data.oddsInfo.our.moneyline}</span>
+                        <span className="font-mono text-fs-text shrink-0">{data.oddsInfo.our.moneyline > 0 ? '+' : ''}{data.oddsInfo.our.moneyline}</span>
                       </div>
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-fs-muted">
+                      <div className="flex items-center justify-between text-sm gap-3">
+                        <span className="text-fs-muted truncate">
                           <span className="text-fs-text font-medium">{data.oddsInfo.opponent.abbr}</span>
                           {data.oddsInfo.opponent.isFavorite
                             ? <span className="text-fs-turf ml-1">(Favorite)</span>
@@ -535,7 +585,8 @@ export default function TeamDashboard() {
                               : <span className="text-fs-muted-2 ml-1">(Even)</span>
                           }
                         </span>
-                        <span className="font-mono text-fs-text">{data.oddsInfo.opponent.moneyline > 0 ? '+' : ''}{data.oddsInfo.opponent.moneyline}</span>
+                        <span className="font-mono text-fs-text shrink-0">{data.oddsInfo.opponent.moneyline > 0 ? '+' : ''}{data.oddsInfo.opponent.moneyline}</span>
+                      </div>
                       </div>
                       {(data.oddsInfo.spread != null || data.oddsInfo.overUnder != null) && (
                         <div className="flex items-center gap-4 text-sm pt-1">
@@ -576,12 +627,12 @@ export default function TeamDashboard() {
               )}
             </div>
 
-            <div className="hover-card fs-panel p-6 flex flex-col items-center justify-center cursor-pointer group" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}24`, '--card-color': team.colors.primary } as React.CSSProperties}
+            <div className="hover-card fs-panel p-6 flex items-center gap-5 cursor-pointer group" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}24`, '--card-color': team.colors.primary } as React.CSSProperties}
               onClick={() => setShowRoster((v) => !v)}>
-              <div className="w-28 h-28 flex items-center justify-center mb-4 relative">
+              <div className="w-20 h-20 flex items-center justify-center shrink-0 relative">
                 {logoFailed ? (
-                  <div className="w-28 h-28 rounded-full flex items-center justify-center" style={{ backgroundColor: team.colors.primary }}>
-                    <span className="text-3xl font-bold" style={{ color: team.colors.secondary }}>{team.abbreviation}</span>
+                  <div className="w-20 h-20 rounded-full flex items-center justify-center" style={{ backgroundColor: team.colors.primary }}>
+                    <span className="text-2xl font-bold" style={{ color: team.colors.secondary }}>{team.abbreviation}</span>
                   </div>
                 ) : (
                   <img src={logoUrl} alt={team.name} className="w-full h-full object-contain" onError={() => setLogoFailed(true)} />
@@ -592,8 +643,10 @@ export default function TeamDashboard() {
                   <div className="w-1 h-1 rounded-full" style={{ backgroundColor: team.colors.primary }} />
                 </div>
               </div>
-              <h1 className="fs-title text-3xl text-fs-text text-center">{team.name}</h1>
-              <p className="fs-meta mt-1.5">{team.conference} &middot; {team.division}</p>
+              <div className="min-w-0">
+                <h1 className="fs-title text-3xl text-fs-text truncate">{team.name}</h1>
+                <p className="fs-meta mt-1.5">{team.conference} &middot; {team.division}</p>
+              </div>
             </div>
           </div>
 
@@ -619,39 +672,23 @@ export default function TeamDashboard() {
             odds={data.oddsInfo}
             isPreseason={data.upcoming.isPreseason}
             onBack={() => setShowNextGame(false)}
+            scraperLoading={scraperLoading}
+            scraperData={scraperData}
+            scraperError={scraperError}
+            isLive={isLiveGame}
+            liveBoxScore={liveBoxScore}
           />
         ) : selectedGameId ? (
           <>
             <div className="mb-5">
-              <div className="fs-panel p-4 sm:p-5" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}20` } as React.CSSProperties}>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="fs-eyebrow" style={{ '--tint': team.colors.primary } as React.CSSProperties}>Last 5 Games</h2>
-                  {data?.teamStanding && <span className="fs-meta">{data.teamStanding}</span>}
-                </div>
-                {data?.lastFive.length ? (
-                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
-                    {data.lastFive.map((game, i) => (
-                      <div key={i} className="hover-card rounded-lg p-2 flex flex-col items-center text-center cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0d`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : `${team.colors.primary}18`}`, '--card-color': team.colors.primary } as React.CSSProperties}
-                        onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}>
-                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded-full text-[11px] font-medium mb-0.5 ${
-                          game.result === 'W' ? 'text-fs-turf' : 'text-fs-red'
-                        }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(139,197,63,0.15)' : 'rgba(232,93,76,0.15)' }}>
-                          {game.result}
-                        </span>
-                        {game.opponentLogo && (
-                          <img src={game.opponentLogo} alt="" className="w-5 h-5 object-contain mb-0.5" />
-                        )}
-                        <span className="text-xs text-fs-text/80 truncate max-w-full">{game.opponent}</span>
-                        <span className="text-xs text-fs-muted">{game.score}</span>
-                        {game.isPreseason && <span className="text-[11px] text-fs-gold/80">Pre</span>}
-                        {!game.isPreseason && game.seasonTypeName && <span className="text-[11px] text-fs-gold/80">{game.seasonTypeName === 'Preseason' ? 'Pre' : game.seasonTypeName}</span>}
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-fs-muted">No recent games</p>
-                )}
-              </div>
+              <LastFiveTiles
+                games={data?.lastFive ?? []}
+                selectedId={selectedGameId}
+                onSelect={(id) => setSelectedGameId(id === selectedGameId ? null : id)}
+                teamColor={team.colors.primary}
+                standing={data?.teamStanding}
+                loading={loading}
+              />
             </div>
             <BoxScorePanel
               data={boxScoreData}
@@ -662,54 +699,48 @@ export default function TeamDashboard() {
               isLive={isLiveGame && selectedGameId === liveGameIdRef.current}
               onBack={() => { setSelectedGameId(null); setBoxScoreData(null) }}
             />
+            {/* Model vs Live: the frozen pre-game prop snapshot against the live
+                box score (one live point saved per quarter for engine tuning). */}
+            {team.sport.toUpperCase() === 'NFL' && isLiveGame
+              && selectedGameId === liveGameIdRef.current
+              && data?.upcoming?.eventId === selectedGameId ? (
+              <NextGamePanel
+                sport={team.sport}
+                teamAbbr={getEspnAbbr(team.id, team.abbreviation)}
+                opponentAbbr={data.upcoming.opponentAbbr ?? ''}
+                teamFantasyAbbr={team.abbreviation}
+                opponentFantasyAbbr={getOpponentFantasyAbbr(data.upcoming.opponentAbbr ?? '', data.upcoming.opponent, team.sport)}
+                eventId={data.upcoming.eventId}
+                eventDate={data.upcoming.eventDate}
+                teamColor={team.colors.primary}
+                teamName={team.name}
+                opponentName={data.upcoming.opponent}
+                odds={data.oddsInfo}
+                isPreseason={data.upcoming.isPreseason}
+                onBack={() => {}}
+                scraperLoading={scraperLoading}
+                scraperData={scraperData}
+                scraperError={scraperError}
+                isLive
+                liveBoxScore={liveBoxScore}
+                compact
+              />
+            ) : null}
           </>
         ) : (
           <>
-            <div className="mb-5">
-              <div className="fs-panel p-5" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}20` } as React.CSSProperties}>
-                <div className="flex items-center justify-between mb-3">
-                  <h2 className="fs-eyebrow" style={{ '--tint': team.colors.primary } as React.CSSProperties}>Last 5 Games</h2>
-                  {data?.teamStanding && <span className="fs-meta">{data.teamStanding}</span>}
-                </div>
-                {loading ? (
-                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3">
-                    {[...Array(5)].map((_, i) => (
-                      <div key={i} className="fs-skeleton h-24" />
-                    ))}
-                  </div>
-                ) : data?.lastFive.length ? (
-                  <div className="grid grid-cols-3 sm:grid-cols-5 gap-2 sm:gap-3 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
-                    {data.lastFive.map((game, i) => (
-                      <div key={i} className="hover-card rounded-lg p-3 flex flex-col items-center text-center cursor-pointer group" style={{ backgroundColor: `${team.colors.primary}0d`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : `${team.colors.primary}18`}`, '--card-color': team.colors.primary } as React.CSSProperties}
-                        onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}>
-                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium mb-1 ${
-                          game.result === 'W' ? 'text-fs-turf' : 'text-fs-red'
-                        }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(139,197,63,0.15)' : 'rgba(232,93,76,0.15)' }}>
-                          {game.result}
-                        </span>
-                        {game.opponentLogo && (
-                          <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain mb-1" />
-                        )}
-                        <span className="text-xs text-fs-text/80 truncate max-w-full">
-                          <span className="sm:hidden">{game.opponentAbbr || game.opponent}</span>
-                          <span className="hidden sm:inline">{game.opponent}</span>
-                        </span>
-                        <span className="text-xs mt-0.5 text-fs-muted">{game.score}</span>
-                        <div className="flex items-center gap-1 mt-0.5">
-                          <span className="text-xs text-fs-muted-2">{game.date}</span>
-                          {game.isPreseason && <span className="text-[11px] text-fs-gold/80">Pre</span>}
-                          {!game.isPreseason && game.seasonTypeName && <span className="text-[11px] text-fs-gold/80">{game.seasonTypeName === 'Preseason' ? 'Pre' : game.seasonTypeName}</span>}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-sm text-fs-muted animate-fade-in">No recent games</p>
-                )}
-              </div>
+            <div className="mb-5 hidden md:block">
+              <LastFiveTiles
+                games={data?.lastFive ?? []}
+                selectedId={selectedGameId}
+                onSelect={(id) => setSelectedGameId(id === selectedGameId ? null : id)}
+                teamColor={team.colors.primary}
+                standing={data?.teamStanding}
+                loading={loading}
+              />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="hidden md:grid md:grid-cols-2 gap-5">
               <StandingsBox
                 standings={data?.standings ?? []}
                 teamId={team.id}
@@ -756,10 +787,163 @@ export default function TeamDashboard() {
             </div>
 
             {!loading && team && (
-              <div className="mt-5">
+              <div className="mt-5 hidden md:block">
                 <FantasyWidget sport={team.sport} teamAbbr={team.abbreviation} teamColor={team.colors.primary} />
               </div>
             )}
+
+            {/* Dedicated mobile layout: compact horizontal strips, snap rows */}
+            <div className="md:hidden space-y-4">
+              <div className="fs-panel p-4 flex items-center gap-3 animate-fade-in-up" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}20` } as React.CSSProperties}>
+                {logoFailed ? (
+                  <div className="w-12 h-12 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: team.colors.primary }}>
+                    <span className="text-sm font-bold" style={{ color: team.colors.secondary }}>{team.abbreviation}</span>
+                  </div>
+                ) : (
+                  <img src={logoUrl} alt={team.name} className="w-12 h-12 object-contain shrink-0" onError={() => setLogoFailed(true)} />
+                )}
+                <div className="min-w-0 flex-1">
+                  <h1 className="text-lg font-semibold text-fs-text truncate">{team.name}</h1>
+                  <p className="fs-meta truncate">{team.conference} &middot; {team.division}{data?.teamStanding ? ` · ${data.teamStanding}` : ''}</p>
+                </div>
+                <button onClick={() => setShowRoster((v) => !v)}
+                  className="hover-bright text-xs font-semibold px-3.5 py-2 rounded-full shrink-0"
+                  style={{ backgroundColor: `${team.colors.primary}18`, border: `1px solid ${team.colors.primary}30`, '--card-color': team.colors.primary } as React.CSSProperties}>
+                  Roster
+                </button>
+              </div>
+
+              {data?.upcoming ? (
+                <div className={`fs-panel p-4 ${data.upcoming.eventId ? 'hover-card cursor-pointer' : ''}`}
+                  style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}20`, '--card-color': team.colors.primary } as React.CSSProperties}
+                  onClick={() => {
+                    if (!data?.upcoming?.eventId) return
+                    if (data.upcoming.isLive) {
+                      setShowNextGame(false)
+                      const liveId = data.upcoming.eventId
+                      setSelectedGameId((cur) => (cur === liveId ? null : (liveId as string)))
+                    } else {
+                      setSelectedGameId(null)
+                      setShowNextGame((v) => !v)
+                    }
+                  }}>
+                  <div className="flex items-center gap-3 min-w-0">
+                    {data.upcoming.opponentLogo && (
+                      <img src={data.upcoming.opponentLogo} alt="" className="w-10 h-10 object-contain shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-fs-text truncate">
+                        {data.upcoming.location === 'home' ? 'vs' : '@'} {data.upcoming.opponent}
+                      </p>
+                      <p className="text-xs text-fs-muted-2 truncate">{data.upcoming.date}{data.upcoming.venue ? ` · ${data.upcoming.venue}` : ''}</p>
+                    </div>
+                    {data.upcoming.isLive && data.upcoming.awayScore != null && data.upcoming.homeScore != null ? (
+                      <span className="font-mono font-bold text-fs-text tabular-nums shrink-0">{data.upcoming.awayScore}-{data.upcoming.homeScore}</span>
+                    ) : (
+                      <span className="text-fs-muted-2 shrink-0">&rsaquo;</span>
+                    )}
+                  </div>
+                  {data.oddsInfo && (data.oddsInfo.spread != null || data.oddsInfo.overUnder != null) && (
+                    <div className="flex items-center gap-2 mt-3 overflow-x-auto">
+                      {data.oddsInfo.spread != null && (
+                        <span className="text-xs font-mono px-2.5 py-1 rounded-full whitespace-nowrap" style={{ backgroundColor: `${team.colors.primary}12`, border: `1px solid ${team.colors.primary}20` }}>
+                          Spread {data.oddsInfo.spread > 0 ? '+' : ''}{data.oddsInfo.spread}
+                        </span>
+                      )}
+                      {data.oddsInfo.overUnder != null && (
+                        <span className="text-xs font-mono px-2.5 py-1 rounded-full whitespace-nowrap" style={{ backgroundColor: `${team.colors.primary}12`, border: `1px solid ${team.colors.primary}20` }}>
+                          O/U {data.oddsInfo.overUnder}
+                        </span>
+                      )}
+                      <span className="text-xs font-mono px-2.5 py-1 rounded-full whitespace-nowrap" style={{ backgroundColor: `${team.colors.primary}12`, border: `1px solid ${team.colors.primary}20` }}>
+                        {data.oddsInfo.our.abbr} {data.oddsInfo.our.moneyline > 0 ? '+' : ''}{data.oddsInfo.our.moneyline}
+                      </span>
+                      {scraperLoading ? (
+                        <span className="text-xs text-fs-muted-2 whitespace-nowrap">Scraping props…</span>
+                      ) : (scraperData?.totalProps ?? 0) > 0 ? (
+                        <span className="text-xs text-fs-turf whitespace-nowrap">✓ {scraperData.totalProps} props</span>
+                      ) : null}
+                    </div>
+                  )}
+                </div>
+              ) : null}
+
+              <div>
+                <div className="flex items-center justify-between mb-2 px-1">
+                  <h2 className="fs-eyebrow" style={{ '--tint': team.colors.primary } as React.CSSProperties}>Last 5 Games</h2>
+                  {data?.teamStanding && <span className="fs-meta">{data.teamStanding}</span>}
+                </div>
+                {loading ? (
+                  <div className="flex gap-2 overflow-hidden">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className="fs-skeleton h-14 min-w-[10rem] flex-1" />
+                    ))}
+                  </div>
+                ) : data?.lastFive.length ? (
+                  <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 -mx-4 px-4">
+                    {data.lastFive.map((game) => (
+                      <div key={game.eventId} className="rounded-lg px-3 py-2.5 flex items-center gap-2.5 cursor-pointer snap-start min-w-[10.5rem] flex-1" style={{ backgroundColor: `${team.colors.primary}0d`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : `${team.colors.primary}18`}` } as React.CSSProperties}
+                        onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}>
+                        <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium shrink-0 ${
+                          game.result === 'W' ? 'text-fs-turf' : 'text-fs-red'
+                        }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(139,197,63,0.15)' : 'rgba(232,93,76,0.15)' }}>
+                          {game.result}
+                        </span>
+                        {game.opponentLogo && (
+                          <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain shrink-0" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="text-xs font-medium text-fs-text/85 truncate">{game.opponentAbbr || game.opponent}</p>
+                          <p className="text-xs text-fs-muted tabular-nums">{game.score}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-fs-muted">No recent games</p>
+                )}
+              </div>
+
+              <StandingsBox
+                standings={data?.standings ?? []}
+                teamId={team.id}
+                teamAbbr={team.abbreviation}
+                teamConference={team.conference}
+                teamColor={team.colors.primary}
+                sport={sport}
+                loading={loading}
+                standingsMessage={data?.standingsMessage}
+              />
+
+              <div className="fs-panel p-4" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}20` } as React.CSSProperties}>
+                <h2 className="fs-eyebrow mb-3" style={{ '--tint': team.colors.primary } as React.CSSProperties}>Latest News</h2>
+                {loading ? (
+                  <div className="animate-pulse space-y-3">
+                    {[...Array(3)].map((_, i) => (
+                      <div key={i} className="fs-skeleton h-4 w-3/4" />
+                    ))}
+                  </div>
+                ) : data?.news.length ? (
+                  <div className="divide-y" style={{ borderColor: `${team.colors.primary}14` }}>
+                    {data.news.slice(0, 5).map((item, i) => (
+                      <a key={i} href={item.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2.5 py-2.5 min-w-0">
+                        <div className="min-w-0 flex-1">
+                          <p className="text-[13px] font-medium text-fs-text/85 leading-snug line-clamp-2">{item.title}</p>
+                          <p className="text-[11px] text-fs-muted-2 mt-0.5">{item.source} · {item.date}</p>
+                        </div>
+                        <span className="text-fs-muted-2 shrink-0">&rsaquo;</span>
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-sm text-fs-muted">No news available</p>
+                )}
+              </div>
+
+              {!loading && team && (
+                <FantasyWidget sport={team.sport} teamAbbr={team.abbreviation} teamColor={team.colors.primary} />
+              )}
+            </div>
           </>
         )}
 
@@ -939,7 +1123,7 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
           {showPlayerStats && (
             <>
               {hasAnyPlayerStats ? (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid sm:grid-cols-2 gap-4 min-w-0">
                   {sortedPlayerStats.map((team: any, ti: number) => {
                     const isOurTeam = team.teamAbbr === teamAbbr
                     return (
@@ -1091,6 +1275,76 @@ function renderNflStats(stats: Record<string, string> | null, pos: string): { sc
     return espnKey && stats[espnKey] !== undefined ? stats[espnKey] : null
   })
   return { schema, values }
+}
+
+interface LastFiveGame {
+  date: string
+  opponent: string
+  opponentAbbr: string
+  opponentLogo: string
+  result: 'W' | 'L'
+  score: string
+  eventId: string
+  isPreseason?: boolean
+  seasonTypeName?: string
+}
+
+// Horizontal result tiles with dynamic resizing: snap-scroll row on mobile,
+// equal-width 5-col grid on desktop. One component for every usage so the
+// mobile and desktop layouts never drift apart.
+function LastFiveTiles({ games, selectedId, onSelect, teamColor, standing, loading }: {
+  games: LastFiveGame[]
+  selectedId: string | null
+  onSelect: (id: string) => void
+  teamColor: string
+  standing?: string
+  loading: boolean
+}) {
+  return (
+    <div className="fs-panel p-4 sm:p-5" style={{ '--tint': teamColor, '--tint-border': `${teamColor}20` } as React.CSSProperties}>
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Last 5 Games</h2>
+        {standing && <span className="fs-meta">{standing}</span>}
+      </div>
+      {loading ? (
+        <div className="flex md:grid md:grid-cols-5 gap-2 overflow-hidden">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="fs-skeleton h-14 min-w-[10rem] md:min-w-0 flex-1" />
+          ))}
+        </div>
+      ) : games.length ? (
+        <div className="flex md:grid md:grid-cols-5 gap-2 overflow-x-auto md:overflow-visible snap-x snap-mandatory md:snap-none pb-1 md:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
+          {games.map((game) => (
+            <div key={game.eventId} className="hover-card rounded-lg px-3 py-2.5 flex items-center gap-2.5 text-left cursor-pointer snap-start min-w-[11rem] md:min-w-0 flex-1" style={{ backgroundColor: `${teamColor}0d`, border: `1px solid ${game.eventId === selectedId ? teamColor : `${teamColor}18`}`, '--card-color': teamColor } as React.CSSProperties}
+              onClick={() => onSelect(game.eventId)}>
+              <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium shrink-0 ${
+                game.result === 'W' ? 'text-fs-turf' : 'text-fs-red'
+              }`} style={{ backgroundColor: game.result === 'W' ? 'rgba(139,197,63,0.15)' : 'rgba(232,93,76,0.15)' }}>
+                {game.result}
+              </span>
+              {game.opponentLogo && (
+                <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain shrink-0" />
+              )}
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-fs-text/85 truncate">
+                  <span className="sm:hidden">{game.opponentAbbr || game.opponent}</span>
+                  <span className="hidden sm:inline">{game.opponent}</span>
+                </p>
+                <p className="text-xs text-fs-muted tabular-nums">{game.score} <span className="text-fs-muted-2">· {game.date}</span></p>
+              </div>
+              {game.isPreseason
+                ? <span className="text-[11px] text-fs-gold/80 shrink-0">Pre</span>
+                : game.seasonTypeName
+                  ? <span className="text-[11px] text-fs-gold/80 shrink-0">{game.seasonTypeName === 'Preseason' ? 'Pre' : game.seasonTypeName}</span>
+                  : null}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-fs-muted animate-fade-in">No recent games</p>
+      )}
+    </div>
+  )
 }
 
 function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any[] | null; loading: boolean; onBack: () => void }) {

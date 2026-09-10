@@ -1,0 +1,363 @@
+[2026-09-04 03:07:02] freetoken qwen3.6-35b-a3b ready
+[2026-09-04 03:07:02] launching opencode on freetoken/qwen3.6-35b-a3b
+[0m
+> build · qwen3.6-35b-a3b
+[0m
+[0m→ [0mRead .overnight-prop-model/MISSION.md
+[0m
+[0m# [0mTodos
+[•] Step 1: Confirm baseline with backtest.py and pytest
+[ ] Step 2: Knob sweep (halflife, prior_strength, opp_shrink, opponent_w)
+[ ] Step 3: Bias hunt - fix rushing bias and passing coverage
+[ ] Step 4: Feature additions with backtest proof
+[ ] Step 5: Thin-sample honesty improvements
+[ ] Step 6: Sportsbook comparison via browser
+[ ] Step 7: Update README.md + AGENTS.md
+[0m
+[0m$ [0mls -la /home/kc-llm/Fanspot/.overnight-prop-model/
+total 32
+drwxrwxr-x  4 kc-llm kc-llm 4096 Sep  4 03:07 .
+drwxrwxr-x 10 kc-llm kc-llm 4096 Sep  4 03:06 ..
+-rw-rw-r--  1 kc-llm kc-llm 5098 Sep  4 03:06 MISSION.md
+-rw-rw-r--  1 kc-llm kc-llm  614 Sep  4 03:07 overnight.log
+-rwxrwxr-x  1 kc-llm kc-llm 2177 Sep  4 03:06 run-overnight.sh
+drwxrwxr-x  2 kc-llm kc-llm 4096 Sep  4 03:07 sweeps
+drwxrwxr-x  2 kc-llm kc-llm 4096 Sep  4 03:07 web
+[0m
+[0m$ [0mls -la /home/kc-llm/Fanspot/prop-model/cache/ 2>/dev/null | head -20
+total 38648
+drwxrwxr-x 3 kc-llm kc-llm     4096 Sep  2 14:42 .
+drwxrwxr-x 8 kc-llm kc-llm     4096 Sep  2 19:20 ..
+-rw-r--r-- 1 kc-llm kc-llm 39548631 Sep  2 14:42 5db0d5f7aa7a296515f128f9.pkl
+drwxrwxr-x 3 kc-llm kc-llm     4096 Sep  2 14:41 espn_events
+-rw-rw-r-- 1 kc-llm kc-llm       86 Sep  2 14:41 tuned_weights_avg.json
+-rw-rw-r-- 1 kc-llm kc-llm     1238 Sep  2 14:40 tuned_weights_nflverse.json
+[0m
+[0m$ [0mcurl -s http://127.0.0.1:1919/v1/models 2>/dev/null | head -5 || echo "FreeToken backend: not responding yet"
+{"object":"list","data":[{"id":"qwen3.6-35b-a3b","object":"model","created":1788505656,"owned_by":"FreeToken","root":"/home/kc-llm/freetoken-server/models/Qwen3.6-35B-A3B-NVFP4","max_model_len":204800,"context_length":204800,"supported_reasoning_efforts":null,"default_reasoning_effort":null}]}
+[0m
+Baseline confirmed: cache exists (37 MB), FreeToken backend alive. Running baseline tests now.
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python -m pytest tests/ -q 2>&1
+........................................................................ [ 52%]
+.................................................................        [100%]
+137 passed in 17.60s
+[0m
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python backtest.py 2>&1
+=== backtest season 2025 ===
+           stat  sampled  scored  refused  refusal_pct  mae  baseline_mae  bias  rmse  coverage68  mean_width
+  passing_yards      204     187       17          8.3 63.3          64.6  -0.4  80.9       0.636       146.0
+  rushing_yards      204     196        8          3.9 17.4          17.5  -3.2  25.7       0.617        35.0
+receiving_yards      204     196        8          3.9 13.8          14.0   0.7  19.0       0.724        34.7
+     receptions      204     196        8          3.9  1.1           1.1  -0.0   1.5       0.740         2.8
+            tds      204     195        9          4.4  0.4           0.4   0.0   0.7       0.718         0.6
+
+--- by history size ---
+                        n   mae  bias   cov
+stat          bucket                       
+passing_yards 3-4      12  81.8 -17.3  0.58
+              5-7       9  67.8 -30.3  0.56
+              8+      166  61.7   2.5  0.64
+
+                        n   mae  bias   cov
+stat          bucket                       
+rushing_yards 3-4      12  13.7   2.7  0.50
+              5-7       9  18.1   2.6  0.78
+              8+      175  17.6  -3.9  0.62
+
+                          n   mae  bias   cov
+stat            bucket                       
+receiving_yards 3-4       8  15.2  -3.7  0.50
+                5-7       8  10.5   1.4  0.62
+                8+      180  13.9   0.9  0.74
+
+                     n  mae  bias   cov
+stat       bucket                      
+receptions 3-4       8  1.0  -0.0  0.62
+           5-7       8  1.1   0.1  0.62
+           8+      180  1.1  -0.0  0.75
+
+               n  mae  bias   cov
+stat bucket                      
+tds  3-4       7  0.1   0.1  1.00
+     5-7       6  0.3   0.3  0.83
+     8+      182  0.4   0.0  0.70
+
+pooled coverage68: continuous=0.680 (n=775), count=0.718 (n=195)
+[0m
+[0m→ [0mRead prop-model/backtest.py
+Baseline confirmed: **137 passed**, backtest matches MISSION.md table exactly. Now writing PROGRESS.md and running knob sweeps.
+[0m→ [0mRead prop-model/propmodel/model.py
+[0m
+[0m← [0mWrite .overnight-prop-model/PROGRESS.md
+Wrote file successfully.
+[0m
+Now running the first wave of knob sweeps to understand parameter sensitivity.
+[2026-09-04 03:09:04] freetoken qwen3.6-35b-a3b ready
+[2026-09-04 03:09:04] launching opencode on freetoken/qwen3.6-35b-a3b
+[0m
+> build · qwen3.6-35b-a3b
+[0m
+[0m→ [0mRead .overnight-prop-model/MISSION.md
+[0m
+[0m$ [0mmkdir -p /home/kc-llm/Fanspot/.overnight-prop-model/sweeps
+(no output)
+[0m
+[0m$ [0mcurl -s http://127.0.0.1:1919/v1/models | head -200
+{"object":"list","data":[{"id":"qwen3.6-35b-a3b","object":"model","created":1788505764,"owned_by":"FreeToken","root":"/home/kc-llm/freetoken-server/models/Qwen3.6-35B-A3B-NVFP4","max_model_len":204800,"context_length":204800,"supported_reasoning_efforts":null,"default_reasoning_effort":null}]}
+[0m
+Starting the overnight mission. Let me begin with Step 1: confirm baseline.
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python -m pytest tests/ -q 2>&1
+........................................................................ [ 52%]
+.................................................................        [100%]
+137 passed in 18.57s
+[0m
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python backtest.py 2>&1
+=== backtest season 2025 ===
+           stat  sampled  scored  refused  refusal_pct  mae  baseline_mae  bias  rmse  coverage68  mean_width
+  passing_yards      204     187       17          8.3 63.3          64.6  -0.4  80.9       0.636       146.0
+  rushing_yards      204     196        8          3.9 17.4          17.5  -3.2  25.7       0.617        35.0
+receiving_yards      204     196        8          3.9 13.8          14.0   0.7  19.0       0.724        34.7
+     receptions      204     196        8          3.9  1.1           1.1  -0.0   1.5       0.740         2.8
+            tds      204     195        9          4.4  0.4           0.4   0.0   0.7       0.718         0.6
+
+--- by history size ---
+                        n   mae  bias   cov
+stat          bucket                       
+passing_yards 3-4      12  81.8 -17.3  0.58
+              5-7       9  67.8 -30.3  0.56
+              8+      166  61.7   2.5  0.64
+
+                        n   mae  bias   cov
+stat          bucket                       
+rushing_yards 3-4      12  13.7   2.7  0.50
+              5-7       9  18.1   2.6  0.78
+              8+      175  17.6  -3.9  0.62
+
+                          n   mae  bias   cov
+stat            bucket                       
+receiving_yards 3-4       8  15.2  -3.7  0.50
+                5-7       8  10.5   1.4  0.62
+                8+      180  13.9   0.9  0.74
+
+                     n  mae  bias   cov
+stat       bucket                      
+receptions 3-4       8  1.0  -0.0  0.62
+           5-7       8  1.1   0.1  0.62
+           8+      180  1.1  -0.0  0.75
+
+               n  mae  bias   cov
+stat bucket                      
+tds  3-4       7  0.1   0.1  1.00
+     5-7       6  0.3   0.3  0.83
+     8+      182  0.4   0.0  0.70
+
+pooled coverage68: continuous=0.680 (n=775), count=0.718 (n=195)
+[0m
+[0m← [0mWrite .overnight-prop-model/PROGRESS.md
+Wrote file successfully.
+[0m
+Baseline confirmed. 137 tests green. Key issues: rushing bias -3.2, passing coverage 0.636 (under-covered), thin samples terrible. Now writing progress and starting knob sweeps.
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python backtest.py 2>&1
+=== backtest season 2025 ===
+           stat  sampled  scored  refused  refusal_pct  mae  baseline_mae  bias  rmse  coverage68  mean_width
+  passing_yards      204     187       17          8.3 63.3          64.6  -0.4  80.9       0.636       146.0
+  rushing_yards      204     196        8          3.9 17.4          17.5  -3.2  25.7       0.617        35.0
+receiving_yards      204     196        8          3.9 13.8          14.0   0.7  19.0       0.724        34.7
+     receptions      204     196        8          3.9  1.1           1.1  -0.0   1.5       0.740         2.8
+            tds      204     195        9          4.4  0.4           0.4   0.0   0.7       0.718         0.6
+
+--- by history size ---
+                        n   mae  bias   cov
+stat          bucket                       
+passing_yards 3-4      12  81.8 -17.3  0.58
+              5-7       9  67.8 -30.3  0.56
+              8+      166  61.7   2.5  0.64
+
+                        n   mae  bias   cov
+stat          bucket                       
+rushing_yards 3-4      12  13.7   2.7  0.50
+              5-7       9  18.1   2.6  0.78
+              8+      175  17.6  -3.9  0.62
+
+                          n   mae  bias   cov
+stat            bucket                       
+receiving_yards 3-4       8  15.2  -3.7  0.50
+                5-7       8  10.5   1.4  0.62
+                8+      180  13.9   0.9  0.74
+
+                     n  mae  bias   cov
+stat       bucket                      
+receptions 3-4       8  1.0  -0.0  0.62
+           5-7       8  1.1   0.1  0.62
+           8+      180  1.1  -0.0  0.75
+
+               n  mae  bias   cov
+stat bucket                      
+tds  3-4       7  0.1   0.1  1.00
+     5-7       6  0.3   0.3  0.83
+     8+      182  0.4   0.0  0.70
+
+pooled coverage68: continuous=0.680 (n=775), count=0.718 (n=195)
+[0m
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python backtest.py --help 2>&1
+usage: backtest.py [-h] [--backtest-season BACKTEST_SEASON]
+                   [--halflife HALFLIFE] [--min-games MIN_GAMES]
+                   [--n-games-hint N_GAMES_HINT] [--opponent-w OPPONENT_W]
+                   [--prior-strength PRIOR_STRENGTH] [--opp-shrink OPP_SHRINK]
+                   [--sd-mult-continuous SD_MULT_CONTINUOUS]
+                   [--sd-mult-count SD_MULT_COUNT] [--cache-dir CACHE_DIR]
+                   [--json-out JSON_OUT]
+
+Backtest harness: score the projection model against cached actuals. Loads the
+cached nflverse weekly frames (populated by any live CLI pull via
+``reliability.DiskCache``), then walks sampled player-weeks of a backtest
+season and asks: "what would the model have projected *before* this game,
+using only prior games and an as-of opponent read?" Each evaluation is scored
+against the actual stat line. Per stat we report MAE, bias, RMSE, coverage of
+the stated ~68% confidence range, mean range width, and the refusal rate, plus
+a history-size breakdown (thin samples are where models usually lie to you).
+Baseline-only (no opponent / game-script factor) is reported alongside the
+full model so each stage's contribution is visible. Game-script is neutral 1.0
+throughout: no historical Vegas lines are cached (The Odds API integration is
+deferred), so this measures baseline + opponent quality. Position priors and
+defense reads are computed strictly from games before each evaluation week —
+no leakage. Usage (from prop-model/): .venv/bin/python backtest.py # score
+defaults .venv/bin/python backtest.py --halflife 6 ... # sweep a knob
+
+options:
+  -h, --help            show this help message and exit
+  --backtest-season BACKTEST_SEASON
+                        season to walk forward through (default: latest cached
+                        minus none)
+  --halflife HALFLIFE
+  --min-games MIN_GAMES
+  --n-games-hint N_GAMES_HINT
+                        history length hint
+  --opponent-w OPPONENT_W
+  --prior-strength PRIOR_STRENGTH
+  --opp-shrink OPP_SHRINK
+  --sd-mult-continuous SD_MULT_CONTINUOUS
+  --sd-mult-count SD_MULT_COUNT
+  --cache-dir CACHE_DIR
+  --json-out JSON_OUT   write per-evaluation detail JSON here
+[0m
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && grep -n "class ModelWeights\|halflife\|prior_strength\|opp_shrink\|opponent_w\|sd_mult\|CALIBRATED" prop-model/*.py prop-model/prop-model/*.py prop-model/model.py prop-model/*.py 2>/dev/null | head -80
+(no output)
+[0m
+Let me check the backtest help and the model source to understand all available knobs.
+[0m✱ [0mGlob "**/model*.py"[90m in prop-model · 1 match[0m
+[0m
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && grep -rn "ModelWeights\|CALIBRATED_SD\|sd_mult\|prior_strength\|halflife\|opp_shrink\|opponent_w" --include="*.py" | head -60
+tests/test_model_enhancements.py:13:    ModelWeights,
+tests/test_model_enhancements.py:444:        w = recency_weights(n, halflife=4.0)
+tests/test_model_enhancements.py:451:    w = recency_weights(1, halflife=4.0)
+tests/test_model.py:13:    ModelWeights,
+tests/test_model.py:54:    w = ModelWeights(opponent=0.0, game_script=0.0)
+tests/test_model.py:157:    w = ModelWeights()
+tests/test_model.py:159:    ess = effective_sample_size(recency_weights(hist.n_games, w.halflife))
+tests/test_model.py:160:    pred_sd = math.sqrt(proj.baseline) * math.sqrt(1.0 + 1.0 / ess) * w.sd_mult_count
+tests/test_model.py:168:    tiny raw mean; prior_strength=0 recovers the unshrunk behavior."""
+tests/test_model.py:171:    raw_mean = float(np.average(x, weights=recency_weights(len(x), halflife=4.0)))
+tests/test_model.py:173:                   position_prior=200.0, weights=ModelWeights(prior_strength=3.0))
+tests/test_model.py:177:                        position_prior=200.0, weights=ModelWeights(prior_strength=0.0))
+tests/test_model.py:187:                                weights=recency_weights(3, halflife=4.0)))
+tests/test_model.py:189:                                weights=recency_weights(8, halflife=4.0)))
+tests/test_walkforward_acceptance.py:29:from propmodel.model import ModelWeights, project  # noqa: E402
+tests/test_walkforward_acceptance.py:84:def _walk(weekly: pd.DataFrame, stat_key: str, season: int, weights: ModelWeights):
+tests/test_walkforward_acceptance.py:109:                                shrink_games=weights.opp_shrink)
+tests/test_walkforward_acceptance.py:147:    weights = ModelWeights()
+backtest.py:22:    .venv/bin/python backtest.py --halflife 6 ...    # sweep a knob
+backtest.py:45:from propmodel.model import ModelWeights, project, recency_weights, effective_sample_size
+backtest.py:148:, stat_key: str, weights: ModelWeights,
+backtest.py:183:                            shrink_games=weights.opp_shrink,
+backtest.py:194:        neutral_w = ModelWeights(**{**weights.__dict__, "opponent": 0.0, "game_script": 0.0})
+backtest.py:262:    ap.add_argument("--halflife", type=float, default=ModelWeights.halflife)
+backtest.py:263:    ap.add_argument("--min-games", type=int, default=ModelWeights.min_games)
+backtest.py:265:    ap.add_argument("--opponent-w", type=float, default=ModelWeights.opponent)
+backtest.py:266:    ap.add_argument("--prior-strength", type=float, default=ModelWeights.prior_strength)
+backtest.py:268:    ap.add_argument("--sd-mult-continuous", type=float, default=ModelWeights.sd_mult_continuous)
+backtest.py:269:    ap.add_argument("--sd-mult-count", type=float, default=ModelWeights.sd_mult_count)
+backtest.py:274:    weights = ModelWeights(
+backtest.py:275:        halflife=args.halflife, opponent=args.opponent_w, min_games=args.min_games,
+backtest.py:276:        prior_strength=args.prior_strength, opp_shrink=args.opp_shrink,
+backtest.py:277:        sd_mult_continuous=args.sd_mult_continuous, sd_mult_count=args.sd_mult_count,
+propmodel/train.py:6:    halflife        — recency decay (2, 4, 6, 8)
+propmodel/train.py:7:    prior_strength  — shrinkage toward position prior (0, 0.5, 1, 3)
+propmodel/train.py:8:    opp_shrink      — shrinkage toward league-average defense (3, 6, 10)
+propmodel/train.py:40:``PER_WEEK_CAP`` sampling, just with a different ``ModelWeights`` per trial.
+propmodel/train.py:55:from .model import ModelWeights
+propmodel/train.py:64:    "halflife": [2.0, 4.0, 6.0, 8.0],
+propmodel/train.py:65:    "prior_strength": [0.0, 0.5, 1.0, 3.0],
+propmodel/train.py:66:    "opp_shrink": [3.0, 6.0, 10.0],
+propmodel/train.py:71:    "halflife": [4.0, 6.0],
+propmodel/train.py:72:    "prior_strength": [0.5, 1.0],
+propmodel/train.py:73:    "opp_shrink": [6.0],
+propmodel/train.py:102:def _score_weights(weekly: pd.DataFrame, season: int, weights: ModelWeights, stat: str, n_games: int = 8) -> dict:
+propmodel/train.py:127:    combos = list(itertools.product(grid["halflife"], grid["prior_strength"], grid["opp_shrink"], grid["opponent"]))
+propmodel/train.py:139:        for halflife, prior_strength, opp_shrink, opponent in combos:
+propmodel/train.py:140:            w = ModelWeights(halflife=halflife, prior_strength=prior_strength, opp_shrink=opp_shrink, opponent=opponent)
+propmodel/train.py:159:                "halflife": best_w.halflife,
+propmodel/train.py:160:                "prior_strength": best_w.prior_strength,
+propmodel/train.py:161:                "opp_shrink": best_w.opp_shrink,
+propmodel/train.py:166:            logger.info("Best %s: MAE %.2f with halflife=%.1f prior=%.1f opp_shrink=%.1f opponent=%.1f", stat, best_detail["mae"], best_w.halflife, best_w.prior_strength, best_w.opp_shrink, best_w.opponent)
+propmodel/train.py:175:    # Also write a single ModelWeights JSON consumable by --weights-json (average of per-stat best)
+propmodel/train.py:178:            "halflife": round(float(np.mean([v["halflife"] for v in best.values()])), 2),
+propmodel/train.py:179:            "prior_strength": round(float(np.mean([v["prior_strength"] for v in best.values()])), 2),
+propmodel/train.py:180:            "opp_shrink": round(float(np.mean([v["opp_shrink"] for v in best.values()])), 2),
+propmodel/cli.py:47:from .model import FullProjection, ModelWeights, Projection, position_guard_reason, project
+propmodel/cli.py:70:    p.add_argument("--weights-json", help="ModelWeights override JSON (halflife, opponent, game_script, min_games)")
+propmodel/cli.py:181:def _weights(args) -> ModelWeights:
+propmodel/cli.py:189:            "halflife", "opponent", "game_script", "min_games",
+[0m
+[0m→ [0mRead prop-model/propmodel/model.py[90m [limit=120][0m
+Now running systematic knob sweeps. I'll run multiple in parallel.
+[0m
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python backtest.py --halflife 2 --json-out /dev/stdout 2>&1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('summary',{}))" 2>/dev/null || .venv/bin/python backtest.py --halflife 2 2>&1 | tail -10
+5-7       8  1.1   0.1  0.62
+           8+      180  1.1  -0.0  0.74
+
+               n  mae  bias   cov
+stat bucket                      
+tds  3-4       7  0.1   0.1  1.00
+     5-7       6  0.3   0.3  0.83
+     8+      182  0.4   0.0  0.70
+
+pooled coverage68: continuous=0.683 (n=775), count=0.718 (n=195)
+[0m
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python backtest.py --halflife 4 --json-out /dev/stdout 2>&1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('summary',{}))" 2>/dev/null || .venv/bin/python backtest.py --halflife 4 2>&1 | tail -10
+5-7       8  1.1   0.1  0.62
+           8+      180  1.1  -0.0  0.75
+
+               n  mae  bias   cov
+stat bucket                      
+tds  3-4       7  0.1   0.1  1.00
+     5-7       6  0.3   0.3  0.83
+     8+      182  0.4   0.0  0.70
+
+pooled coverage68: continuous=0.680 (n=775), count=0.718 (n=195)
+[0m
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python backtest.py --halflife 6 --json-out /dev/stdout 2>&1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('summary',{}))" 2>/dev/null || .venv/bin/python backtest.py --halflife 6 2>&1 | tail -10
+5-7       8  1.1   0.1  0.62
+           8+      180  1.1  -0.0  0.73
+
+               n  mae  bias   cov
+stat bucket                      
+tds  3-4       7  0.1   0.1  1.00
+     5-7       6  0.3   0.3  0.83
+     8+      182  0.4   0.0  0.70
+
+pooled coverage68: continuous=0.663 (n=775), count=0.718 (n=195)
+[0m
+[0m$ [0mcd /home/kc-llm/Fanspot/prop-model && .venv/bin/python backtest.py --halflife 8 --json-out /dev/stdout 2>&1 | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('summary',{}))" 2>/dev/null || .venv/bin/python backtest.py --halflife 8 2>&1 | tail -10
+5-7       8  1.1   0.1  0.62
+           8+      180  1.1  -0.0  0.73
+
+               n  mae  bias   cov
+stat bucket                      
+tds  3-4       7  0.1   0.1  1.00
+     5-7       6  0.3   0.3  0.83
+     8+      182  0.4   0.0  0.70
+
+pooled coverage68: continuous=0.665 (n=775), count=0.718 (n=195)
+[0m
+Let me create a systematic sweep script that captures the full results.

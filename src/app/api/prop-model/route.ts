@@ -120,7 +120,13 @@ export async function POST(request: Request) {
       recent_form_factor: r.recent_form_factor ?? null,
       refused_reason: r.refused_reason,
       note: r.note ?? null,
-      warnings: r.warnings ?? null,
+      // The CLI historically emitted warnings as a JSON-encoded string;
+      // normalize to an array (or null) so the panel can .join() safely.
+      warnings: Array.isArray(r.warnings)
+        ? r.warnings
+        : typeof r.warnings === 'string' && r.warnings
+          ? (() => { try { const p = JSON.parse(r.warnings); return Array.isArray(p) ? p : [r.warnings] } catch { return [r.warnings] } })()
+          : null,
       last_updated: r.last_updated ?? null,
       reliability: r.reliability ?? 0,
       pred_sd: r.pred_sd ?? null,

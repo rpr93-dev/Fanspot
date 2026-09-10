@@ -1,0 +1,21 @@
+services:
+  scraper:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: fanspot-scraper
+    ports:
+      - "127.0.0.1:8770:8765"
+    environment:
+      - PYTHONUNBUFFERED=1
+      - ODDS_API_KEY=${ODDS_API_KEY:-}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Increase memory for Playwright
+    mem_limit: 2g
+    shm_size: 2g

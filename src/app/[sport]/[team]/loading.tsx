@@ -10,8 +10,8 @@ export default function TeamLoading() {
               <div className="h-7 w-3/4 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }} />
               <div className="h-4 w-1/2 rounded mt-3" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }} />
             </div>
-            <div className="rounded-xl p-6 flex flex-col items-center justify-center" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-              <div className="w-28 h-28 rounded-full mb-4" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }} />
+            <div className="rounded-xl p-6 flex items-center gap-5" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
+              <div className="w-20 h-20 rounded-full shrink-0" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }} />
               <div className="h-6 w-40 rounded" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }} />
             </div>
           </div>
@@ -19,9 +19,9 @@ export default function TeamLoading() {
         <div className="mb-5">
           <div className="rounded-xl p-5" style={{ backgroundColor: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
             <div className="h-3 w-24 rounded mb-3" style={{ backgroundColor: 'rgba(255,255,255,0.06)' }} />
-            <div className="grid grid-cols-5 gap-3">
+            <div className="flex md:grid md:grid-cols-5 gap-3 overflow-hidden">
               {[...Array(5)].map((_, j) => (
-                <div key={j} className="h-24 rounded-lg animate-pulse" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }} />
+                <div key={j} className="h-14 rounded-lg animate-pulse min-w-[10rem] md:min-w-0 flex-1" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }} />
               ))}
             </div>
           </div>

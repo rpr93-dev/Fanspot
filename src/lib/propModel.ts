@@ -4,6 +4,8 @@ import path from 'path'
 import fs from 'fs/promises'
 import { spawn } from 'child_process'
 
+export { eventDateToAsOf } from './propLedger'
+
 /**
  * Shared plumbing for the Python prop model (prop-model/propmodel):
  * venv paths, cache warm-up, and event-date normalization.
@@ -45,16 +47,6 @@ export async function preferredDataSource(): Promise<'espn' | 'nflverse'> {
     if (files.some(f => f.startsWith('espn_weekly_') && f.endsWith('.parquet'))) return 'espn'
   } catch {}
   return 'nflverse'
-}
-
-/** The panel's event date ("YYYYMMDD" or ISO) → the CLI's --as-of form. */
-export function eventDateToAsOf(eventDate?: string | null): string | null {
-  if (!eventDate) return null
-  if (/^\d{8}$/.test(eventDate)) {
-    return `${eventDate.slice(0, 4)}-${eventDate.slice(4, 6)}-${eventDate.slice(6, 8)}`
-  }
-  if (/^\d{4}-\d{2}-\d{2}/.test(eventDate)) return eventDate.slice(0, 10)
-  return null
 }
 
 let warmupStarted = false

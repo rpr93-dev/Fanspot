@@ -13,6 +13,9 @@ cache/
 *.parquet
 *.feather
 
+# Game-day ledger (pre-game snapshots + live points for engine tuning)
+ledger/
+
 # Local config / secrets
 .env
 .env.*

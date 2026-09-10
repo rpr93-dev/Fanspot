@@ -44,6 +44,40 @@ import pandas as pd
 from .data_pipeline import PlayerHistory
 from .stats import StatSpec
 
+
+def _normal_cdf(x: float, mean: float, std: float) -> float:
+    """Standard normal CDF: P(X <= x) for N(mean, std)."""
+    if std is None or std <= 0:
+        return 0.5
+    z = (x - mean) / std
+    # Abramowitz & Stegun approximation for the error function (accurate to ~1e-7)
+    sign = 1 if z >= 0 else -1
+    abs_z = abs(z)
+    t = 1.0 / (1.0 + 0.2316419 * abs_z)
+    d = 0.3989422804014327  # 1/sqrt(2*pi)
+    pdf = d * math.exp(-abs_z * abs_z / 2)
+    cdf = 1.0 - pdf * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
+    return 1.0 - cdf if sign == -1 else cdf
+
+
+@dataclass
+class EdgeResult:
+    """Comparison of model projection vs sportsbook line."""
+    line: float | None = None
+    edge: float = 0.0
+    over_prob: float = 0.5
+    pick: str = "fair"  # "over", "under", "fair"
+    strong: bool = False  # strong pick: high edge AND high confidence
+
+    def to_dict(self) -> dict:
+        return {
+            "line": round(self.line, 1) if self.line else None,
+            "edge": round(self.edge, 1),
+            "over_prob": round(self.over_prob, 3),
+            "pick": self.pick,
+            "strong": self.strong,
+        }
+
 # ── Interval calibration multipliers ────────────────────────────────────────
 CALIBRATED_SD_MULT_CONTINUOUS = 1.01
 CALIBRATED_SD_MULT_COUNT = 0.63
@@ -105,6 +139,7 @@ class FullProjection:
     note: str | None = None
     warnings: list[str] = field(default_factory=list)
     inputs: dict = field(default_factory=dict)
+    edge: EdgeResult | None = None
 
     def to_dict(self) -> dict:
         d = {
@@ -136,6 +171,8 @@ class FullProjection:
             d["warnings"] = self.warnings
         if self.inputs:
             d["inputs"] = self.inputs
+        if self.edge:
+            d["edge"] = self.edge.to_dict()
         return d
 
 
@@ -467,6 +504,68 @@ def build_distribution(
         "mean": float(projection),
         "std_dev": float(pred_sd),
     }
+
+
+def compute_edge(
+    projection: float | None,
+    pred_sd: float | None,
+    confidence_score: float,
+    line: float | None,
+    stat_kind: str,
+) -> EdgeResult:
+    """Compute model-vs-line edge: P(over), edge value, pick direction.
+
+    Uses the model's distribution (normal around projection with pred_sd)
+    to compute P(actual > line), then flags "over" or "under" when the
+    model probability exceeds the sportsbook's break-even (plus vig).
+
+    For a double-action line like 4.5 TDs, the break-even is ~50% (ignoring vig).
+    For a half-line stat like 45.5 yards, same logic. For whole-number lines
+    like 4 TDs where the actual value can be exactly 4, treat the "over" as
+    >4 (not >=4).
+    """
+    if line is None or line <= 0:
+        return EdgeResult(line=None)
+
+    if projection is None or pred_sd is None:
+        return EdgeResult(line=line, edge=0.0, over_prob=0.5, pick="fair")
+
+    mean = projection
+    std = max(pred_sd, 0.01)  # avoid divide by zero
+
+    # P(over) = P(actual > line) = 1 - CDF(line)
+    over_prob = 1.0 - _normal_cdf(line, mean, std)
+
+    # Edge = expected value beyond the line
+    edge = mean - line
+
+    # Pick direction: use both probability and edge
+    # "Fair" when model is close to the line (within ~0.3 std dev)
+    z_score = (mean - line) / std
+    abs_z = abs(z_score)
+
+    if abs_z < 0.3:
+        pick = "fair"
+    elif z_score > 0:
+        pick = "over"
+    else:
+        pick = "under"
+
+    # Strong: high confidence + meaningful edge (≥0.5 std dev or ≥40% probability tilt)
+    strong = False
+    if confidence_score >= 0.5:
+        if pick == "over" and over_prob >= 0.65 and abs_z >= 0.5:
+            strong = True
+        elif pick == "under" and over_prob <= 0.35 and abs_z >= 0.5:
+            strong = True
+
+    return EdgeResult(
+        line=line,
+        edge=edge,
+        over_prob=over_prob,
+        pick=pick,
+        strong=strong,
+    )
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
