@@ -1,5 +1,5 @@
-import { TTL, STALE } from '@/lib/cache/ttl'
-import { swr, fetchOrCache } from '@/lib/cache/cacheService'
+import { TTL, STALE, scheduleTtlFor } from '@/lib/cache/ttl'
+import { swr, fetchOrCache, getCached, setCached, isFresh } from '@/lib/cache/cacheService'
 import { getTeamSchedule as providerGetSchedule } from '@/lib/providers/index'
 
 export interface GameScheduleResult {
@@ -16,18 +16,22 @@ export async function getSchedule(
   origin?: string,
 ): Promise<GameScheduleResult> {
   const cacheKey = `schedule:${sport}:${teamId}`
-  return fetchOrCache(
-    cacheKey,
-    TTL.SCHEDULE,
-    async () => {
-      const result = await providerGetSchedule(sport, teamId, teamAbbreviation, origin)
-      const upcomingEventId = result.upcoming?.id ?? null
-      const upcomingDate = result.upcoming
-        ? result.upcoming.date.slice(0, 10).replace(/-/g, '')
-        : null
-      return { ...result, upcomingEventId, upcomingDate }
-    },
-  )
+  // Game-clock-aware TTL (see scheduleTtlFor): a flat 6h TTL serves a
+  // pre-kickoff snapshot all game long, and once the game's date passes it
+  // drops out of `upcoming` entirely — the live game vanishes from the dash.
+  const peek = getCached<GameScheduleResult>(cacheKey)
+  if (peek) {
+    const probe = [peek.data.upcoming, ...(peek.data.lastFive ?? [])].filter(Boolean)
+    if (isFresh(peek.ts, scheduleTtlFor(probe))) return peek.data
+  }
+  const result = await providerGetSchedule(sport, teamId, teamAbbreviation, origin)
+  const upcomingEventId = result.upcoming?.id ?? null
+  const upcomingDate = result.upcoming
+    ? result.upcoming.date.slice(0, 10).replace(/-/g, '')
+    : null
+  const out = { ...result, upcomingEventId, upcomingDate }
+  setCached(cacheKey, out)
+  return out
 }
 
 function apiUrl(path: string, origin?: string): string {

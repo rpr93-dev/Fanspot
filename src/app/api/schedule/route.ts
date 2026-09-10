@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
 import { espnSportMap } from '@/lib/providers/espn'
-import { fetchOrCache } from '@/lib/cache/cacheService'
-import { TTL } from '@/lib/cache/ttl'
+import { getCached, setCached, isFresh } from '@/lib/cache/cacheService'
+import { scheduleTtlFor } from '@/lib/cache/ttl'
 
 /** Carries the upstream status through fetchOrCache so error responses stay uncached and exact. */
 class EspnStatusError extends Error {
@@ -44,20 +44,22 @@ export async function GET(request: Request) {
   try {
     // Route-level cache: the client schedule poll re-runs the full ESPN fan-out
     // (up to 6 of these proxy calls, ~2 MB JSON) from every open tab every
-    // 300s (F1). TTL.SCHEDULE matches the gameService path's cache so both
-    // routes serve equally fresh data; failures stay uncached so the next
-    // poll retries.
-    const data = await fetchOrCache(
-      `schedule:${sport.toUpperCase()}:${team.toUpperCase()}:${season ?? ''}:${source ?? ''}:${dates ?? ''}`,
-      TTL.SCHEDULE,
-      async () => {
-        const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
-        if (!res.ok) {
-          throw new EspnStatusError(res.status)
-        }
-        return res.json()
-      }
-    )
+    // 300s (F1); failures stay uncached so the next poll retries.
+    // The TTL follows the game clock (scheduleTtlFor): a flat 6h TTL drops
+    // live games from the dashboard — a feed cached pre-kickoff still marks
+    // the game `pre`, and once its date passes it matches neither the future
+    // list nor the live list, so the game vanishes until the cache expires.
+    const key = `schedule:${sport.toUpperCase()}:${team.toUpperCase()}:${season ?? ''}:${source ?? ''}:${dates ?? ''}`
+    const peek = getCached<any>(key)
+    if (peek && isFresh(peek.ts, scheduleTtlFor(peek.data?.events))) {
+      return NextResponse.json(peek.data, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
+    }
+    const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+    if (!res.ok) {
+      throw new EspnStatusError(res.status)
+    }
+    const data = await res.json()
+    setCached(key, data)
     return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
   } catch (err) {
     if (err instanceof EspnStatusError) {
