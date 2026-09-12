@@ -134,7 +134,7 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
       })
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }))
-        setOutput(`Error: ${err.error ?? 'Unknown error'}`)
+        setOutput(`Error: ${err.message ?? err.error ?? 'Unknown error'}`)
       } else {
         const data = await res.json()
         setOutput(data.content ?? 'No response generated')

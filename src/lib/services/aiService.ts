@@ -1,3 +1,4 @@
+import { createHash } from 'crypto'
 import { TTL } from '@/lib/cache/ttl'
 import { setCached, getCached, isFresh } from '@/lib/cache/cacheService'
 
@@ -208,8 +209,13 @@ export async function generateAIAnalysis(
   customQuestion?: string,
 ): Promise<string> {
   // Include team + sport so analyses for different teams never collide in the cache —
-  // otherwise one team's write-up would be served to another.
-  const cacheKey = `ai:${context.sport}:${context.teamAbbr}:${pageType}:${[...focusAreas].sort().join(',')}:${style}:${customQuestion || 'none'}`
+  // otherwise one team's write-up would be served to another. The custom question is
+  // hashed into the key (never embedded): it is arbitrary user text and the cache
+  // map stores keys raw.
+  const questionDigest = customQuestion && customQuestion.trim()
+    ? createHash('sha256').update(customQuestion.trim()).digest('hex').slice(0, 32)
+    : 'none'
+  const cacheKey = `ai:${context.sport}:${context.teamAbbr}:${pageType}:${[...focusAreas].sort().join(',')}:${style}:${questionDigest}`
 
   const cached = getCached<string>(cacheKey)
   if (cached && isFresh(cached.ts, TTL.AI_RESPONSE)) return cached.data

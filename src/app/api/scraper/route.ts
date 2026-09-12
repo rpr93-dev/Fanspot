@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server'
+import { DATE_RE, TEAM_RE, invalidParam, isAllowedSport } from '@/lib/api-validation'
+import { checkRateLimit } from '@/lib/rate-limit'
 
 /**
  * POST /api/scraper/scrape
@@ -12,6 +14,9 @@ import { NextResponse } from 'next/server'
 const SCRAPER_URL = process.env.SCRAPER_URL || 'http://localhost:8770'
 
 export async function POST(request: Request) {
+  const limited = checkRateLimit(request, 'scraper')
+  if (limited) return limited
+
   let body: any
   try {
     body = await request.json()
@@ -25,6 +30,18 @@ export async function POST(request: Request) {
       { error: 'Missing required fields: team, opponent, gameDate' },
       { status: 400 },
     )
+  }
+  if (typeof team !== 'string' || !TEAM_RE.test(team.toUpperCase())) {
+    return invalidParam('team must be a 2-4 character abbreviation')
+  }
+  if (typeof opponent !== 'string' || !TEAM_RE.test(opponent.toUpperCase())) {
+    return invalidParam('opponent must be a 2-4 character abbreviation')
+  }
+  if (typeof gameDate !== 'string' || !DATE_RE.test(gameDate)) {
+    return invalidParam('gameDate must be YYYYMMDD')
+  }
+  if (sport != null && !isAllowedSport(sport)) {
+    return invalidParam('sport must be one of NFL, NBA, NHL, MLB')
   }
 
   try {
@@ -43,8 +60,9 @@ export async function POST(request: Request) {
 
     if (!scrapeRes.ok) {
       const errorText = await scrapeRes.text().catch(() => '')
+      console.error(`[scraper] upstream scrape failed: ${scrapeRes.status} ${errorText.slice(0, 500)}`)
       return NextResponse.json(
-        { error: 'Scraper failed', details: errorText },
+        { error: 'SCRAPER_FAILED', message: 'Scraper failed' },
         { status: scrapeRes.status },
       )
     }
@@ -71,8 +89,9 @@ export async function POST(request: Request) {
       results,
     })
   } catch (err: any) {
+    console.error('[scraper] scrape request failed:', err?.message ?? err)
     return NextResponse.json(
-      { error: 'Scraper request failed', details: err?.message },
+      { error: 'SCRAPER_UNAVAILABLE', message: 'Scraper request failed' },
       { status: 502 },
     )
   }
@@ -85,9 +104,12 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const date = searchParams.get('date')
+  if (date && !DATE_RE.test(date)) {
+    return invalidParam('date must be YYYYMMDD')
+  }
 
   try {
-    const url = `${SCRAPER_URL}/results${date ? `?date=${date}` : ''}`
+    const url = `${SCRAPER_URL}/results${date ? `?date=${encodeURIComponent(date)}` : ''}`
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) })
 
     if (!res.ok) {
@@ -99,8 +121,9 @@ export async function GET(request: Request) {
 
     return NextResponse.json(await res.json())
   } catch (err: any) {
+    console.error('[scraper] results request failed:', err?.message ?? err)
     return NextResponse.json(
-      { error: 'Scraper unavailable', details: err?.message },
+      { error: 'SCRAPER_UNAVAILABLE', message: 'Scraper unavailable' },
       { status: 502 },
     )
   }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { espnSportMap } from '@/lib/providers/espn'
+import { invalidParam, isKnownEspnSport, isValidEventId } from '@/lib/api-validation'
 
 const reservedKeys = new Set(['athlete', 'stats', 'statistics', 'displayValue', 'value', 'team', 'id', 'uid', 'guid', 'type', 'slug', 'sequence'])
 
@@ -135,6 +136,12 @@ export async function GET(request: Request) {
   if (!sport || !eventId) {
     return NextResponse.json({ error: 'Missing sport or eventId' }, { status: 400 })
   }
+  if (!isKnownEspnSport(sport)) {
+    return invalidParam('sport must be one of NFL, NBA, NHL, MLB')
+  }
+  if (!isValidEventId(eventId)) {
+    return invalidParam('eventId must be numeric')
+  }
 
   const espnPath = espnSportMap[sport.toUpperCase()]
   if (!espnPath) {
@@ -143,18 +150,19 @@ export async function GET(request: Request) {
 
   try {
     let res = await fetch(
-      `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${eventId}`,
+      `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventId)}`,
       { signal: AbortSignal.timeout(15000) }
     )
     if (!res.ok && sport.toUpperCase() === 'NBA') {
       // Fallback: Summer League games live under nba-summer path
       const slPath = 'basketball/nba-summer'
       res = await fetch(
-        `https://site.api.espn.com/apis/site/v2/sports/${slPath}/summary?event=${eventId}`,
+        `https://site.api.espn.com/apis/site/v2/sports/${slPath}/summary?event=${encodeURIComponent(eventId)}`,
         { signal: AbortSignal.timeout(15000) }
       )
     }
     if (!res.ok) {
+      console.error(`[box-score] ESPN API error ${res.status} for sport=${sport} event=${eventId}`)
       return NextResponse.json({ error: `ESPN API error ${res.status}` }, { status: res.status })
     }
     const data = await res.json()
@@ -312,6 +320,7 @@ export async function GET(request: Request) {
       },
     }, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    console.error('[box-score] request failed:', err)
+    return NextResponse.json({ error: 'BOX_SCORE_UNAVAILABLE', message: 'Unable to load box score' }, { status: 500 })
   }
 }

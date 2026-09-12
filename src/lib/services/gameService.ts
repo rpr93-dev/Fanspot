@@ -1,5 +1,5 @@
 import { TTL, STALE, scheduleTtlFor } from '@/lib/cache/ttl'
-import { swr, fetchOrCache, getCached, setCached, isFresh } from '@/lib/cache/cacheService'
+import { swr, fetchOrCache, getCached, setCachedChecked, isFresh } from '@/lib/cache/cacheService'
 import { getTeamSchedule as providerGetSchedule } from '@/lib/providers/index'
 
 export interface GameScheduleResult {
@@ -30,7 +30,7 @@ export async function getSchedule(
     ? result.upcoming.date.slice(0, 10).replace(/-/g, '')
     : null
   const out = { ...result, upcomingEventId, upcomingDate }
-  setCached(cacheKey, out)
+  setCachedChecked(cacheKey, out)
   return out
 }
 

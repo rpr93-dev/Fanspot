@@ -1,6 +1,9 @@
 import { NextResponse } from 'next/server'
 import { XMLParser } from 'fast-xml-parser'
 import { fetchOrCache } from '@/lib/cache/cacheService'
+import { SPORT_ALLOWLIST } from '@/lib/api-validation'
+
+const MAX_TEAM_PARAM = 80
 import { TTL } from '@/lib/cache/ttl'
 
 const parser = new XMLParser({
@@ -161,6 +164,9 @@ export async function GET(request: Request) {
 
   if (!teamName) {
     return NextResponse.json({ error: 'Missing team' }, { status: 400 })
+  }
+  if (teamName.length > MAX_TEAM_PARAM || !SPORT_ALLOWLIST.includes(sport.toLowerCase() as any)) {
+    return NextResponse.json({ error: 'INVALID_PARAM', message: `team (≤${MAX_TEAM_PARAM} chars) and sport (NFL/NBA/NHL/MLB) required` }, { status: 400 })
   }
 
   // Route-level cache: the client news poll re-hits this route every 120s per

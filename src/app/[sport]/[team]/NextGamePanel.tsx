@@ -423,7 +423,7 @@ export default function NextGamePanel({
         signal: AbortSignal.timeout(180000),
       })
       const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json.error ?? `Model API returned ${res.status}`)
+      if (!res.ok) throw new Error(json.message ?? json.error ?? `Model API returned ${res.status}`)
       const projs = Array.isArray(json.projections) ? json.projections : []
       setModelResults(projs)
       // Persist the pre-game snapshot once per game (the ledger replaces, never
@@ -561,7 +561,22 @@ export default function NextGamePanel({
         body: JSON.stringify({ action: 'pre', team: t1, opponent: t2, eventDate, record: { ...meta, rows } }),
         signal: AbortSignal.timeout(30000),
       })
-        .then((res) => res.json().catch(() => null))
+        .then(async (res) => {
+          if (res.status === 409) {
+            // Snapshot is write-once: one already exists server-side (second
+            // tab or replayed run). Treat as success — hydrate from the
+            // ledger so live comparison tracks the frozen snapshot.
+            try {
+              const g = await fetch(`/api/prop-ledger?team=${t1}&opponent=${t2}&eventDate=${eventDate}`, { signal: AbortSignal.timeout(10000) })
+                .then((r) => r.json())
+              if (g?.game?.pre) {
+                setLedger((prev: any) => (prev?.pre ? prev : { ...prev, eventDate, team: t1, opponent: t2, live: prev?.live ?? [], pre: g.game.pre }))
+              }
+            } catch { /* leave the local view as-is */ }
+            return null
+          }
+          return res.json().catch(() => null)
+        })
         .then((j) => {
           if (j?.ok) {
             setLedger((g: any) => ({
@@ -672,7 +687,7 @@ export default function NextGamePanel({
         signal: AbortSignal.timeout(180000),
       })
       const json = await res.json().catch(() => ({}))
-      if (!res.ok) throw new Error(json.error ?? `Model API returned ${res.status}`)
+      if (!res.ok) throw new Error(json.message ?? json.error ?? `Model API returned ${res.status}`)
       const projs = Array.isArray(json.projections) ? json.projections : []
       // Only keep the rows if this backup is still the one under center.
       if (Object.values(exitedQbsRef.current).some((e) => e.backup === backupName)) {
