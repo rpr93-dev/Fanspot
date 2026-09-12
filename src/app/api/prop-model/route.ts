@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import path from 'path'
 import os from 'os'
 import fs from 'fs/promises'
+import { checkRateLimit } from '@/lib/rate-limit'
 import {
   CACHE_DIR,
   PYTHON,
@@ -39,6 +40,8 @@ const WARMING_MESSAGE =
   'The prop model is warming up — its first run downloads NFL data. Try again in a minute.'
 
 export async function POST(request: Request) {
+  const limited = checkRateLimit(request, 'prop-model')
+  if (limited) return limited
   warmPropModel()
 
   let body: any
@@ -77,7 +80,13 @@ export async function POST(request: Request) {
     const dataSource = body?.dataSource === 'espn' || body?.dataSource === 'nflverse'
       ? body.dataSource as string
       : await preferredDataSource()
-    const weightsPath = body?.weightsJson || await tunedWeightsPath()
+    if (body?.weightsJson !== undefined) {
+      // Security: never let a client path the model's --weights-json flag —
+      // the CLI reads whatever file it points at. Always use server-owned
+      // tuned weights; a supplied value is ignored (logged once, audit trail).
+      console.warn('[prop-model] ignoring client-supplied weightsJson; using server tuned weights')
+    }
+    const weightsPath = await tunedWeightsPath()
     const args = [
       '-m', 'propmodel.cli',
       '--input', batchPath,
@@ -142,9 +151,9 @@ export async function POST(request: Request) {
       warmPropModel()
       return NextResponse.json({ error: WARMING_MESSAGE, warmingUp: true }, { status: 503 })
     }
-    const lastLine = detail.trim().split('\n').filter(Boolean).pop() ?? 'unknown error'
+    // Generic user-safe message; full detail already logged server-side.
     return NextResponse.json(
-      { error: `Prop model run failed: ${lastLine}` },
+      { error: 'MODEL_RUN_FAILED', message: 'Prop model run failed' },
       { status: 500 },
     )
   } finally {

@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { espnSportMap } from '@/lib/providers/espn'
 import { fetchOrCache } from '@/lib/cache/cacheService'
 import { TTL } from '@/lib/cache/ttl'
+import { invalidParam, isKnownEspnSport, isValidDate, isValidEventId, isValidTeam } from '@/lib/api-validation'
 
 /** Shift a YYYYMMDD date by ±days (returns YYYYMMDD). */
 function shiftDate(ymd: string, days: number): string {
@@ -93,6 +94,18 @@ export async function GET(request: Request) {
   if (!sport || !team) {
     return NextResponse.json({ error: 'Missing sport or team' }, { status: 400 })
   }
+  if (!isKnownEspnSport(sport)) {
+    return invalidParam('sport must be one of NFL, NBA, NHL, MLB')
+  }
+  if (!isValidTeam(team)) {
+    return invalidParam('team must be a 2-4 character team abbreviation')
+  }
+  if (eventId && !isValidEventId(eventId)) {
+    return invalidParam('eventId must be numeric')
+  }
+  if (providedDate && !isValidDate(providedDate)) {
+    return invalidParam('date must be YYYYMMDD')
+  }
 
   const espnPath = espnSportMap[sport.toUpperCase()]
   if (!espnPath) {
@@ -119,7 +132,7 @@ export async function GET(request: Request) {
           // Home/away not known yet — will determine from scoreboard
         } else {
           // Fallback: fetch schedule to find upcoming game
-          const schedUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${team.toUpperCase()}/schedule`
+          const schedUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${encodeURIComponent(team.toUpperCase())}/schedule`
 
           const schedRes = await fetch(schedUrl, { signal: AbortSignal.timeout(15000) })
           if (!schedRes.ok) {
@@ -220,7 +233,7 @@ export async function GET(request: Request) {
 
         if ((!oddsArr || oddsArr.length === 0) && eventIdStr) {
           // Fallback: fetch the summary endpoint for this event (may have odds during live games)
-          const summaryUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${eventIdStr}`
+          const summaryUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventIdStr ?? '')}`
           try {
             const summaryRes = await fetch(summaryUrl, { signal: AbortSignal.timeout(10000) })
             if (summaryRes.ok) {

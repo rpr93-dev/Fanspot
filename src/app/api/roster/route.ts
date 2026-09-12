@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { espnSportMap } from '@/lib/providers/espn'
+import { invalidParam, isKnownEspnSport, isValidTeam } from '@/lib/api-validation'
 
 function getSeasonYear(sport: string): number {
   const now = new Date()
@@ -61,6 +62,12 @@ export async function GET(request: Request) {
   if (!sport || !team) {
     return NextResponse.json({ error: 'Missing sport or team' }, { status: 400 })
   }
+  if (!isKnownEspnSport(sport)) {
+    return invalidParam('sport must be one of NFL, NBA, NHL, MLB')
+  }
+  if (!isValidTeam(team)) {
+    return invalidParam('team must be a 2-4 character team abbreviation')
+  }
 
   const sportKey = sport.toUpperCase() as 'NFL' | 'NBA' | 'NHL' | 'MLB'
   const espnPath = espnSportMap[sportKey]
@@ -70,11 +77,12 @@ export async function GET(request: Request) {
 
   try {
     const res = await fetch(
-      `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${team.toUpperCase()}/roster`,
+      `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${encodeURIComponent(team.toUpperCase())}/roster`,
       { signal: AbortSignal.timeout(15000) }
     )
     if (!res.ok) {
-      return NextResponse.json({ error: `ESPN API error ${res.status}` }, { status: res.status })
+      console.error(`[roster] ESPN API error ${res.status} for ${sportKey}/${team.toUpperCase()}`)
+      return NextResponse.json({ error: 'ESPN_ERROR', message: `ESPN API error ${res.status}` }, { status: res.status })
     }
     const data = await res.json()
 
@@ -145,6 +153,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    console.error('[roster] request failed:', err)
+    return NextResponse.json({ error: 'ROSTER_UNAVAILABLE', message: 'Unable to load roster' }, { status: 500 })
   }
 }

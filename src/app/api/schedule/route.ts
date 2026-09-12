@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { espnSportMap } from '@/lib/providers/espn'
 import { getCached, setCached, isFresh } from '@/lib/cache/cacheService'
 import { scheduleTtlFor } from '@/lib/cache/ttl'
+import { invalidParam, isKnownEspnSport, isValidSeason, isValidDateRange, isValidTeam } from '@/lib/api-validation'
 
 /** Carries the upstream status through fetchOrCache so error responses stay uncached and exact. */
 class EspnStatusError extends Error {
@@ -23,6 +24,18 @@ export async function GET(request: Request) {
   if (!sport || !team) {
     return NextResponse.json({ error: 'Missing sport or team' }, { status: 400 })
   }
+  if (!isKnownEspnSport(sport)) {
+    return invalidParam('sport must be one of NFL, NBA, NHL, MLB')
+  }
+  if (!isValidTeam(team)) {
+    return invalidParam('team must be a 2-4 character team abbreviation')
+  }
+  if (season && !isValidSeason(season)) {
+    return invalidParam('season must be a 4-digit year')
+  }
+  if (dates && !isValidDateRange(dates)) {
+    return invalidParam('dates must be YYYYMM or YYYYMMDD, optionally as a start-end range')
+  }
 
   const espnPath = espnSportMap[sport.toUpperCase()]
   if (!espnPath) {
@@ -37,8 +50,8 @@ export async function GET(request: Request) {
     const qs = params.toString()
     if (qs) url += `?${qs}`
   } else {
-    url = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${team.toUpperCase()}/schedule`
-    if (season) url += `?season=${season}`
+    url = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${encodeURIComponent(team.toUpperCase())}/schedule`
+    if (season) url += `?season=${encodeURIComponent(season)}`
   }
 
   try {
@@ -63,8 +76,10 @@ export async function GET(request: Request) {
     return NextResponse.json(data, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
   } catch (err) {
     if (err instanceof EspnStatusError) {
-      return NextResponse.json({ error: err.message }, { status: err.status })
+      console.error(`[schedule] ESPN upstream error for ${sport}/${team}: ${err.status}`)
+      return NextResponse.json({ error: 'ESPN_ERROR', message: `ESPN API error ${err.status}` }, { status: err.status })
     }
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    console.error('[schedule] request failed:', err)
+    return NextResponse.json({ error: 'SCHEDULE_UNAVAILABLE', message: 'Unable to load schedule' }, { status: 500 })
   }
 }

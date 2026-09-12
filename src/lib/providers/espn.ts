@@ -141,7 +141,7 @@ export async function fetchTeamSchedule(
 
     async function fetchScoreboard(dates: string, existingIds: Set<string>) {
       try {
-        const res = await fetch(`${base}/api/schedule?sport=${sport}&team=${abbr}&source=scoreboard&dates=${dates}`)
+        const res = await fetch(`${base}/api/schedule?sport=${sport}&team=${abbr}&source=scoreboard&dates=${dates}`, { signal: AbortSignal.timeout(10000) })
         if (res.ok) {
           const data = await res.json()
           if (data?.events) {

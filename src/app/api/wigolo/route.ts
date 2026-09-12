@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { XMLParser } from 'fast-xml-parser'
+import { invalidParam } from '@/lib/api-validation'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -68,6 +69,37 @@ async function fetchGoogleNews(query: string): Promise<WigoloArticle[]> {
   }
 }
 
+const MAX_CONTENT_BYTES = 512 * 1024
+
+async function readCapped(res: Response): Promise<string | null> {
+  const lenHeader = res.headers.get('content-length')
+  if (lenHeader && Number(lenHeader) > MAX_CONTENT_BYTES) return null
+  const reader = res.body?.getReader()
+  if (!reader) return null
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value) continue
+      total += value.length
+      if (total > MAX_CONTENT_BYTES) return null
+      chunks.push(value)
+    }
+  } catch {
+    return null
+  }
+  return new TextDecoder('utf-8', { fatal: false }).decode(
+    chunks.reduce((acc, c) => {
+      const merged = new Uint8Array(acc.length + c.length)
+      merged.set(acc)
+      merged.set(c, acc.length)
+      return merged
+    }, new Uint8Array(0)),
+  )
+}
+
 async function enrichWithContent(articles: WigoloArticle[], maxContent: number): Promise<WigoloArticle[]> {
   const enriched = await Promise.all(
     articles.slice(0, maxContent).map(async (a) => {
@@ -77,25 +109,27 @@ async function enrichWithContent(articles: WigoloArticle[], maxContent: number):
             signal: AbortSignal.timeout(8000),
             headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Fanspot/1.0)' },
           })
-          if (res.ok) {
-            const html = await res.text()
-            const text = html
-              .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
-              .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
-              .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
-              .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
-              .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
-              .replace(/<[^>]+>/g, ' ')
-              .replace(/&amp;/g, '&')
-              .replace(/&nbsp;/g, ' ')
-              .replace(/&lt;/g, '<')
-              .replace(/&gt;/g, '>')
-              .replace(/&quot;/g, '"')
-              .replace(/&#39;/g, "'")
-              .replace(/\s+/g, ' ')
-              .trim()
-            return { ...a, content: text.slice(0, 2000) }
-          }
+          if (!res.ok) return a
+          const contentType = res.headers.get('content-type') ?? ''
+          if (!contentType.toLowerCase().includes('text/html')) return a
+          const html = await readCapped(res)
+          if (html == null) return a
+          const text = html
+            .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+            .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+            .replace(/<nav[^>]*>[\s\S]*?<\/nav>/gi, '')
+            .replace(/<footer[^>]*>[\s\S]*?<\/footer>/gi, '')
+            .replace(/<header[^>]*>[\s\S]*?<\/header>/gi, '')
+            .replace(/<[^>]+>/g, ' ')
+            .replace(/&amp;/g, '&')
+            .replace(/&nbsp;/g, ' ')
+            .replace(/&lt;/g, '<')
+            .replace(/&gt;/g, '>')
+            .replace(/&quot;/g, '"')
+            .replace(/&#39;/g, "'")
+            .replace(/\s+/g, ' ')
+            .trim()
+          return { ...a, content: text.slice(0, 2000) }
         } catch {}
       }
       return a
@@ -103,6 +137,8 @@ async function enrichWithContent(articles: WigoloArticle[], maxContent: number):
   )
   return enriched
 }
+
+const MAX_QUERY_LEN = 120
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
@@ -112,6 +148,9 @@ export async function GET(request: Request) {
 
   if (!q) {
     return NextResponse.json({ error: 'Missing q parameter' }, { status: 400 })
+  }
+  if (q.length > MAX_QUERY_LEN) {
+    return invalidParam(`q must be at most ${MAX_QUERY_LEN} characters`)
   }
 
   const queries = [

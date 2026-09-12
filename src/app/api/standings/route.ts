@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { teams } from '@/data/teams'
 import { getEspnAbbr, espnSportMap } from '@/lib/providers/espn'
 import { fetchOrCache } from '@/lib/cache/cacheService'
+import { invalidParam, isAllowedSport, isValidTeam } from '@/lib/api-validation'
 import { TTL } from '@/lib/cache/ttl'
 
 interface StandingRow {
@@ -67,6 +68,12 @@ export async function GET(request: Request) {
 
   if (!sport || !teamId) {
     return NextResponse.json({ error: 'Missing sport or team' }, { status: 400 })
+  }
+  if (!isAllowedSport(sport)) {
+    return invalidParam('sport must be one of NFL, NBA, NHL, MLB')
+  }
+  if (!isValidTeam(teamId)) {
+    return invalidParam('team must be a 2-4 character team abbreviation')
   }
 
   const espnPath = espnSportMap[sport.toUpperCase()]
