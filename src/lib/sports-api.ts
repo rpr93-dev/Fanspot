@@ -53,6 +53,7 @@ export interface EspnEvent {
   name: string
   shortName: string
   date: string
+  week?: { number: number; text: string }
   seasonType?: EspnSeasonType
   season?: { year: number; type: number; slug?: string }
   competitions: Array<{
@@ -97,12 +98,12 @@ export async function getTeamSchedule(
   sport: string,
   teamId: string,
   teamAbbreviation: string,
-): Promise<{ upcoming: EspnEvent | null; lastFive: EspnEvent[] }> {
+): Promise<{ upcoming: EspnEvent | null; lastFive: EspnEvent[]; spotlightEventId: string | null }> {
   try {
     return await orchestratorSchedule(sport, teamId, teamAbbreviation)
   } catch (err) {
     console.error(`[sports-api] getTeamSchedule error for ${sport}/${teamAbbreviation}:`, err)
-    return { upcoming: null, lastFive: [] }
+    return { upcoming: null, lastFive: [], spotlightEventId: null }
   }
 }
 

@@ -24,9 +24,9 @@ const LEAGUE_COLORS: Record<League, string> = {
 
 const FILTERS: ('all' | League)[] = ['all', 'nfl', 'nba', 'nhl', 'mlb']
 
-function relativeTime(iso: string | null): string {
-  if (!iso) return ''
-  const mins = Math.round((Date.now() - new Date(iso).getTime()) / 60000)
+function relativeTime(iso: string | null, now: number | null): string {
+  if (!iso || now == null) return ''
+  const mins = Math.round((now - new Date(iso).getTime()) / 60000)
   if (!Number.isFinite(mins) || mins < 0) return ''
   if (mins < 60) return `${mins}m ago`
   const hours = Math.round(mins / 60)
@@ -39,6 +39,9 @@ export default function BiggestStories() {
   const [filter, setFilter] = useState<'all' | League>('all')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  // Clock reads only after mount: server HTML and first client render agree
+  // (empty), so ticking minutes can never cause a hydration mismatch.
+  const [now, setNow] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -60,11 +63,17 @@ export default function BiggestStories() {
     }
   }, [])
 
+  useEffect(() => {
+    setNow(Date.now())
+    const t = setInterval(() => setNow(Date.now()), 30000)
+    return () => clearInterval(t)
+  }, [])
+
   const shown = filter === 'all' ? stories : stories.filter((s) => s.league === filter)
 
   return (
     <div>
-      <div className="flex flex-wrap gap-1.5 mb-6 justify-center">
+      <div className="flex flex-wrap gap-1.5 mb-6 justify-start">
         {FILTERS.map((f) => (
           <button
             key={f}
@@ -122,7 +131,7 @@ export default function BiggestStories() {
                   className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-fs-muted-2 uppercase tracking-wider fs-mono"
                 >
                   <span>{s.source}</span>
-                  {relativeTime(s.publishedAt) && <span>{relativeTime(s.publishedAt)}</span>}
+                  {relativeTime(s.publishedAt, now) && <span>{relativeTime(s.publishedAt, now)}</span>}
                   {s.drivers.length > 0 && (
                     <span className="text-fs-muted-2/70">why: {s.drivers.slice(0, 2).join(' · ')}</span>
                   )}

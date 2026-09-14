@@ -22,10 +22,10 @@ export default function TeamCard({ team, sport }: { team: Team; sport: string })
       className="group hover-card fs-panel rounded-xl p-5 animate-fade-in"
       style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}30`, '--card-color': team.colors.primary } as React.CSSProperties}
     >
-      <div className="flex flex-col items-center text-center">
-        <div className="w-14 h-14 mb-3 flex items-center justify-center">
+      <div className="flex items-center gap-4 text-left">
+        <div className="w-16 h-16 shrink-0 flex items-center justify-center">
           {logoFailed ? (
-            <div className="w-14 h-14 rounded-full flex items-center justify-center" style={{ backgroundColor: team.colors.primary }}>
+            <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ backgroundColor: team.colors.primary }}>
               <span className="text-lg font-bold" style={{ color: team.colors.secondary }}>{team.abbreviation}</span>
             </div>
           ) : (
@@ -38,8 +38,11 @@ export default function TeamCard({ team, sport }: { team: Team; sport: string })
             />
           )}
         </div>
-        <h2 className="fs-title text-base text-white/90 leading-tight">{team.name}</h2>
-        <p className="fs-meta mt-1.5">{team.conference} &middot; {team.division}</p>
+        <div className="min-w-0 flex-1">
+          <h2 className="fs-title text-base text-white/90 leading-tight">{team.name}</h2>
+          <p className="fs-meta mt-1.5 truncate">{team.conference} &middot; {team.division}</p>
+        </div>
+        <span className="fs-meta shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">&rarr;</span>
       </div>
     </Link>
   )

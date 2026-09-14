@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { espnSportMap } from '@/lib/providers/espn'
 import { invalidParam, isKnownEspnSport, isValidEventId } from '@/lib/api-validation'
+import { extractLastPlay } from '@/lib/lastPlay'
 
 const reservedKeys = new Set(['athlete', 'stats', 'statistics', 'displayValue', 'value', 'team', 'id', 'uid', 'guid', 'type', 'slug', 'sequence'])
 
@@ -303,11 +304,13 @@ export async function GET(request: Request) {
     }
 
     const status = data?.header?.competitions?.[0]?.status?.type
+    const lastPlay = extractLastPlay(data)
 
     return NextResponse.json({
       boxScore: {
         teams,
         playerStats,
+        lastPlay,
         status: status
           ? {
               state: status.state,

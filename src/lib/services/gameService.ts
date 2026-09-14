@@ -7,6 +7,7 @@ export interface GameScheduleResult {
   lastFive: any[]
   upcomingEventId: string | null
   upcomingDate: string | null
+  spotlightEventId: string | null
 }
 
 export async function getSchedule(
@@ -29,7 +30,8 @@ export async function getSchedule(
   const upcomingDate = result.upcoming
     ? result.upcoming.date.slice(0, 10).replace(/-/g, '')
     : null
-  const out = { ...result, upcomingEventId, upcomingDate }
+  const spotlightEventId = result.spotlightEventId ?? null
+  const out = { ...result, upcomingEventId, upcomingDate, spotlightEventId }
   setCachedChecked(cacheKey, out)
   return out
 }

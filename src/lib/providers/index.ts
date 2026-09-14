@@ -18,6 +18,12 @@ interface ScheduleResult {
   lastFive: EspnEvent[]
 }
 
+export interface ScheduleWithSpotlight extends ScheduleResult {
+  /** The current week's finished game to keep featuring until the week turns
+   *  over (football only; null otherwise). Event id, or null. */
+  spotlightEventId: string | null
+}
+
 function seasonTypeCoverage(events: EspnEvent[]): Set<number> {
   const types = new Set<number>()
   for (const e of events) {
@@ -44,8 +50,12 @@ function hasCompletedGames(events: EspnEvent[]): boolean {
   })
 }
 
-function computeResult(events: EspnEvent[]): ScheduleResult {
+function computeResult(events: EspnEvent[], spotlightEventId?: string | null): ScheduleWithSpotlight {
   const now = new Date()
+  const month = now.getMonth() + 1
+  const currentYear = now.getFullYear()
+  // NFL season Y spans Aug(Y) – Jan/Feb(Y+1)
+  const nflCurrentSeason = month <= 2 ? currentYear - 1 : currentYear
 
   const completed = events
     .filter((e) => {
@@ -71,7 +81,7 @@ function computeResult(events: EspnEvent[]): ScheduleResult {
 
   const upcoming = live[0] ?? future.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())[0] ?? null
 
-  return { upcoming, lastFive }
+  return { upcoming, lastFive, spotlightEventId: spotlightEventId ?? null }
 }
 
 const fallbackProviders: Record<string, typeof espn | typeof mlb | typeof nhl> = {
@@ -84,11 +94,12 @@ export async function getTeamSchedule(
   teamId: string,
   teamAbbreviation: string,
   origin?: string,
-): Promise<ScheduleResult> {
+): Promise<ScheduleWithSpotlight> {
   const teamAbbr = getEspnAbbr(teamId, teamAbbreviation)
 
   const espnResult = await espn.fetchTeamSchedule(sport, teamId, teamAbbreviation, origin)
   const espnEvents = espnResult.events as EspnEvent[]
+  const espnSpotlightEventId = espnResult.spotlightEventId ?? null
 
   let espnHasUpcoming = hasUpcomingGame(espnEvents)
   let espnHasCompleted = hasCompletedGames(espnEvents)
@@ -152,21 +163,22 @@ export async function getTeamSchedule(
   }
 
   if (validation.valid && espnHasCompleted) {
-    return computeResult(allEvents)
+    return computeResult(allEvents, espnSpotlightEventId)
   }
 
   const fallback = fallbackProviders[sport]
   if (!fallback) {
     if (allEvents.length > 0) {
       log('ESPN', sport, teamAbbr, 'Partial data accepted (no fallback available)')
-      return computeResult(allEvents)
+      return computeResult(allEvents, espnSpotlightEventId)
     }
-    return { upcoming: null, lastFive: [] }
+    return { upcoming: null, lastFive: [], spotlightEventId: null }
   }
 
   log('ESPN', sport, teamAbbr, 'Insufficient data, trying fallback', `${sport} API`)
   const fallbackResult = await fallback.fetchTeamSchedule(sport, teamId, teamAbbreviation)
   const fallbackEvents = fallbackResult.events as EspnEvent[]
+  const fallbackSpotlightEventId = (fallbackResult as any).spotlightEventId ?? null
 
   if (fallbackResult.problems.length > 0) {
     log(`${sport} API`, sport, teamAbbr, fallbackResult.problems.join('; '))
@@ -187,7 +199,8 @@ export async function getTeamSchedule(
     log('Merged', sport, teamAbbr, validation.errors.join('; '))
   }
 
-  return computeResult(merged)
+  // Prefer ESPN's spotlight; fallback can't compute one reliably since it lacks week data.
+  return computeResult(merged, espnSpotlightEventId || fallbackSpotlightEventId)
 }
 
 export async function getTeamNews(

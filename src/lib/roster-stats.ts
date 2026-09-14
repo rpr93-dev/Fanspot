@@ -1,6 +1,13 @@
 export const teamStatLabels: Record<string, string> = {
   totalFirstDowns: '1st Downs', firstDownRushing: 'Rush 1st', firstDownPassing: 'Pass 1st', firstDownPenalty: 'Penalty 1st',
-  totalYards: 'Total Yards', passingYards: 'Pass Yds', rushingYards: 'Rush Yds', netPassingYards: 'Net Pass', grossPassingYards: 'Gross Pass',
+  // Real ESPN football team-stat keys (site v2 summary endpoint)
+  firstDowns: '1st Downs', firstDownsRushing: 'Rush 1st', firstDownsPassing: 'Pass 1st', firstDownsPenalty: 'Penalty 1st',
+  thirdDownEff: '3rd Down', fourthDownEff: '4th Down', redZoneAttempts: 'Red Zone',
+  totalOffensivePlays: 'Off Plays', totalDrives: 'Drives', yardsPerPlay: 'Yds/Play',
+  completionAttempts: 'Comp/Att', yardsPerPass: 'Yds/Pass', sacksYardsLost: 'Sacks-Yds',
+  rushingAttempts: 'Rush Att', yardsPerRushAttempt: 'Yds/Rush',
+  totalPenaltiesYards: 'Pen-Yds', fumblesLost: 'Fum Lost', defensiveTouchdowns: 'Def TD',
+  totalYards: 'Total Yards', passingYards: 'Pass Yds', rushingYards: 'Rush Yds', netPassingYards: 'Pass Yds', grossPassingYards: 'Gross Pass',
   turnovers: 'TO', interceptionsThrown: 'INT', lostFumbles: 'Fum Lost', forcedFumbles: 'FF', fumblesRecovered: 'Fum Rec',
   tackles: 'Tackles', sacks: 'Sacks', interceptions: 'INT', safeties: 'Safeties',
   thirdDownEfficiency: '3rd Down', fourthDownEfficiency: '4th Down', redZoneEfficiency: 'Red Zone',

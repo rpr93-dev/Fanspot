@@ -29,25 +29,24 @@ function scoreArticle(title: string, snippet: string, teamName: string): number 
 
   if (!title.toLowerCase().includes(lastNameToken)) return 0
 
-  const excludedNames = ['Packers', 'Cowboys', 'Eagles', 'Chiefs', '49ers', 'Ravens', 'Bills', 'Bengals',
-    'Browns', 'Dolphins', 'Jets', 'Patriots', 'Texans', 'Colts', 'Jaguars', 'Titans', 'Broncos', 'Raiders',
-    'Chargers', 'Giants', 'Commanders', 'Bears', 'Lions', 'Vikings', 'Falcons', 'Panthers', 'Saints',
-    'Buccaneers', 'Cardinals', 'Rams', 'Seahawks', 'Celtics', 'Nets', 'Knicks', '76ers', 'Raptors',
-    'Bulls', 'Cavaliers', 'Pistons', 'Pacers', 'Bucks', 'Hawks', 'Hornets', 'Heat', 'Magic', 'Wizards',
-    'Nuggets', 'Timberwolves', 'Thunder', 'Trail Blazers', 'Jazz', 'Warriors', 'Clippers', 'Lakers',
-    'Suns', 'Kings', 'Mavericks', 'Rockets', 'Grizzlies', 'Pelicans', 'Spurs',
-    'Ducks', 'Coyotes', 'Bruins', 'Sabres', 'Flames', 'Hurricanes', 'Blackhawks', 'Avalanche',
-    'Blue Jackets', 'Stars', 'Red Wings', 'Oilers', 'Panthers', 'Kings', 'Wild', 'Canadiens',
-    'Predators', 'Devils', 'Islanders', 'Rangers', 'Senators', 'Flyers', 'Penguins', 'Sharks',
-    'Kraken', 'Blues', 'Lightning', 'Maple Leafs', 'Canucks', 'Golden Knights', 'Capitals', 'Jets',
-    'Diamondbacks', 'Braves', 'Orioles', 'Red Sox', 'Cubs', 'White Sox', 'Reds', 'Guardians',
-    'Rockies', 'Tigers', 'Astros', 'Royals', 'Angels', 'Dodgers', 'Marlins', 'Brewers',
-    'Twins', 'Yankees', 'Mets', 'Athletics', 'Phillies', 'Pirates', 'Padres', 'Giants',
-    'Mariners', 'Cardinals', 'Rays', 'Rangers', 'Blue Jays', 'Nationals']
+  // Exclude other single-word team names that aren't part of the current team's name.
+  // Multi-word names (e.g. "Blue Jackets", "Golden Knights") are intentionally skipped
+  // because they often appear in "vs" contexts that are actually relevant.
+  const EXCLUDED_SINGLE_WORD_TEAMS = [
+    'Packers', 'Cowboys', 'Eagles', 'Chiefs', 'Ravens', 'Bengals', 'Dolphins',
+    'Patriots', 'Colts', 'Jaguars', 'Titans', 'Raiders', 'Giants', 'Bears',
+    'Lions', 'Vikings', 'Saints', 'Rams', 'Celtics', 'Nets', 'Knicks', 'Raptors',
+    'Bulls', 'Cavaliers', 'Pistons', 'Pacers', 'Bucks', 'Heat', 'Magic',
+    'Nuggets', 'Thunder', 'Jazz', 'Suns', 'Kings', 'Rockets', 'Spurs',
+    'Bruins', 'Flames', 'Sabres', 'Hurricanes', 'Stars', 'Oilers', 'Kings',
+    'Canadiens', 'Devils', 'Islanders', 'Rangers', 'Sharks', 'Kraken',
+    'Blues', 'Lightning', 'Canucks', 'Jets', 'Reds', 'Royals', 'Marlins',
+    'Twins', 'Mets', 'Padres', 'Rays', 'Nationals'
+  ]
 
-  for (const name of excludedNames) {
-    const lower = name.toLowerCase()
-    if (lower !== lastNameToken && title.toLowerCase().includes(lower)) {
+  for (const name of EXCLUDED_SINGLE_WORD_TEAMS) {
+    if (name.toLowerCase() === lastNameToken) continue
+    if (title.toLowerCase().includes(name.toLowerCase())) {
       return 0
     }
   }

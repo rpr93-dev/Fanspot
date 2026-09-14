@@ -131,6 +131,13 @@ body {
     background-image: radial-gradient(1200px 600px at 15% -10%, var(--glow, rgba(139, 197, 63, 0.07)), transparent 60%);
   }
 
+  /* Wide dashboard shell: use the available screen width on desktop
+     (multi-column dashboard), full-width single column below md (768px). */
+  .fs-shell {
+    width: min(98vw, 2000px);
+    margin-inline: auto;
+  }
+
   .fs-panel {
     background: linear-gradient(180deg, color-mix(in srgb, var(--tint, transparent) 12%, var(--color-fs-panel)), var(--color-fs-panel));
     border: 1px solid var(--tint-border, var(--color-fs-line));

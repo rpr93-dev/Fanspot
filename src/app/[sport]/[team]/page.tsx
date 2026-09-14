@@ -6,11 +6,12 @@ import { teams, sportConfig, sportPath } from '@/data/teams'
 import { useParams } from 'next/navigation'
 import { getTeamSchedule, getTeamNews, getEspnAbbr } from '@/lib/sports-api'
 import StandingsBox from './StandingsBox'
-import NextGamePanel from './NextGamePanel'
+import NextGamePanel from '@/components/NextGamePanel'
 import AiNalyst from '@/components/AiNalyst'
 import FantasyWidget from '@/components/FantasyWidget'
 import type { EspnEvent } from '@/lib/sports-api'
-import { teamStatLabels, playerStatLabels, sportPositionOrder, nflStatKey, nflStatSchema, relevantStats } from '@/lib/roster-stats'
+import { playerStatLabels, sportPositionOrder, nflStatKey, nflStatSchema, relevantStats } from '@/lib/roster-stats'
+import { GameStatsSection } from '@/components/box-score/GameStatsSection'
 
 function useTeamDashboard(sport: string, teamId: string, teamName: string, teamAbbreviation: string) {
   const [data, setData] = useState<any>(null)
@@ -97,6 +98,8 @@ interface TeamDashboardData {
   standings: ConferenceGroup[]
   teamStanding: string
   standingsMessage?: string
+  spotlightEvent?: EspnEvent | null
+  spotlightEventId?: string | null
 }
 
 function getGameDetail(event: EspnEvent): string {
@@ -214,7 +217,7 @@ export default function TeamDashboard() {
     const abbr = getEspnAbbr(dashboard.team.id, dashboard.team.abbreviation)
     const schedule = dashboard.schedule
     const schedForState = processScheduleForState(
-      { upcoming: schedule.upcoming, lastFive: schedule.lastFive },
+      { upcoming: schedule.upcoming, lastFive: schedule.lastFive, spotlightEventId: schedule.spotlightEventId },
       abbr,
       dashboard.team.sport
     )
@@ -246,6 +249,8 @@ export default function TeamDashboard() {
       standings: standings?.standings ?? [],
       teamStanding: standings?.teamStanding ?? '',
       standingsMessage: standings?.message ?? '',
+      spotlightEvent: schedForState.spotlightEvent,
+      spotlightEventId: schedForState.spotlightEventId,
     })
     const live = schedForState.upcoming?.isLive
     setIsLiveGame(!!live)
@@ -407,7 +412,7 @@ export default function TeamDashboard() {
         upcomingGameRef.current = result.upcomingEventId
           ? { id: result.upcomingEventId, date: result.upcomingDate!, kickoff: result.upcoming?.kickoff }
           : null
-        setData(p => p ? { ...p, upcoming: result.upcoming, lastFive: result.lastFive } : p)
+        setData(p => p ? { ...p, upcoming: result.upcoming, lastFive: result.lastFive, spotlightEvent: result.spotlightEvent, spotlightEventId: result.spotlightEventId } : p)
         const live = result.upcoming?.isLive
         setIsLiveGame(!!live)
         liveGameIdRef.current = live ? (result.upcomingEventId ?? null) : null
@@ -496,30 +501,76 @@ export default function TeamDashboard() {
 
   return (
     <div className="min-h-screen fs-page" style={{ '--glow': `${team.colors.primary}1c` } as React.CSSProperties}>
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10">
         <Link href={`/${sport}`} className="hover-lift fs-meta hover:text-fs-text inline-block mb-8" style={{ '--card-color': team.colors.primary } as React.CSSProperties}>&larr; {config.name}</Link>
 
-        <div className="hidden md:grid md:grid-cols-2 gap-5 mb-5">
-            <div className={`fs-panel p-5 sm:p-6 ${data?.upcoming?.eventId ? 'hover-card cursor-pointer group' : ''}`}
+        <div className="hidden md:grid md:grid-cols-12 gap-5 mb-5 items-stretch">
+            <div className={`md:col-span-7 min-w-0 fs-panel p-5 sm:p-6 ${data?.upcoming?.eventId ? 'hover-card cursor-pointer group' : ''}`}
               style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}26`, '--card-color': team.colors.primary } as React.CSSProperties}
               onClick={() => {
-                if (!data?.upcoming?.eventId) return
-                if (data.upcoming.isLive) {
-                  // Toggle: open the live box score, or close it back to the main page.
-                  const liveId = data.upcoming.eventId
-                  setShowNextGame(false)
-                  setSelectedGameId((cur) => (cur === liveId ? null : (liveId as string)))
+                if (!data?.upcoming?.eventId && !data?.spotlightEventId) return
+                if (data.upcoming?.eventId) {
+                  if (data.upcoming.isLive) {
+                    // Toggle: open the live box score, or close it back to the main page.
+                    const liveId = data.upcoming.eventId
+                    setShowNextGame(false)
+                    setSelectedGameId((cur) => (cur === liveId ? null : (liveId as string)))
+                  } else {
+                    // Upcoming game: open the preview panel (odds + prop model).
+                    setSelectedGameId(null)
+                    setShowNextGame((v) => !v)
+                  }
                 } else {
-                  // Toggle: open the preview panel, or close it back to the main page.
-                  setSelectedGameId(null)
-                  setShowNextGame((v) => !v)
+                  // Spotlight-only card (no upcoming game in the feed) — open its box score
+                  const sid = data.spotlightEventId ?? null
+                  setShowNextGame(false)
+                  setSelectedGameId((cur) => (cur === sid ? null : sid))
                 }
               }}>
-              <h2 className="fs-eyebrow mb-4" style={{ '--tint': team.colors.primary } as React.CSSProperties}>{data?.upcoming?.isLive ? 'Live' : 'Next Game'}</h2>
+              <h2 className="fs-eyebrow mb-4" style={{ '--tint': team.colors.primary } as React.CSSProperties}>{data?.upcoming?.isLive ? 'Live' : data?.spotlightEvent && !data?.upcoming ? 'This Week' : 'Next Game'}</h2>
               {loading ? (
                 <div className="animate-pulse space-y-3">
                   <div className="fs-skeleton h-7 w-3/4" />
                   <div className="fs-skeleton h-4 w-1/2" />
+                </div>
+              ) : data?.spotlightEvent && !data?.upcoming ? (
+                <div className="animate-fade-in-up">
+                  {(() => {
+                    const e = data.spotlightEvent!
+                    const abbr = getEspnAbbr(team.id, team.abbreviation)
+                    const opp = getOpponent(e, abbr, team.sport)
+                    const status = e.competitions?.[0]?.status?.type
+                    const comp = e.competitions?.[0]
+                    const teamComp = comp?.competitors?.find(c => c.team.abbreviation === abbr)
+                    const oppComp = comp?.competitors?.find(c => c.team.abbreviation !== abbr)
+                    const disp = (s: any): string => (s == null ? '' : (typeof s === 'object' ? (s.displayValue ?? '') : String(s)))
+                    const ourScore = disp(teamComp?.score)
+                    const oppScore = disp(oppComp?.score)
+                    const weekText = e.week?.text ?? (e.seasonType?.type === 1 ? 'Preseason' : e.seasonType?.type === 2 ? 'Regular Season' : e.seasonType?.type === 3 ? 'Postseason' : '')
+                    return (
+                      <>
+                        <div className="flex items-center gap-3 mb-2">
+                          {opp.logo && (
+                            <img src={opp.logo} alt="" className="w-7 h-7 object-contain" />
+                          )}
+                          <p className="text-xl font-medium text-fs-text">
+                            {opp.location === 'home' ? 'vs' : '@'} {opp.name}
+                          </p>
+                        </div>
+                        <div className="mt-1">
+                          <p className="text-sm text-fs-muted">{getGameDetail(e)}</p>
+                          <div className="flex items-center gap-3 mt-2">
+                            {ourScore && oppScore ? (
+                              <span className="text-2xl font-bold font-mono text-fs-text tabular-nums">{ourScore} — {oppScore}</span>
+                            ) : (
+                              <p className="text-sm text-fs-muted-2">Final</p>
+                            )}
+                            <span className="text-xs font-medium text-fs-gold bg-fs-gold/10 px-2 py-0.5 rounded">{weekText}</span>
+                          </div>
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
               ) : data?.upcoming ? (
                 <div className="animate-fade-in-up">
@@ -539,7 +590,6 @@ export default function TeamDashboard() {
                           LIVE
                         </span>
                         <span className="text-xs sm:text-sm text-fs-muted">{data.upcoming.statusDetail ?? 'Starting soon'}</span>
-                        <span className="text-xs text-fs-muted-2 ml-auto animate-pulse hidden sm:inline">auto-refreshing</span>
                       </div>
                       {data.upcoming.awayScore != null && data.upcoming.homeScore != null ? (
                         <div className="flex items-center gap-5 mt-1">
@@ -566,7 +616,7 @@ export default function TeamDashboard() {
                   {data.upcoming.seasonTypeName && <span className="inline-block mt-2 px-2 py-0.5 text-xs font-medium bg-fs-gold/10 text-fs-gold rounded">{data.upcoming.seasonTypeName}</span>}
                   {data.oddsInfo ? (
                     <div className="mt-5 pt-4 space-y-3" style={{ borderTop: `1px solid ${team.colors.primary}20` }}>
-                      <div className="grid sm:grid-cols-2 gap-x-5 gap-y-3">
+                      <div className="grid md:grid-cols-2 gap-x-5 gap-y-3">
                       <div className="flex items-center justify-between text-sm gap-3">
                         <span className="text-fs-muted truncate">
                           <span className="text-fs-text font-medium">{data.oddsInfo.our.abbr}</span>
@@ -631,7 +681,7 @@ export default function TeamDashboard() {
               )}
             </div>
 
-            <div className="hover-card fs-panel p-6 flex items-center gap-5 cursor-pointer group" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}24`, '--card-color': team.colors.primary } as React.CSSProperties}
+            <div className="md:col-span-5 min-w-0 hover-card fs-panel p-6 flex items-center gap-5 cursor-pointer group" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}24`, '--card-color': team.colors.primary } as React.CSSProperties}
               onClick={() => setShowRoster((v) => !v)}>
               <div className="w-20 h-20 flex items-center justify-center shrink-0 relative">
                 {logoFailed ? (
@@ -684,13 +734,7 @@ export default function TeamDashboard() {
           />
         ) : selectedGameId ? (
           <>
-            {isLiveGame && selectedGameId === liveGameIdRef.current && data?.upcoming?.eventId === selectedGameId ? (
-              <LiveScoreHeader
-                liveBoxScore={liveBoxScore}
-                upcoming={data?.upcoming}
-                teamColor={team.colors.primary}
-              />
-            ) : (
+            {!(isLiveGame && selectedGameId === liveGameIdRef.current && data?.upcoming?.eventId === selectedGameId) && (
               <div className="mb-5">
                 <LastFiveTiles
                   games={data?.lastFive ?? []}
@@ -752,7 +796,8 @@ export default function TeamDashboard() {
               />
             </div>
 
-            <div className="hidden md:grid md:grid-cols-2 gap-5">
+            <div className="hidden md:grid md:grid-cols-12 gap-5 items-start">
+              <div className="md:col-span-4 min-w-0">
               <StandingsBox
                 standings={data?.standings ?? []}
                 teamId={team.id}
@@ -763,8 +808,9 @@ export default function TeamDashboard() {
                 loading={loading}
                 standingsMessage={data?.standingsMessage}
               />
+              </div>
 
-              <div className="fs-panel p-6 flex flex-col" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}20` } as React.CSSProperties}>
+              <div className="md:col-span-4 min-w-0 fs-panel p-6 flex flex-col" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}20` } as React.CSSProperties}>
                 <h2 className="fs-eyebrow mb-4" style={{ '--tint': team.colors.primary } as React.CSSProperties}>Latest News</h2>
                 {loading ? (
                   <div className="animate-pulse space-y-4 flex-1">
@@ -796,13 +842,13 @@ export default function TeamDashboard() {
                   <p className="text-sm text-fs-muted animate-fade-in flex-1 flex items-center justify-center">No news available</p>
                 )}
               </div>
-            </div>
 
-            {!loading && team && (
-              <div className="mt-5 hidden md:block">
-                <FantasyWidget sport={team.sport} teamAbbr={team.abbreviation} teamColor={team.colors.primary} />
-              </div>
-            )}
+              {team && (
+                <div className="md:col-span-4 min-w-0">
+                  <FantasyWidget sport={team.sport} teamAbbr={team.abbreviation} teamColor={team.colors.primary} />
+                </div>
+              )}
+            </div>
 
             {/* Dedicated mobile layout: compact horizontal strips, snap rows */}
             <div className="md:hidden space-y-4">
@@ -995,55 +1041,19 @@ function prettifyName(name: string): string {
     .trim()
 }
 
-function LiveScoreHeader({ liveBoxScore, upcoming, teamColor }: { liveBoxScore: any; upcoming: any; teamColor: string }) {
-  const bsTeams: any[] = liveBoxScore?.teams ?? []
-  const home = bsTeams.find((t: any) => t.homeAway === 'home') ?? null
-  const away = bsTeams.find((t: any) => t.homeAway === 'away') ?? null
-  const status = liveBoxScore?.status?.shortDetail ?? liveBoxScore?.status?.description ?? upcoming?.statusDetail ?? 'Live'
-  const nonEmpty = (v: any): string | null => (v == null || v === '' ? null : String(v))
-  const awayAbbr = away?.abbreviation ?? upcoming?.awayAbbr ?? 'Away'
-  const homeAbbr = home?.abbreviation ?? upcoming?.homeAbbr ?? 'Home'
-  const awayScore = nonEmpty(away?.score?.displayValue) ?? nonEmpty(upcoming?.awayScore)
-  const homeScore = nonEmpty(home?.score?.displayValue) ?? nonEmpty(upcoming?.homeScore)
-
-  return (
-    <div className="fs-panel p-4 sm:p-5 mb-5 animate-fade-in-up" style={{ '--tint': teamColor, '--tint-border': `${teamColor}26`, '--card-color': teamColor } as React.CSSProperties}>
-      <div className="flex items-center justify-center gap-2 mb-3">
-        <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-bold tracking-wider bg-fs-red/15 text-fs-red">
-          <span className="w-1.5 h-1.5 rounded-full bg-fs-red animate-pulse" />
-          LIVE
-        </span>
-        <span className="text-xs sm:text-sm text-fs-muted">{status}</span>
-      </div>
-      {awayScore != null && homeScore != null ? (
-        <div className="flex items-center justify-center gap-5 sm:gap-8">
-          <div className="flex items-center gap-2.5">
-            {away?.logo && <img src={away.logo} alt="" className="w-8 h-8 object-contain" />}
-            <span className="text-sm font-medium text-fs-muted">{awayAbbr}</span>
-            <span className="text-3xl sm:text-4xl font-bold font-mono text-fs-text tabular-nums">{awayScore}</span>
-          </div>
-          <span className="text-2xl text-fs-muted-2">-</span>
-          <div className="flex items-center gap-2.5">
-            <span className="text-3xl sm:text-4xl font-bold font-mono text-fs-text tabular-nums">{homeScore}</span>
-            <span className="text-sm font-medium text-fs-muted">{homeAbbr}</span>
-            {home?.logo && <img src={home.logo} alt="" className="w-8 h-8 object-contain" />}
-          </div>
-        </div>
-      ) : (
-        <div className="animate-pulse flex justify-center"><div className="fs-skeleton h-10 w-48" /></div>
-      )}
-    </div>
-  )
-}
-
 function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBack }: { data: any; loading: boolean; teamAbbr: string; teamColor: string; sport: string; isLive?: boolean; onBack: () => void }) {
   const [showPlayerStats, setShowPlayerStats] = useState(false)
 
-  const ourIdx = data?.teams?.findIndex((t: any) => t.abbreviation === teamAbbr) ?? -1
-  const oppIdx = ourIdx === 0 ? 1 : 0
-  const ourTeam = ourIdx >= 0 ? data?.teams?.[ourIdx] : null
-  const oppTeam = oppIdx >= 0 ? data?.teams?.[oppIdx] : null
-  const maxPeriods = Math.max(ourTeam?.linescores?.length ?? 0, oppTeam?.linescores?.length ?? 0)
+  const bsTeams: any[] = data?.teams ?? []
+  // Head-to-head order is always away (left) vs home (right), regardless of
+  // which side is "our" team. Fall back to index order when homeAway is absent.
+  const awayTeam = bsTeams.find((t: any) => t.homeAway === 'away')
+    ?? (bsTeams[0]?.homeAway === 'home' ? bsTeams[1] : bsTeams[0])
+    ?? null
+  const homeTeam = bsTeams.find((t: any) => t.homeAway === 'home')
+    ?? (awayTeam === bsTeams[0] ? bsTeams[1] : bsTeams[0])
+    ?? null
+  const maxPeriods = Math.max(awayTeam?.linescores?.length ?? 0, homeTeam?.linescores?.length ?? 0)
 
   const sortedPlayerStats = useMemo(() =>
     [...(data?.playerStats ?? [])].sort((a, b) => {
@@ -1056,25 +1066,7 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
 
   const hasAnyPlayerStats = sortedPlayerStats.some((t: any) => t.categories?.some((c: any) => c.athletes?.length > 0))
 
-  const allStats = useMemo(() => {
-    if (!ourTeam?.statistics?.length && !oppTeam?.statistics?.length) return []
-    const names = new Set<string>()
-    const rows: { name: string; our: string; opp: string }[] = []
-    for (const s of ourTeam?.statistics ?? []) {
-      if (!names.has(s.name)) {
-        names.add(s.name)
-        const opp = oppTeam?.statistics?.find((x: any) => x.name === s.name)
-        rows.push({ name: s.name, our: s.displayValue ?? '-', opp: opp?.displayValue ?? '-' })
-      }
-    }
-    for (const s of oppTeam?.statistics ?? []) {
-      if (!names.has(s.name)) {
-        names.add(s.name)
-        rows.push({ name: s.name, our: '-', opp: s.displayValue ?? '-' })
-      }
-    }
-    return rows
-  }, [ourTeam, oppTeam])
+
 
   return (
     <div className="animate-fade-in-up mt-4 pt-3" style={{ borderTop: `1px solid ${teamColor}20` }}>
@@ -1109,63 +1101,49 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
         <p className="text-sm text-fs-muted">Box score unavailable</p>
       ) : (
         <>
-          {/* Period scores — always visible */}
-          {maxPeriods > 0 && (
-            <div className="overflow-x-auto mb-3">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-fs-muted-2">
-                    <th className="text-left pr-3 pb-1 font-medium tracking-wider text-xs" />
-                    {Array.from({ length: maxPeriods }, (_, i) => (
-                      <th key={i} className="text-center px-1.5 pb-1 font-medium text-xs tracking-wider">{getPeriodLabels(sport)[i]}</th>
-                    ))}
-                    <th className="text-center pl-2 pb-1 font-medium text-fs-text/60 text-xs tracking-wider">T</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr className="text-fs-text/85" style={{ borderBottom: `1px solid ${teamColor}10` }}>
-                    <td className="pr-3 py-1 font-medium text-xs">{ourTeam?.abbreviation ?? 'Home'}</td>
-                    {Array.from({ length: maxPeriods }, (_, i) => (
-                      <td key={i} className="text-center px-1.5 py-1 font-mono tabular-nums">{ourTeam?.linescores?.[i] ?? '-'}</td>
-                    ))}
-                    <td className="text-center pl-2 py-1 font-mono tabular-nums text-fs-text font-semibold">{ourTeam ? sum(ourTeam.linescores) : '-'}</td>
-                  </tr>
-                  <tr className="text-fs-text/85">
-                    <td className="pr-3 py-1 font-medium text-xs">{oppTeam?.abbreviation ?? 'Away'}</td>
-                    {Array.from({ length: maxPeriods }, (_, i) => (
-                      <td key={i} className="text-center px-1.5 py-1 font-mono tabular-nums">{oppTeam?.linescores?.[i] ?? '-'}</td>
-                    ))}
-                    <td className="text-center pl-2 py-1 font-mono tabular-nums text-fs-text font-semibold">{oppTeam ? sum(oppTeam.linescores) : '-'}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Team stats (default view) */}
+          {/* Team stats (default view): head-to-head comparison, away left / home right */}
           {!showPlayerStats && (
             <>
-              {allStats.length > 0 ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead>
-                      <tr className="text-fs-muted-2">
-                        <th className="text-left pr-3 pb-1 font-medium tracking-wider uppercase text-xs" />
-                        <th className="text-right px-2 pb-1 font-medium tracking-wider uppercase text-xs" style={{ color: teamColor }}>{ourTeam?.abbreviation ?? 'Home'}</th>
-                        <th className="text-right pl-2 pb-1 font-medium tracking-wider uppercase text-xs text-fs-muted">{oppTeam?.abbreviation ?? 'Away'}</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allStats.map((s, si) => (
-                        <tr key={si} className="text-fs-text/70" style={si % 2 === 1 ? { backgroundColor: `${teamColor}08` } : undefined}>
-                          <td className="pr-3 py-1 text-fs-muted text-xs tracking-wide">{teamStatLabels[s.name] ?? prettifyName(s.name)}</td>
-                          <td className="text-right px-2 py-1 font-mono tabular-nums">{s.our}</td>
-                          <td className="text-right pl-2 py-1 font-mono tabular-nums">{s.opp}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+              {maxPeriods > 0 && (
+                <div data-testid="linescores" className="mb-4 overflow-x-auto">
+                <div className="mx-auto flex w-fit min-w-full flex-col gap-1 text-[11px] tabular-nums text-fs-muted-2">
+                  <div className="flex items-center justify-center gap-2 sm:gap-2.5">
+                    <span className="w-8 text-right font-semibold text-fs-muted">{awayTeam?.abbreviation ?? 'Away'}</span>
+                    {Array.from({ length: maxPeriods }, (_, i) => (
+                      <span key={i} className="flex flex-col items-center">
+                        <span className="text-[9px] uppercase tracking-wider opacity-70">{getPeriodLabels(sport)[i]}</span>
+                        <span className="font-mono">{awayTeam?.linescores?.[i] ?? '-'}</span>
+                      </span>
+                    ))}
+                    <span className="flex flex-col items-center">
+                      <span className="text-[9px] uppercase tracking-wider opacity-70">T</span>
+                      <span className="font-mono font-semibold text-fs-text">{awayTeam ? sum(awayTeam.linescores) : '-'}</span>
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-center gap-2 sm:gap-2.5">
+                    <span className="w-8 text-right font-semibold text-fs-muted">{homeTeam?.abbreviation ?? 'Home'}</span>
+                    {Array.from({ length: maxPeriods }, (_, i) => (
+                      <span key={i} className="flex flex-col items-center">
+                        <span className="text-[9px] uppercase tracking-wider opacity-70">{getPeriodLabels(sport)[i]}</span>
+                        <span className="font-mono">{homeTeam?.linescores?.[i] ?? '-'}</span>
+                      </span>
+                    ))}
+                    <span className="flex flex-col items-center">
+                      <span className="text-[9px] uppercase tracking-wider opacity-70">T</span>
+                      <span className="font-mono font-semibold text-fs-text">{homeTeam ? sum(homeTeam.linescores) : '-'}</span>
+                    </span>
+                  </div>
                 </div>
+                </div>
+              )}
+              {awayTeam && homeTeam ? (
+                <GameStatsSection
+                  away={awayTeam}
+                  home={homeTeam}
+                  status={data?.status ?? null}
+                  sport={sport}
+                  lastPlay={data?.lastPlay ?? null}
+                />
               ) : (
                 <p className="text-sm text-fs-muted">Team stats not yet available</p>
               )}
@@ -1176,38 +1154,43 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
           {showPlayerStats && (
             <>
               {hasAnyPlayerStats ? (
-                <div className="grid sm:grid-cols-2 gap-4 min-w-0">
+                <div className="grid md:grid-cols-2 gap-4 min-w-0">
                   {sortedPlayerStats.map((team: any, ti: number) => {
                     const isOurTeam = team.teamAbbr === teamAbbr
+                    const athleteCount = team.categories.reduce((n: number, c: any) => n + (c.athletes?.length ?? 0), 0)
                     return (
-                      <div key={team.teamAbbr || ti}>
-                        <p className="text-xs font-medium mb-2 tracking-wider uppercase" style={{ color: isOurTeam ? teamColor : undefined, opacity: isOurTeam ? 1 : 0.7 }}>
-                          {team.teamAbbr}
-                        </p>
+                      <div key={team.teamAbbr || ti} className="min-w-0">
+                        <div className="flex items-baseline justify-between gap-2 mb-2">
+                          <p className="text-sm font-semibold tracking-wider uppercase" style={{ color: isOurTeam ? teamColor : undefined, opacity: isOurTeam ? 1 : 0.7 }}>
+                            {team.teamAbbr}
+                          </p>
+                          <span className="fs-meta shrink-0">{athleteCount} players</span>
+                        </div>
                         {team.categories.map((cat: any, ci: number) => (
-                          <div key={ci} className="mb-3">
-                            <h5 className="text-xs font-medium text-fs-muted mb-1 uppercase tracking-wider">{cat.label}</h5>
+                          <div key={ci} className="mb-3 rounded-lg overflow-hidden" style={{ border: `1px solid ${teamColor}16` }}>
+                            <div className="px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-fs-muted-2" style={{ backgroundColor: `${teamColor}0a` }}>
+                              {cat.label}
+                            </div>
                             <div className="overflow-x-auto">
                               <table className="w-full text-xs">
                                 <thead>
                                   <tr className="text-fs-muted-2">
-                                    <th className="text-left pr-2 pb-1 font-medium">#</th>
-                                    <th className="text-left pr-2 pb-1 font-medium">Player</th>
+                                    <th className="text-left px-2.5 py-1.5 font-medium">Player</th>
                                     {cat.statNames.map((n: string, ni: number) => (
-                                      <th key={ni} className="text-right px-1 pb-1 font-medium text-fs-muted text-xs tracking-wider">{playerStatLabels[n] ?? prettifyName(n)}</th>
+                                      <th key={ni} className="text-right px-2 py-1.5 font-medium tabular-nums">{playerStatLabels[n] ?? prettifyName(n)}</th>
                                     ))}
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {cat.athletes.map((a: any, ai: number) => (
-                                    <tr key={a.id || ai} className="text-fs-text/70" style={ai % 2 === 1 ? { backgroundColor: isOurTeam ? `${teamColor}08` : `${teamColor}04` } : undefined}>
-                                      <td className="pr-2 py-0.5 font-mono text-fs-muted text-right">{a.jersey ?? ''}</td>
-                                      <td className="pr-2 py-0.5 truncate max-w-28">
-                                        {a.displayName}
-                                        {a.position ? <span className="text-fs-muted ml-0.5">({a.position})</span> : ''}
+                                  {cat.athletes.map((a: any, i: number) => (
+                                    <tr key={a.id || `ath-${i}`} className="text-fs-text/75" style={{ borderTop: `1px solid ${teamColor}0c` }}>
+                                      <td className="px-2.5 py-1.5 whitespace-nowrap">
+                                        <span className="font-mono text-fs-muted-2 mr-1.5">{a.jersey ?? ''}</span>
+                                        <span className="text-sm font-medium text-fs-text/90">{a.displayName}</span>
+                                        {a.position ? <span className="text-fs-muted-2 ml-1 text-xs">{a.position}</span> : ''}
                                       </td>
                                       {cat.statNames.map((n: string, ni: number) => (
-                                        <td key={ni} className="text-right px-1 py-0.5 font-mono tabular-nums">{a.stats?.[n] ?? '-'}</td>
+                                        <td key={ni} className="px-2 py-1.5 text-right font-mono tabular-nums text-[13px]">{a.stats?.[n] ?? <span className="text-fs-muted-2">—</span>}</td>
                                       ))}
                                     </tr>
                                   ))}
@@ -1226,7 +1209,7 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
             </>
           )}
 
-          {data?.status && (
+          {showPlayerStats && data?.status && (
             <p className="text-xs text-fs-muted-2 mt-1">{data.status.shortDetail ?? data.status.description}</p>
           )}
         </>
@@ -1244,7 +1227,7 @@ function getSeasonTypeName(e: EspnEvent): string | undefined {
   return e.seasonType?.name ?? undefined
 }
 
-function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFive: EspnEvent[] }, espnAbbr: string, sport: string) {
+function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFive: EspnEvent[]; spotlightEventId?: string | null }, espnAbbr: string, sport: string) {
   const lastFive = schedule.lastFive.map((e) => {
     const opp = getOpponent(e, espnAbbr, sport)
     return {
@@ -1263,6 +1246,8 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
   let upcoming: TeamDashboardData['upcoming'] = null
   let upcomingEventId: string | null = null
   let upcomingDate: string | null = null
+  let spotlightEventId: string | null = schedule.spotlightEventId ?? null
+  let spotlightEvent: EspnEvent | null = null
 
   if (schedule.upcoming) {
     const comp = schedule.upcoming.competitions?.[0]
@@ -1311,7 +1296,14 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
     upcomingDate = schedule.upcoming.date.slice(0, 10).replace(/-/g, '')
   }
 
-  return { lastFive, upcoming, upcomingEventId, upcomingDate }
+  // Spotlight event: a completed game from the current week that should stay
+  // featured until the week turns over (NFL only).
+  if (spotlightEventId && sport.toUpperCase() === 'NFL') {
+    const allGames = [schedule.upcoming, ...schedule.lastFive]
+    spotlightEvent = allGames.find((e) => e?.id === spotlightEventId) ?? null
+  }
+
+  return { lastFive, upcoming, upcomingEventId, upcomingDate, spotlightEvent, spotlightEventId }
 }
 
 function checkRookie(athlete: any): boolean {

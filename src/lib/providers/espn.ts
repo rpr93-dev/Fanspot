@@ -57,8 +57,85 @@ function getSeasonYears(sport: string, year: number, month: number): number[] {
 }
 
 // Simple in-memory TTL cache for schedule fetches (reduces repeated calls within short windows)
-const scheduleCache = new Map<string, { events: EspnEvent[]; problems: string[]; ts: number }>()
+interface ScheduleCacheEntry {
+  events: EspnEvent[]
+  problems: string[]
+  spotlightEventId?: string | null
+  ts: number
+}
+const scheduleCache = new Map<string, ScheduleCacheEntry>()
 const SCHEDULE_CACHE_TTL = 120_000 // 2 minutes
+
+/**
+ * Spotlight event: the most recent completed game from the current week for
+ * NFL teams. Keeps the team's Week 1 game featured on the dashboard until
+ * ESPN shifts the feed into Week 2 (new games appear, old week games are no
+ * longer the "most recent completed from the current week").
+ *
+ * For non-NFL sports returns null.
+ *
+ * If the team hasn't played yet, falls back to their earliest upcoming game
+ * (should be Week 1 early in the season) so the dashboard still shows a
+ * "This Week" card instead of nothing.
+ */
+function computeSpotlightEventId(sport: string, events: EspnEvent[], teamAbbr: string): string | null {
+  if (sport.toUpperCase() !== 'NFL') return null
+
+  const now = new Date()
+  const currentYear = now.getFullYear()
+
+  // Determine the current NFL season year
+  // NFL season Y spans Aug(Y) – Jan/Feb(Y+1), so January-February games belong to year-1
+  const month = now.getMonth() + 1
+  const nflCurrentSeason = month <= 2 ? currentYear - 1 : currentYear
+
+  // Collect completed games for the team, sorted newest first
+  const completed = events
+    .filter((e) => {
+      const c = e.competitions?.[0]
+      if (!c) return false
+      if (c.status?.type?.state === 'post' || c.status?.type?.completed) {
+        return c.competitors?.some((cp: any) => cp.team?.abbreviation === teamAbbr)
+      }
+      return false
+    })
+    .filter((e) => {
+      // Must be the current NFL season (not last season)
+      const seasonYear = e.season?.year
+      if (seasonYear !== nflCurrentSeason) return false
+      // Must be regular season or postseason
+      const seasonType = e.seasonType?.type
+      return seasonType === 2 || seasonType === 3
+    })
+    .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+
+  if (completed.length > 0) {
+    return completed[0].id
+  }
+
+  // No completed game yet — fall back to the earliest upcoming game
+  // (should be Week 1 early in the season)
+  const upcoming = events
+    .filter((e) => {
+      const c = e.competitions?.[0]
+      if (!c) return false
+      if (c.status?.type?.completed || c.status?.type?.state === 'post') return false
+      return c.competitors?.some((cp: any) => cp.team?.abbreviation === teamAbbr)
+    })
+    .filter((e) => {
+      const seasonYear = e.season?.year
+      if (seasonYear !== nflCurrentSeason) return false
+      const seasonType = e.seasonType?.type
+      return seasonType === 2 || seasonType === 3
+    })
+    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  if (upcoming.length > 0) {
+    return upcoming[0].id
+  }
+
+  return null
+}
 
 function apiOrigin(origin?: string): string {
   return origin ?? ''
@@ -69,13 +146,13 @@ export async function fetchTeamSchedule(
   teamId: string,
   teamAbbreviation: string,
   origin?: string,
-): Promise<{ events: EspnEvent[]; problems: string[] }> {
+): Promise<{ events: EspnEvent[]; problems: string[]; spotlightEventId?: string | null }> {
   const problems: string[] = []
   const abbr = getEspnAbbr(teamId, teamAbbreviation)
   const cacheKey = `${sport}:${abbr}`
   const cached = scheduleCache.get(cacheKey)
   if (cached && Date.now() - cached.ts < SCHEDULE_CACHE_TTL) {
-    return { events: cached.events, problems: cached.problems }
+    return { events: cached.events, problems: cached.problems, spotlightEventId: cached.spotlightEventId }
   }
 
   const cfg = scoreboardConfig[sport]
@@ -214,8 +291,8 @@ export async function fetchTeamSchedule(
     }
 
     const unique = deduplicateById(allEvents)
-
-    const result = { events: unique, problems }
+    const spotlightEventId = computeSpotlightEventId(sport, unique, abbr)
+    const result = { events: unique, problems, spotlightEventId }
     scheduleCache.set(cacheKey, { ...result, ts: Date.now() })
     return result
   } catch (err) {
