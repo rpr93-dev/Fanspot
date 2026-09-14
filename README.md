@@ -1,6 +1,18 @@
-# Fanspot — Multi-Sport Team Dashboard
+# Fanspot — Multi-Sport Dashboard
 
-Track NFL, NBA, NHL, and MLB teams with live schedules, standings, odds, news, box scores, and roster stats. Includes **NBA Summer League** support.
+Track NFL, NBA, NHL, and MLB teams with live schedules, standings, odds, news, box scores, player profiles, and stat leaders. Includes **NBA Summer League** support.
+
+## Features
+
+- **Global Navigation** — bottom nav bar with Scores, Standings, Search, News, and Favorites
+- **Live Game Updates** — real-time polling every 15s with LIVE badge, period/clock, and score updates
+- **Player Profiles** — dedicated pages with season stats and play-by-play history
+- **Favorites** — save teams and access them from the Favorites tab (persisted via browser storage)
+- **Standings** — league-wide standings with conference/division breakdowns and sport-specific layouts
+- **Stat Leaders** — top performers across the league by position
+- **Multi-Sport Search** — search players, teams, and leagues
+- **News Feed** — global news aggregated from ESPN sources
+- **PWA** — Add to Home Screen support with custom icons and offline-ready manifest
 
 ## Tech Stack
 
@@ -14,62 +26,100 @@ Track NFL, NBA, NHL, and MLB teams with live schedules, standings, odds, news, b
 ```
 src/
 ├── app/
-│   ├── layout.tsx              # Root layout (dark theme)
-│   ├── page.tsx                # Home page — league selection
+│   ├── layout.tsx              # Root layout (dark theme, global nav)
+│   ├── page.tsx                # Home page — for you / league selection
+│   ├── scores/                 # Multi-team scoreboard
+│   ├── standings/              # Not used (league routes below)
+│   ├── search/                 # Search page
+│   ├── news/                   # Global news feed
+│   ├── favorites/              # Saved teams
 │   ├── [sport]/
 │   │   ├── page.tsx            # League overview — team grid
 │   │   └── [team]/
-│   │       ├── page.tsx        # Team dashboard (main app, ~1300 lines)
-│   │       ├── error.tsx       # Error boundary
-│   │       └── loading.tsx     # Loading skeleton
+│   │       ├── page.tsx        # Team dashboard
+│   │       └── [eventId]/      # Game detail page
+│   │   └── player/
+│   │       └── [playerId]/     # Player profile page
 │   ├── api/
 │   │   ├── roster/route.ts     # Roster + per-player season stats
-│   │   ├── box-score/route.ts  # Box score with per-sport extraction + Summer League fallback
+│   │   ├── box-score/route.ts  # Box score with per-sport extraction
 │   │   ├── schedule/route.ts   # ESPN schedule proxy
 │   │   ├── standings/route.ts  # ESPN standings proxy
-│   │   ├── odds/route.ts       # Moneyline odds extraction with summary endpoint fallback
-│   │   └── news-search/route.ts# Google News RSS aggregation
+│   │   ├── standings-league/route.ts  # Full league standings
+│   │   ├── odds/route.ts       # Moneyline win probability
+│   │   ├── news-search/route.ts# Google News RSS aggregation
+│   │   ├── top-stories/route.ts# Top sports stories
+│   │   ├── player/route.ts     # Player stats lookup
+│   │   ├── plays/route.ts      # Play-by-play data
+│   │   ├── search/route.ts     # Player/team search
+│   │   ├── stat-leaders/route.ts  # Top performers by stat
+│   │   └── scoreboard/multi/route.ts  # Multi-team scoreboard
 │   ├── robots.ts / sitemap.ts  # SEO
 │   └── globals.css             # Tailwind import + custom scrollbar
-├── data/
-│   └── teams.ts                # 124 teams across 4 leagues
-└── lib/
-    ├── sports-api.ts           # Public API — types + entry point
-    ├── schedule-types.ts       # Schedule validation
-    └── providers/
-        ├── index.ts            # Provider orchestrator (ESPN + Summer League merge)
-        └── espn.ts             # ESPN fetcher with caching + Summer League
-```
-
-## Getting Started
-
-```bash
-npm install
-npm run dev       # → http://localhost:3000
-npm run build     # TypeScript check + production build
+├── components/
+│   ├── GlobalNav.tsx           # Bottom nav bar
+│   ├── GlobalScoreboard.tsx    # Scoreboard component
+│   ├── NewsFeed.tsx            # News list component
+│   ├── SearchResults.tsx       # Search results component
+│   ├── StandingsTable.tsx      # Standings grid
+│   ├── StatLeaders.tsx         # Top performers
+│   ├── FavoriteButton.tsx      # Team favorite toggle
+│   ├── home/
+│   │   ├── ForYou.tsx          # Home feed
+│   │   └── DaySnapshot.tsx     # Today's games
+│   ├── game/
+│   │   ├── GameHeader.tsx      # Game info header
+│   │   ├── PlayByPlay.tsx      # Play timeline
+│   │   └── PlayerBoxScore.tsx # Player stats table
+│   ├── scoreboard/
+│   │   ├── ScoreCard.tsx       # Individual game card
+│   │   ├── GameStatusBadge.tsx # Live/pre/post status
+│   │   └── TeamIdentity.tsx    # Team colors/nickname
+│   └── BiggestStories.tsx      # Top news cards
+├── hooks/
+│   ├── useLivePoll.ts          # Auto-refresh for live games
+│   ├── useFavorites.ts         # Favorites state management
+│   └── useSearch.ts            # Search debouncing
+├── lib/
+│   ├── sports-api.ts           # Public API — types + entry point
+│   ├── favorites.ts            # Favorites storage layer
+│   ├── standings.ts            # Standings data processing
+│   ├── players.ts              # Player stat normalization
+│   ├── plays.ts                # Play data parsing
+│   └── leaders.ts              # Stat leader calculations
+└── data/
+    └── teams.ts                # 124 teams across 4 leagues
 ```
 
 ## Routes
 
 | Path | Page |
 |---|---|
-| `/` | League selection home |
+| `/` | Home — Today's games and for you feed |
+| `/scores` | Multi-team scoreboard |
 | `/[sport]` | Team grid (nfl / nba / nhl / mlb) |
 | `/[sport]/[team]` | Team dashboard |
+| `/[sport]/[team]/[eventId]` | Game detail with play-by-play |
+| `/[sport]/player/[playerId]` | Player profile |
+| `/standings/[sport]` | League standings |
+| `/stat-leaders/[sport]` | Top performers |
+| `/search` | Player and team search |
+| `/news` | Global news feed |
+| `/favorites` | Saved teams |
 
 ## Team Dashboard
 
 The team dashboard at `/[sport]/[team]` is a mobile-responsive single-page app with:
 
-- **Next Game** (top-left) — opponent, date/time, venue, win-probability bar (when odds available). Live games show scores, period clock, LIVE badge with pulsing indicator, and auto-refresh. Preseason / Summer League badges appear when applicable.
+- **Next Game** (top-left) — opponent, date/time, venue, win-probability bar. Live games show scores, period clock, LIVE badge with pulsing indicator, and auto-refresh.
 - **Team Logo** (top-right) — team colors, nickname. Click opens the roster panel.
-- **Last 5 Games** (bottom-left) — W/L indicators with hover lift effect; click opens box score. Adapts to 3 columns on mobile.
+- **Last 5 Games** (bottom-left) — W/L indicators with hover lift effect; click opens box score.
 - **Standings** (bottom-center) — Conference/division standings with your team highlighted.
 - **News** (bottom-right) — 4 articles (ESPN-sourced or fallback).
 
 ### Live Games
 
-In-progress games are detected automatically. The dashboard polls for live box scores every 15 seconds, showing a LIVE badge with pulsing dot and the current period/clock. Scores update in real time alongside the team abbreviations.
+In-progress games are detected automatically. The dashboard polls for live box scores every 15 seconds, showing a LIVE badge with pulsing dot and the current period/clock. Scores update in real time.
 
 ### Season Type Badges
 
@@ -83,11 +133,11 @@ In-progress games are detected automatically. The dashboard polls for live box s
 
 ### NBA Summer League
 
-Summer League games are fetched from the ESPN `nba-summer` scoreboard endpoint during June–July. The season type is normalized to `Summer League` so it's distinguishable from regular season. Games appear naturally in the last-5 and next-game slots by date order.
+Summer League games are fetched from the ESPN `nba-summer` scoreboard endpoint during June–July. The season type is normalized to `Summer League` so it's distinguishable from regular season.
 
 ### Roster View
 
-Clicking the logo toggles to a roster panel showing every player grouped by position, sorted by season stat within each group. Each player shows position-relevant stats in a fixed-column layout. Players with no game logs show college / "No stats yet".
+Clicking the logo toggles to a roster panel showing every player grouped by position, sorted by season stat within each group. Each player shows position-relevant stats.
 
 **NFL per-position stat schemas:**
 
@@ -109,14 +159,14 @@ Clicking the logo toggles to a roster panel showing every player grouped by posi
 
 **MLB:** AVG HR RBI OBP SLG SB / ERA W L SO BB SV
 
-### Box Score View
+### Box Score & Play-by-Play
 
-Clicking a game in Last 5 opens a box-score overlay with sport-aware period labels (Q1-Q4 for NBA/NFL, 1st-3rd+OT for NHL, 1st-9th for MLB), alternating row colors, and right-aligned stat values for easy scanning. Toggle between team stats and player stats.
+Clicking a game opens a detail page with box score, sport-aware period labels (Q1-Q4 for NBA/NFL, 1st-3rd+OT for NHL, 1st-9th for MLB), and a play-by-play timeline.
 
-### Performance
+## Performance
 
-- **In-memory TTL cache**: Schedule results are cached for 2 minutes to avoid redundant ESPN calls when navigating between teams
-- **Parallel fetching**: Season years, preseason, postseason, and extra-month scoreboard requests all fire concurrently
+- **In-memory TTL cache**: Schedule results cached for 2 minutes to avoid redundant ESPN calls
+- **Parallel fetching**: Season years, preseason, postseason, and extra-month requests fire concurrently
 - **API route caching**: All proxy endpoints use `Cache-Control: public, s-maxage=60-300, stale-while-revalidate`
 - **Reduced season depth**: Fetches 1-2 seasons instead of 2-3
 
@@ -127,10 +177,17 @@ Clicking a game in Last 5 opens a box-score overlay with sport-aware period labe
 | `GET /api/schedule?sport=NFL&team=NE` | Upcoming & recent games |
 | `GET /api/schedule?sport=NBA_SUMMER&team=BOS&source=scoreboard&dates=20260701-20260731` | Summer League scoreboard |
 | `GET /api/standings?sport=NFL` | Conference standings |
-| `GET /api/odds?sport=NFL&team=NE` | Moneyline win probability (falls back to summary endpoint for live games) |
+| `GET /api/standings-league?sport=NFL` | Full league standings |
+| `GET /api/odds?sport=NFL&team=NE` | Moneyline win probability |
 | `GET /api/news-search?name=Patriots` | Aggregated news |
-| `GET /api/box-score?sport=NFL&eventId=401671e0` | Player + team stats for a game |
-| `GET /api/roster?sport=NFL&team=NE` | Roster with per-player season stats |
+| `GET /api/top-stories` | Top sports stories |
+| `GET /api/box-score?sport=NFL&eventId=401671e0` | Player + team stats |
+| `GET /api/roster?sport=NFL&team=NE` | Roster with season stats |
+| `GET /api/player?name=Patrick Mahomes` | Player stats lookup |
+| `GET /api/plays?eventId=401671e0` | Play-by-play data |
+| `GET /api/search?q=Patriots` | Player and team search |
+| `GET /api/stat-leaders?sport=NFL&stat=passing_yards` | Top performers |
+| `GET /api/scoreboard/multi?sport=NFL&teams=NE,BUF` | Multi-team scoreboard |
 
 ## Environment Variables
 
