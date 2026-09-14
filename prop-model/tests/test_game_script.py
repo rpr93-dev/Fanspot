@@ -56,3 +56,15 @@ def test_static_provider_lookup():
     assert lines is not None and lines.total == 40.5
     # Unknown teams → None (caller falls back to neutral).
     assert provider.fetch("SEA", "ARI") is None
+
+
+def test_passing_yards_dampened_for_underdog():
+    # Implied 18 (total 43.5, +7.5 dogs): raw factor 18/22 = 0.818, but
+    # passing volume barely responds to implied total (fitted slope ~0.12 on
+    # 2024-2025 QB games), so the stat weight pulls it most of the way to 1.0.
+    lines = GameLines(total=43.5, spread=7.5, favorite="NE")
+    raw = 18.0 / 22.0
+    assert script_factor_for_team(lines, "PIT") == pytest.approx(raw)
+    dampened = script_factor_for_team(lines, "PIT", stat_key="passing_yards")
+    assert dampened == pytest.approx(0.25 * raw + 0.75)
+    assert dampened > 0.94  # never crushes a starting QB for being an underdog

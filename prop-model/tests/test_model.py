@@ -45,8 +45,24 @@ def _history(values: list[float], stat: str = "passing_yards", **kw):
 
 def test_projection_multiplies_factors():
     hist = _history([200.0] * 10)
-    proj = project(hist, {"factor": 1.2, "low_sample": False}, {"factor": 1.1, "available": True})
-    assert proj.projection == pytest.approx(200.0 * 1.2 * 1.1)
+    proj = project(hist, {"factor": 1.1, "low_sample": False}, {"factor": 1.1, "available": True})
+    assert proj.projection == pytest.approx(200.0 * 1.1 * 1.1)
+
+
+def test_combined_factors_clamped_for_continuous():
+    # 0.86 x 0.82 = 0.705 would put a 212-yard baseline at ~150; the clamp
+    # keeps the mean out of tail territory and says so in warnings.
+    hist = _history([212.0] * 10)
+    proj = project(hist, {"factor": 0.86, "low_sample": False}, {"factor": 0.82, "available": True})
+    assert proj.projection == pytest.approx(212.0 * 0.80)
+    assert any("combined_adjustment_clamped" in w for w in proj.warnings)
+
+
+def test_combined_factors_within_range_untouched():
+    hist = _history([200.0] * 10)
+    proj = project(hist, {"factor": 0.95, "low_sample": False}, {"factor": 0.95, "available": True})
+    assert proj.projection == pytest.approx(200.0 * 0.95 * 0.95)
+    assert not any("combined_adjustment_clamped" in w for w in proj.warnings)
 
 
 def test_weights_soften_adjustments():
@@ -214,5 +230,5 @@ def test_low_clamped_at_zero():
 
 def test_float_factors_accepted():
     hist = _history([200.0] * 10)
-    proj = project(hist, 1.2, 1.1)
-    assert proj.projection == pytest.approx(200.0 * 1.2 * 1.1)
+    proj = project(hist, 1.1, 1.1)
+    assert proj.projection == pytest.approx(200.0 * 1.1 * 1.1)

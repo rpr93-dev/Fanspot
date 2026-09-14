@@ -150,23 +150,45 @@ export async function GET(request: Request) {
   }
 
   try {
-    let res = await fetch(
-      `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventId)}`,
-      { signal: AbortSignal.timeout(15000) }
-    )
-    if (!res.ok && sport.toUpperCase() === 'NBA') {
-      // Fallback: Summer League games live under nba-summer path
-      const slPath = 'basketball/nba-summer'
-      res = await fetch(
-        `https://site.api.espn.com/apis/site/v2/sports/${slPath}/summary?event=${encodeURIComponent(eventId)}`,
+    const fetchSummary = async (): Promise<any | null> => {
+      let res = await fetch(
+        `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventId)}`,
         { signal: AbortSignal.timeout(15000) }
       )
+      if (!res.ok && sport.toUpperCase() === 'NBA') {
+        // Fallback: Summer League games live under nba-summer path
+        const slPath = 'basketball/nba-summer'
+        res = await fetch(
+          `https://site.api.espn.com/apis/site/v2/sports/${slPath}/summary?event=${encodeURIComponent(eventId)}`,
+          { signal: AbortSignal.timeout(15000) }
+        )
+      }
+      if (!res.ok) {
+        console.error(`[box-score] ESPN API error ${res.status} for sport=${sport} event=${eventId}`)
+        return null
+      }
+      return res.json()
     }
-    if (!res.ok) {
-      console.error(`[box-score] ESPN API error ${res.status} for sport=${sport} event=${eventId}`)
-      return NextResponse.json({ error: `ESPN API error ${res.status}` }, { status: res.status })
+
+    // ESPN occasionally serves a thin summary (no teams/players yet) for games
+    // that are live or final — one quick retry before accepting a partial body.
+    let data: any = null
+    let statusType: any = null
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (attempt > 0) await new Promise((r) => setTimeout(r, 600))
+      data = await fetchSummary()
+      if (!data) break
+      statusType = data?.header?.competitions?.[0]?.status?.type ?? null
+      const started = statusType?.state === 'in' || statusType?.completed === true
+      const teamsPresent = Array.isArray(data?.boxscore?.teams) && data.boxscore.teams.length > 0
+      const playersPresent =
+        Array.isArray(data?.boxscore?.players) &&
+        data.boxscore.players.some((p: any) => (p.statistics ?? []).some((c: any) => (c.athletes ?? []).length > 0))
+      if (!started || (teamsPresent && playersPresent)) break
     }
-    const data = await res.json()
+    if (!data) {
+      return NextResponse.json({ error: 'ESPN_ERROR', message: 'ESPN request failed' }, { status: 502 })
+    }
 
     const boxscore = data?.boxscore
     if (!boxscore) {
@@ -229,11 +251,13 @@ export async function GET(request: Request) {
           const statNames = new Set<string>()
           const athletes: any[] = []
 
-          // Group athletes by ID — handles both per-athlete and multi-entry formats
+          // Group athletes by ID — handles both per-athlete and multi-entry formats.
+          // Entries without an id are kept as unlinked rows (name + stats still
+          // real) rather than dropped, so a thin feed degrades to text.
           const groups = new Map<string, { entry: any; values: string[] }>()
+          let anon = 0
           for (const a of (cat.athletes ?? [])) {
-            const id = a.athlete?.id
-            if (!id) continue
+            const id = a.athlete?.id != null && a.athlete.id !== '' ? String(a.athlete.id) : `anon-${anon++}`
             if (!groups.has(id)) groups.set(id, { entry: a, values: [] })
             const dv = a.displayValue ?? a.value
             if (dv !== undefined && dv !== null) groups.get(id)!.values.push(String(dv))
@@ -244,7 +268,7 @@ export async function GET(request: Request) {
 
           if (hasMultiValue && labels.length > 0) {
             // Multi-entry grouping format: pair values with displayNames positionally
-            for (const [id, group] of groups) {
+            for (const [key, group] of groups) {
               const stats: Record<string, string> = {}
               for (let i = 0; i < Math.min(labels.length, group.values.length); i++) {
                 if (labels[i] && group.values[i]) stats[labels[i]] = group.values[i]
@@ -252,7 +276,7 @@ export async function GET(request: Request) {
               for (const l of labels) if (l) statNames.add(l)
               const a = group.entry
               athletes.push({
-                id,
+                id: key.startsWith('anon-') ? null : key,
                 displayName: a.athlete?.displayName ?? '',
                 jersey: a.athlete?.jersey ?? '',
                 position: (typeof a.athlete?.position === 'string' ? a.athlete.position : a.athlete?.position?.abbreviation) ?? '',
@@ -262,8 +286,8 @@ export async function GET(request: Request) {
           } else {
             // Per-athlete format: each entry has its own stats
             for (const a of (cat.athletes ?? [])) {
-              const id = a.athlete?.id
-              if (!id) continue
+              const rawId = a.athlete?.id
+              const id = rawId != null && rawId !== '' ? String(rawId) : null
               const stats = extractStats(a, raw)
               // Positional pairing: cat.labels / cat.keys / cat.displayNames + a.stats (string array) or a.values
               if (Object.keys(stats).length === 0) {

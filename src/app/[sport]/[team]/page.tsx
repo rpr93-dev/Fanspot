@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation'
 import { getTeamSchedule, getTeamNews, getEspnAbbr } from '@/lib/sports-api'
 import StandingsBox from './StandingsBox'
 import NextGamePanel from '@/components/NextGamePanel'
+import { FavoriteButton } from '@/components/FavoriteButton'
 import AiNalyst from '@/components/AiNalyst'
 import FantasyWidget from '@/components/FantasyWidget'
 import type { EspnEvent } from '@/lib/sports-api'
@@ -527,7 +528,18 @@ export default function TeamDashboard() {
                   setSelectedGameId((cur) => (cur === sid ? null : sid))
                 }
               }}>
-              <h2 className="fs-eyebrow mb-4" style={{ '--tint': team.colors.primary } as React.CSSProperties}>{data?.upcoming?.isLive ? 'Live' : data?.spotlightEvent && !data?.upcoming ? 'This Week' : 'Next Game'}</h2>
+              <div className="flex items-center justify-between gap-3 mb-4">
+                <h2 className="fs-eyebrow" style={{ '--tint': team.colors.primary } as React.CSSProperties}>{data?.upcoming?.isLive ? 'Live' : data?.spotlightEvent && !data?.upcoming ? 'This Week' : 'Next Game'}</h2>
+                {(data?.upcoming?.eventId || data?.spotlightEventId) && (
+                  <Link
+                    href={`/${sport.toLowerCase()}/game/${data.upcoming?.eventId ?? data.spotlightEventId}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="fs-meta hover:text-fs-text shrink-0"
+                  >
+                    Game Center &rarr;
+                  </Link>
+                )}
+              </div>
               {loading ? (
                 <div className="animate-pulse space-y-3">
                   <div className="fs-skeleton h-7 w-3/4" />
@@ -700,6 +712,11 @@ export default function TeamDashboard() {
               <div className="min-w-0">
                 <h1 className="fs-title text-3xl text-fs-text truncate">{team.name}</h1>
                 <p className="fs-meta mt-1.5">{team.conference} &middot; {team.division}</p>
+                <div className="mt-2.5">
+                  <FavoriteButton
+                    favorite={{ kind: 'team', sport: team.sport, teamId: team.id, abbr: team.abbreviation, name: team.name }}
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -753,6 +770,7 @@ export default function TeamDashboard() {
               teamColor={team.colors.primary}
               sport={team.sport}
               isLive={isLiveGame && selectedGameId === liveGameIdRef.current}
+              eventId={selectedGameId}
               onBack={() => { setSelectedGameId(null); setBoxScoreData(null) }}
             />
             {/* Model vs Live: the frozen pre-game prop snapshot against the live
@@ -862,7 +880,12 @@ export default function TeamDashboard() {
                 )}
                 <div className="min-w-0 flex-1">
                   <h1 className="text-lg font-semibold text-fs-text truncate">{team.name}</h1>
-                  <p className="fs-meta truncate">{team.conference} &middot; {team.division}{data?.teamStanding ? ` · ${data.teamStanding}` : ''}</p>
+                  <p className="fs-meta truncate">{data?.teamStanding ? data.teamStanding : `${team.conference} · ${team.division}`}</p>
+                </div>
+                <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                  <FavoriteButton
+                    favorite={{ kind: 'team', sport: team.sport, teamId: team.id, abbr: team.abbreviation, name: team.name }}
+                  />
                 </div>
                 <button onClick={() => setShowRoster((v) => !v)}
                   className="hover-bright text-xs font-semibold px-3.5 py-2 rounded-full shrink-0"
@@ -1041,7 +1064,7 @@ function prettifyName(name: string): string {
     .trim()
 }
 
-function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBack }: { data: any; loading: boolean; teamAbbr: string; teamColor: string; sport: string; isLive?: boolean; onBack: () => void }) {
+function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, eventId, onBack }: { data: any; loading: boolean; teamAbbr: string; teamColor: string; sport: string; isLive?: boolean; eventId?: string | null; onBack: () => void }) {
   const [showPlayerStats, setShowPlayerStats] = useState(false)
 
   const bsTeams: any[] = data?.teams ?? []
@@ -1092,6 +1115,14 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
             style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}>
             &larr; Back
           </button>
+          {eventId && (
+            <Link
+              href={`/${sport.toLowerCase()}/game/${eventId}`}
+              className="hover-bright text-xs px-2 py-1 rounded text-fs-muted hover:text-fs-text"
+              style={{ backgroundColor: `${teamColor}15`, border: `1px solid ${teamColor}25`, '--card-color': teamColor } as React.CSSProperties}>
+              Full game &rarr;
+            </Link>
+          )}
         </div>
       </div>
 
@@ -1186,7 +1217,16 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, onBa
                                     <tr key={a.id || `ath-${i}`} className="text-fs-text/75" style={{ borderTop: `1px solid ${teamColor}0c` }}>
                                       <td className="px-2.5 py-1.5 whitespace-nowrap">
                                         <span className="font-mono text-fs-muted-2 mr-1.5">{a.jersey ?? ''}</span>
-                                        <span className="text-sm font-medium text-fs-text/90">{a.displayName}</span>
+                                        {a.id ? (
+                                          <Link
+                                            href={`/${sport.toLowerCase()}/player/${a.id}`}
+                                            className="text-sm font-medium text-fs-text/90 hover:text-fs-text hover:underline underline-offset-2"
+                                          >
+                                            {a.displayName}
+                                          </Link>
+                                        ) : (
+                                          <span className="text-sm font-medium text-fs-text/90">{a.displayName}</span>
+                                        )}
                                         {a.position ? <span className="text-fs-muted-2 ml-1 text-xs">{a.position}</span> : ''}
                                       </td>
                                       {cat.statNames.map((n: string, ni: number) => (
@@ -1459,7 +1499,16 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
                       return (
                         <div key={athlete.id ?? `athlete-${pi}-${ai}`} className="flex items-center gap-2 sm:gap-3 rounded-lg px-2 sm:px-3 py-1.5 overflow-x-auto" style={{ backgroundColor: rookie ? `${team.colors.primary}12` : 'transparent' }}>
                           <span className="text-xs w-5 sm:w-6 text-right font-mono text-fs-muted-2 flex-shrink-0">{athlete.jersey}</span>
-                          <span className="text-xs sm:text-sm flex-shrink-0 text-fs-text/85 whitespace-nowrap">{athlete.fullName ?? `${athlete.firstName ?? ''} ${athlete.lastName ?? ''}`}</span>
+                          {athlete.id ? (
+                            <Link
+                              href={`/${team.sport.toLowerCase()}/player/${athlete.id}`}
+                              className="text-xs sm:text-sm flex-shrink-0 text-fs-text/85 whitespace-nowrap hover:text-fs-text hover:underline underline-offset-2"
+                            >
+                              {athlete.fullName ?? `${athlete.firstName ?? ''} ${athlete.lastName ?? ''}`}
+                            </Link>
+                          ) : (
+                            <span className="text-xs sm:text-sm flex-shrink-0 text-fs-text/85 whitespace-nowrap">{athlete.fullName ?? `${athlete.firstName ?? ''} ${athlete.lastName ?? ''}`}</span>
+                          )}
                           {nflSchema && nflSchema.length > 0 && (
                             <div className="flex items-center gap-2 sm:gap-3 font-mono tabular-nums flex-shrink-0" style={{ fontVariantNumeric: 'tabular-nums' }}>
                               {nflSchema.map((s, si) => (

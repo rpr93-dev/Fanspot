@@ -88,6 +88,11 @@ OPP_FACTOR_MAX = 1.25
 SCRIPT_FACTOR_MIN = 0.80
 SCRIPT_FACTOR_MAX = 1.20
 WINSORIZE_MAD_MULT = 3.5
+# Combined opponent x game-script product for continuous stats. Each factor is
+# shrunk on its own, but the product can still stack into a tail outcome
+# (e.g. 0.86 x 0.82); the clamp keeps the mean projection out of the weeds.
+COMBINED_FACTOR_MIN = 0.80
+COMBINED_FACTOR_MAX = 1.30
 
 
 @dataclass(frozen=True)
@@ -750,8 +755,23 @@ def project(
 
     pred_sd = core_std * math.sqrt(1.0 + 1.0 / ess) * sd_mult if ess > 0 else core_std * sd_mult
 
-    # Step 5: Apply opponent and game-script adjustments
-    projection = baseline * (opp_f ** w_opp) * (gs_f ** weights.game_script)
+    # Step 5: Apply opponent and game-script adjustments.
+    # The two factors multiply — each is shrunk toward 1.0 on its own, but
+    # their product can still stack into a tail (0.86 x 0.82 = 0.71 turned a
+    # 212-yard baseline into a 150-yard starting-QB projection). Clamp the
+    # combined product for continuous stats so one bad week on both sides
+    # can't drag a projection to a percentile outcome.
+    combined = (opp_f ** w_opp) * (gs_f ** weights.game_script)
+    clamp_note: str | None = None
+    if not is_count:
+        clamped = max(COMBINED_FACTOR_MIN, min(COMBINED_FACTOR_MAX, combined))
+        if clamped != combined:
+            clamp_note = (
+                f"combined_adjustment_clamped: opponent x script {combined:.3f} "
+                f"clamped to [{COMBINED_FACTOR_MIN}, {COMBINED_FACTOR_MAX}]"
+            )
+        combined = clamped
+    projection = baseline * combined
 
     # Step 6: Role-change detection (diagnostic only — recency weighting already captures this)
     role_factor, role_warnings = _detect_role_change(history, weekly)
@@ -854,6 +874,8 @@ def project(
 
     # Step 12: Return
     all_warnings = role_warnings + season_warnings + guardrail_warnings
+    if clamp_note:
+        all_warnings = all_warnings + [clamp_note]
     if espn_disagreement_warning:
         all_warnings = all_warnings + [espn_disagreement_warning]
     return FullProjection(

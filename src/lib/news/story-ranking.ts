@@ -13,6 +13,8 @@ export interface TopStory {
   significance: number
   /** Human-readable list of the signals that scored, shown in the UI. */
   drivers: string[]
+  /** Fanspot team ids mentioned in the story (attached downstream). */
+  teamIds: string[]
 }
 
 /**
@@ -179,7 +181,7 @@ export function rankStories(raw: RawStory[], limit: number): TopStory[] {
     if (seen.has(key)) continue
     seen.add(key)
     const { significance, drivers } = scoreStory(s)
-    scored.push({ ...s, significance, drivers })
+    scored.push({ ...s, significance, drivers, teamIds: [] })
   }
 
   scored.sort(

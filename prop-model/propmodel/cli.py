@@ -416,7 +416,7 @@ def _project_one(
     pid = _resolve_pid(memo, weekly, player, team)
     prior = target.get("prior")
     lines = lines_provider.fetch(team, opponent) if lines_provider else None
-    gs = script_adjustment(team, opponent, lines)
+    gs = script_adjustment(team, opponent, lines, stat_key=stat)
     rates = _defense_rates_for(
         memo.rates if memo is not None else None, weekly, stat, seasons=seasons,
         window=args.n_games, shrink_games=weights.opp_shrink,

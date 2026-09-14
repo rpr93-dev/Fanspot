@@ -47,9 +47,14 @@ SCRIPT_FACTOR_MAX = 1.25
 
 # Stat-specific game script multipliers:
 # Different stats respond differently to game context.
-# A +10 spread increases passing volume more than rushing volume.
+# Passing yards respond WEAKLY to implied team total (weight 0.25): underdog
+# QBs throw ~as much as usual (garbage-time volume compensates) — fitted on
+# 2024-2025 QB games, slope of actual/season-avg on implied/22 is ~0.12 and
+# MAE(weight=0) <= MAE(0.5) < MAE(1.0). Full proportional scaling (1.0)
+# crushed underdog-QB projections (e.g. implied-18 -> x0.82 on passing).
+# TDs keep full weight: scoring follows the implied total.
 STAT_SCRIPT_WEIGHTS: dict[str, float] = {
-    "passing_yards": 1.0,       # full game-script effect on passing
+    "passing_yards": 0.25,       # dampened: volume follows pace, not team total
     "passing_tds": 1.0,
     "receiving_yards": 0.9,     # slightly less than passing (recipients vary)
     "receptions": 0.8,          # volume stat, less sensitive to game state

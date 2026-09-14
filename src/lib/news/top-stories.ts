@@ -1,4 +1,5 @@
 import { XMLParser } from 'fast-xml-parser'
+import { attachStoryTeams, feedScore } from '@/lib/models'
 import { STORY_LEAGUES, rankStories, type RawStory, type StoryLeague, type TopStory } from './story-ranking'
 
 const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_' })
@@ -90,11 +91,14 @@ export interface TopStoriesResult {
   cached: boolean
 }
 
+export type StoryRanking = 'significance' | 'balanced'
+
 export async function getTopStories(
   leagues: readonly StoryLeague[] = STORY_LEAGUES,
   limit = 20,
+  ranking: StoryRanking = 'significance',
 ): Promise<TopStoriesResult> {
-  const key = `${[...leagues].sort().join(',')}:${limit}`
+  const key = `${[...leagues].sort().join(',')}:${limit}:${ranking}`
   const hit = cache.get(key)
   if (hit && Date.now() - hit.at < TOP_STORIES_TTL_MS) {
     return {
@@ -113,10 +117,23 @@ export async function getTopStories(
   )
 
   const emptyLeagues = perLeague.filter((p) => p.raw.length === 0).map((p) => p.league)
-  const stories = rankStories(perLeague.flatMap((p) => p.raw), limit)
+  let stories = rankStories(perLeague.flatMap((p) => p.raw), limit * 2)
+  if (ranking === 'balanced') {
+    // Recency-weighted feed: significance blended with age so major current
+    // stories outrank big-but-stale ones on the main feed.
+    const now = Date.now()
+    stories = [...stories]
+      .sort((a, b) => feedScore(b.significance, b.publishedAt, now) - feedScore(a.significance, a.publishedAt, now))
+      .slice(0, limit)
+  } else {
+    stories = stories.slice(0, limit)
+  }
+
+  // Attach Fanspot team ids so clients can boost favorites and deep-link.
+  const withTeams = stories.map((s) => attachStoryTeams(s))
 
   // An all-empty result is an upstream outage, not a slow news day — don't cache it.
-  if (stories.length > 0) cache.set(key, { at: Date.now(), stories })
+  if (withTeams.length > 0) cache.set(key, { at: Date.now(), stories: withTeams })
 
-  return { stories, emptyLeagues, fetchedAt: new Date().toISOString(), cached: false }
+  return { stories: withTeams, emptyLeagues, fetchedAt: new Date().toISOString(), cached: false }
 }

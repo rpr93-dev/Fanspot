@@ -20,6 +20,10 @@ export default function sitemap(): MetadataRoute.Sitemap {
 
   return [
     { url: 'https://fanspot.app', lastModified: new Date(), changeFrequency: 'weekly', priority: 0.5 },
+    { url: 'https://fanspot.app/scores', lastModified: new Date(), changeFrequency: 'hourly', priority: 0.9 },
+    { url: 'https://fanspot.app/news', lastModified: new Date(), changeFrequency: 'hourly', priority: 0.7 },
+    { url: 'https://fanspot.app/favorites', lastModified: new Date(), changeFrequency: 'weekly', priority: 0.4 },
+    { url: 'https://fanspot.app/search', lastModified: new Date(), changeFrequency: 'weekly', priority: 0.4 },
     ...leagueEntries,
     ...teamEntries,
   ]

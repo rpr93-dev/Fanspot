@@ -156,7 +156,11 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
     <>
       <button
         onClick={() => setOpen(v => !v)}
-        className={`fixed top-4 right-4 sm:top-6 sm:right-6 z-50 gen-btn-glow shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200 flex items-center justify-center ${
+        className={`fixed z-50 gen-btn-glow shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200 flex items-center justify-center ${
+          // Bottom-right above the mobile tab bar; top-right on desktop.
+          // (Top-right on mobile collides with the nav search/favorites buttons.)
+          'bottom-24 right-4 md:bottom-auto md:top-6 md:right-6'
+        } ${
           open
             ? 'gap-2.5 px-4 py-2.5 sm:px-5 sm:py-3 rounded-full'
             : 'w-11 h-11 sm:w-12 sm:h-12 rounded-full p-0'
