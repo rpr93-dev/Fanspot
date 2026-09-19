@@ -79,8 +79,12 @@ class EdgeResult:
         }
 
 # ── Interval calibration multipliers ────────────────────────────────────────
-CALIBRATED_SD_MULT_CONTINUOUS = 1.01
-CALIBRATED_SD_MULT_COUNT = 0.63
+# Fit by tune.py (--fit-sd) on walk-forward 2023-2025 out-of-sample residuals
+# of the tuned weights: the unique mult (per stat family) making
+# mean(|err| <= mult * base_sd) == 0.68, so the +/-1-sd interval covers ~68%.
+# base_sd = core_std * sqrt(1 + 1/ess). See cache/sd_calibration.json.
+CALIBRATED_SD_MULT_CONTINUOUS = 1.147
+CALIBRATED_SD_MULT_COUNT = 0.605
 
 # ── Bounded adjustment guardrails ───────────────────────────────────────────
 OPP_FACTOR_MIN = 0.75
@@ -97,13 +101,19 @@ COMBINED_FACTOR_MAX = 1.30
 
 @dataclass(frozen=True)
 class ModelWeights:
-    """Tunable projection parameters."""
-    halflife: float = 4.0
+    """Tunable projection parameters.
+
+    Defaults are the walk-forward 2023-2025 tuned weights (tune.py): the
+    on-grid combo minimizing mean model-vs-plain-mean MAE ratio across all
+    five stats. Per-stat optima live in cache/tuned_weights_nflverse.json;
+    the dashboard passes cache/tuned_weights_avg.json via --weights-json.
+    """
+    halflife: float = 8.0
     opponent: float = 1.0
     game_script: float = 1.0
     min_games: int = 3
-    prior_strength: float = 0.5
-    opp_shrink: float = 6.0
+    prior_strength: float = 0.0
+    opp_shrink: float = 10.0
     sd_mult_continuous: float = CALIBRATED_SD_MULT_CONTINUOUS
     sd_mult_count: float = CALIBRATED_SD_MULT_COUNT
     halflife_count: float = 8.0
@@ -881,8 +891,8 @@ def project(
     return FullProjection(
         player_name=history.player_name, stat=history.stat,
         projection=projection, baseline=baseline,
-        low=max(0.0, projection - pred_sd) if pred_sd else None,
-        high=projection + pred_sd if pred_sd else None,
+        low=max(0.0, projection - pred_sd),
+        high=projection + pred_sd,
         p10=dist.get("p10"), p25=dist.get("p25"), p50=dist.get("p50"),
         p75=dist.get("p75"), p90=dist.get("p90"),
         pred_sd=pred_sd,

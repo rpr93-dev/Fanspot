@@ -179,12 +179,26 @@ def test_count_stat_uses_poisson_std():
     assert proj.high == pytest.approx(proj.projection + pred_sd, abs=0.01)
 
 
+def test_zero_variance_history_still_gets_interval():
+    """A bench player with an all-zero (zero-variance) history yields
+    pred_sd=0; a non-refused projection must still expose an interval
+    (degenerate low==high==projection). None low/high is reserved for
+    refusals — consumers like backtest.py compare actuals against them."""
+    hist = _history([0.0] * 8)
+    proj = project(hist, {"factor": 1.0}, {"factor": 1.0})
+    assert proj.projection is not None
+    assert proj.low is not None and proj.high is not None
+    assert proj.low == pytest.approx(proj.projection)
+    assert proj.high == pytest.approx(proj.projection)
+
+
 def test_thin_history_shrinks_toward_position_prior():
     """A short sample leans toward the position prior instead of trusting a
     tiny raw mean; prior_strength=0 recovers the unshrunk behavior."""
     hist = _history([300.0, 290.0, 310.0])
     x = np.asarray([300.0, 290.0, 310.0])
-    raw_mean = float(np.average(x, weights=recency_weights(len(x), halflife=4.0)))
+    halflife = ModelWeights().halflife  # track the shipped default
+    raw_mean = float(np.average(x, weights=recency_weights(len(x), halflife=halflife)))
     proj = project(hist, {"factor": 1.0}, {"factor": 1.0},
                    position_prior=200.0, weights=ModelWeights(prior_strength=3.0))
     assert proj.baseline < raw_mean          # pulled toward the prior
@@ -199,12 +213,14 @@ def test_prior_pull_weakens_as_history_grows():
     shrinkage must fade out as real evidence accumulates."""
     thin = _history([300.0, 290.0, 310.0])
     full = _history([300.0] * 8)
+    halflife = ModelWeights().halflife  # track the shipped default
+    w = ModelWeights(prior_strength=3.0)  # explicit pull (default is 0.0)
     raw_thin = float(np.average(np.asarray([300.0, 290.0, 310.0]),
-                                weights=recency_weights(3, halflife=4.0)))
+                                weights=recency_weights(3, halflife=halflife)))
     raw_full = float(np.average(np.asarray([300.0] * 8),
-                                weights=recency_weights(8, halflife=4.0)))
-    p_thin = project(thin, {"factor": 1.0}, {"factor": 1.0}, position_prior=200.0)
-    p_full = project(full, {"factor": 1.0}, {"factor": 1.0}, position_prior=200.0)
+                                weights=recency_weights(8, halflife=halflife)))
+    p_thin = project(thin, {"factor": 1.0}, {"factor": 1.0}, position_prior=200.0, weights=w)
+    p_full = project(full, {"factor": 1.0}, {"factor": 1.0}, position_prior=200.0, weights=w)
     pull_thin = raw_thin - p_thin.baseline
     pull_full = raw_full - p_full.baseline
     assert pull_thin > pull_full > 0
