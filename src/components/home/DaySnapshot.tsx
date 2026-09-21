@@ -61,13 +61,13 @@ export function DaySnapshot() {
   const upcoming = relevanceSort(games.filter((g) => g.status.phase === 'pre'), boost).slice(0, 6)
   const finals = relevanceSort(games.filter((g) => g.status.phase === 'final'), boost).slice(0, 6)
 
-  const rail = (list: NormalizedGame[], empty: string) =>
+  const rail = (list: NormalizedGame[], empty: string, wrap = false) =>
     list.length === 0 ? (
       <EmptyState title={empty} />
     ) : (
-      <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
+      <div className={wrap ? 'flex flex-wrap gap-3' : 'flex gap-3 overflow-x-auto pb-2 snap-x'}>
         {list.map((g) => (
-          <div key={`${g.sport}:${g.id}`} className="snap-start">
+          <div key={`${g.sport}:${g.id}`} className={wrap ? undefined : 'snap-start'}>
             <ScoreCard game={g} />
           </div>
         ))}
@@ -75,7 +75,7 @@ export function DaySnapshot() {
     )
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-8 lg:space-y-0 lg:grid lg:grid-cols-3 lg:gap-6 lg:items-start">
       <section aria-label="Live now">
         <SectionHeader
           eyebrow="Happening now"
@@ -89,7 +89,7 @@ export function DaySnapshot() {
             ) : undefined
           }
         />
-        {rail(live, 'No games live right now.')}
+        {rail(live, 'No games live right now.', true)}
       </section>
 
       <section aria-label="Upcoming">

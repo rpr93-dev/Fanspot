@@ -146,48 +146,7 @@ const EDGE_STYLES: Record<string, { label: string; bg: string; fg: string; stron
   fair: { label: 'FAIR', bg: 'bg-fs-muted-2/10', fg: 'text-fs-muted-2', strongBg: 'bg-fs-muted-2/10', strongFg: 'text-fs-muted-2' },
 }
 
-/** Stat columns shown per position group in the projected-lines tables. */
-const PROJ_COLUMNS: Record<string, { label: string; stat: string }[]> = {
-  QB: [
-    { label: 'Pass Yds', stat: 'Pass Yds' },
-    { label: 'Pass TDs', stat: 'Pass TDs' },
-    { label: 'Rush Yds', stat: 'Rush Yds' },
-  ],
-  RB: [
-    { label: 'Rush Yds', stat: 'Rush Yds' },
-    { label: 'Rush Att', stat: 'Rush Att' },
-    { label: 'Rec Yds', stat: 'Rec Yds' },
-    { label: 'Rec', stat: 'Receptions' },
-  ],
-  WR: [
-    { label: 'Rec Yds', stat: 'Rec Yds' },
-    { label: 'Rec', stat: 'Receptions' },
-    { label: 'Rec TDs', stat: 'Rec TDs' },
-  ],
-  TE: [
-    { label: 'Rec Yds', stat: 'Rec Yds' },
-    { label: 'Rec', stat: 'Receptions' },
-    { label: 'Rec TDs', stat: 'Rec TDs' },
-  ],
-}
-
 const POS_ORDER = ['QB', 'RB', 'WR', 'TE']
-
-/** Split (already position-sorted) players into QB/RB/WR/TE groups (betting-props
- *  positions like "WR/TE" normalize to WR; unknown positions land in "Other"). */
-function groupByPos<T extends { position: string | null }>(players: T[]): { pos: string; players: T[] }[] {
-  const map = new Map<string, T[]>()
-  for (const p of players) {
-    let key = p.position || 'Other'
-    if (key.startsWith('WR')) key = 'WR'
-    if (!POS_ORDER.includes(key)) key = 'Other'
-    if (!map.has(key)) map.set(key, [])
-    map.get(key)!.push(p)
-  }
-  const order = [...POS_ORDER]
-  if (map.has('Other')) order.push('Other')
-  return order.filter((o) => map.has(o)).map((o) => ({ pos: o, players: map.get(o)! }))
-}
 
 export default function NextGamePanel({
   sport,
@@ -201,6 +160,7 @@ export default function NextGamePanel({
   teamName,
   opponentName,
   odds,
+  oddsStatus,
   isPreseason,
   onBack,
   scraperLoading,
@@ -221,6 +181,7 @@ export default function NextGamePanel({
   teamName: string
   opponentName: string
   odds: any
+  oddsStatus?: 'loading' | 'found' | 'none' | 'no-game' | 'error'
   isPreseason?: boolean
   onBack: () => void
   scraperLoading?: boolean
@@ -231,7 +192,6 @@ export default function NextGamePanel({
   compact?: boolean
 }) {
   const [props, setProps] = useState<PropsResponse | null>(null)
-  const [propsLoading, setPropsLoading] = useState(true)
   const [ourStarters, setOurStarters] = useState<Starter[] | null>(null)
   const [oppStarters, setOppStarters] = useState<Starter[] | null>(null)
   const [fantasyError, setFantasyError] = useState<string | null>(null)
@@ -243,7 +203,6 @@ export default function NextGamePanel({
 
   useEffect(() => {
     let cancelled = false
-    setPropsLoading(true)
     const params = new URLSearchParams({ sport })
     if (teamAbbr) params.set('team', teamAbbr)
     if (opponentAbbr) params.set('opponent', opponentAbbr)
@@ -258,7 +217,6 @@ export default function NextGamePanel({
       .then((r) => r.json().catch(() => ({ available: false })))
       .then((json) => { if (!cancelled) setProps(json) })
       .catch(() => { if (!cancelled) setProps({ available: false, reason: 'error' }) })
-      .finally(() => { if (!cancelled) setPropsLoading(false) })
     return () => { cancelled = true }
   }, [sport, teamAbbr, opponentAbbr, eventId, eventDate, isPreseason, total, spread])
 
@@ -286,13 +244,8 @@ export default function NextGamePanel({
     return () => { cancelled = true }
   }, [sport, teamFantasyAbbr, opponentFantasyAbbr])
 
-  const ourProps = props?.players?.filter((p) => p.team === teamAbbr) ?? []
-  const oppProps = props?.players?.filter((p) => p.team === opponentAbbr) ?? []
-  const ungrouped = props?.players?.filter((p) => !p.team) ?? []
   const ourProjected = props?.projections?.filter((p) => p.team === teamAbbr) ?? []
   const oppProjected = props?.projections?.filter((p) => p.team === opponentAbbr) ?? []
-  const showBettingProps = props?.available === true && (ourProps.length > 0 || oppProps.length > 0)
-  const showProjected = !showBettingProps && (ourProjected.length > 0 || oppProjected.length > 0)
 
   // ---- Prop Model (Python pipeline) ----
   const [modelResults, setModelResults] = useState<ModelProjection[] | null>(null)
@@ -933,7 +886,7 @@ export default function NextGamePanel({
       {/* Game odds: moneyline + spread + total */}
       {!compact && (odds ? (
         <div className="rounded-lg p-4 mb-4" style={{ backgroundColor: `${teamColor}0a`, border: `1px solid ${teamColor}18` }}>
-          <p className="text-xs font-medium uppercase tracking-wider text-fs-muted mb-2">Game Odds &middot; {odds.sportsbook}</p>
+          <p className="fs-eyebrow mb-2" style={{ '--tint': teamColor } as React.CSSProperties}>Game Odds &middot; {odds.sportsbook}</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div>
               <p className="text-[11px] uppercase tracking-wider text-fs-muted-2 mb-1">Moneyline</p>
@@ -952,144 +905,20 @@ export default function NextGamePanel({
             </div>
           </div>
         </div>
+      ) : oddsStatus === 'loading' ? (
+        <div className="animate-pulse space-y-2 mb-4">
+          <div className="fs-skeleton h-4 w-2/3" />
+          <div className="fs-skeleton h-4 w-1/3" />
+        </div>
       ) : (
-        <p className="text-sm text-fs-muted-2 mb-4">Odds not yet posted for this game.</p>
+        <p className="text-sm text-fs-muted-2 mb-4">
+          {oddsStatus === 'no-game'
+            ? 'Odds will appear once this game is posted on the board.'
+            : oddsStatus === 'error'
+              ? 'Odds are temporarily unavailable — check back soon.'
+              : 'Odds not yet posted for this game.'}
+        </p>
       ))}
-
-      {/* Player props */}
-      {!compact && (
-      <div className="mb-4">
-        <p className="fs-eyebrow mb-2" style={{ '--tint': teamColor } as React.CSSProperties}>Player Lines</p>
-        {propsLoading ? (
-          <div className="animate-pulse space-y-2">
-            <div className="fs-skeleton h-8" style={{ backgroundColor: `${teamColor}14` }} />
-            <div className="fs-skeleton h-8" style={{ backgroundColor: `${teamColor}14` }} />
-          </div>
-        ) : showProjected ? (
-          <>
-            <p className="text-xs text-fs-muted-2 mb-2">
-              {isPreseason ? 'Preseason-adjusted' : 'Projected'} per-game lines from ESPN fantasy projections
-              {props?.matchup ? (
-                <> &middot; matchup-adjusted via Vegas total {props.matchup.total} ({teamName} {props.matchup.ourTotal} pts, {opponentName} {props.matchup.oppTotal} pts implied)</>
-              ) : null}
-              &nbsp;(betting props not posted — crude fallback; canonical projections via &ldquo;Prop Model&rdquo; below use recency-weighted history + opponent + game-script + distributions).
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5 sm:gap-4 min-w-0">
-              {[ourProjected, oppProjected].map((group, gi) => {
-                if (!group.length) return null
-                const posGroups = groupByPos(group)
-                return (
-                  <div key={gi}>
-                    <p className="text-xs font-medium mb-1.5 uppercase tracking-wider" style={{ color: gi === 0 ? teamColor : undefined, opacity: gi === 0 ? 1 : 0.7 }}>
-                      {gi === 0 ? teamName : opponentName}
-                    </p>
-                    <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${teamColor}16` }}>
-                      {posGroups.map((g) => {
-                        const cols = PROJ_COLUMNS[g.pos] ?? []
-                        return (
-                          <div key={g.pos} className="border-t first:border-t-0" style={{ borderColor: `${teamColor}12` }}>
-                            <div className="px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-fs-muted-2" style={{ backgroundColor: `${teamColor}0a` }}>
-                              {g.pos === 'Other' ? 'Other' : `${g.pos}s`}
-                            </div>
-                            <table className="w-full text-xs">
-                              <thead>
-                                <tr className="text-fs-muted-2">
-                                  <th className="text-left px-2.5 py-1.5 font-medium">Player</th>
-                                  {cols.map((c) => (
-                                    <th key={c.stat} className="text-right px-2 py-1.5 font-medium tabular-nums">{c.label}</th>
-                                  ))}
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {g.players.map((p) => (
-                                  <tr key={p.name} className="text-fs-text/75" style={{ borderTop: `1px solid ${teamColor}0c` }}>
-                                    <td className="px-2.5 py-1.5 font-medium text-fs-text/90 whitespace-nowrap">{p.name}</td>
-                                    {cols.map((c) => {
-                                      const v = p.lines.find((l) => l.label === c.stat)?.value
-                                      return (
-                                        <td key={c.stat} className="px-2 py-1.5 text-right font-mono tabular-nums">
-                                          {v != null && v > 0 ? v : '—'}
-                                        </td>
-                                      )
-                                    })}
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          </>
-        ) : !props?.available ? (
-          <div className="rounded-lg p-4 text-sm text-fs-muted" style={{ backgroundColor: `${teamColor}08`, border: `1px solid ${teamColor}14` }}>
-            {props?.reason === 'no-api-key'
-              ? 'Player prop lines are not configured yet (ODDS_API_KEY missing).'
-              : props?.reason === 'no-props'
-                ? 'Player props not posted for this game yet — check back closer to kickoff.'
-                : 'Player prop lines are unavailable for this game.'}
-          </div>
-        ) : (
-          <div className="grid gap-4 md:grid-cols-2 items-start">
-            {[ourProps, oppProps, ungrouped].map((group, gi) => {
-              if (!group.length) return null
-              const isOur = gi === 0
-              const isOpp = gi === 1
-              const label = isOur ? teamName : isOpp ? opponentName : 'Other'
-              const posGroups = groupByPos(group)
-              return (
-                <div key={gi} className={gi === 2 ? 'md:col-span-2 min-w-0' : 'min-w-0'}>
-                  <p className="text-xs font-medium mb-1.5 uppercase tracking-wider" style={{ color: isOur ? teamColor : undefined, opacity: isOur || isOpp ? 1 : 0.6 }}>
-                    {label} {props?.bookmaker ? <span className="text-fs-muted-2 normal-case">· {props.bookmaker}</span> : null}
-                  </p>
-                  <div className="rounded-lg overflow-hidden" style={{ border: `1px solid ${teamColor}16` }}>
-                    {posGroups.map((g) => (
-                      <div key={g.pos} className="border-t first:border-t-0" style={{ borderColor: `${teamColor}12` }}>
-                        <div className="px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-fs-muted-2" style={{ backgroundColor: `${teamColor}0a` }}>
-                          {g.pos === 'Other' ? 'Other' : `${g.pos}s`}
-                        </div>
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="text-fs-muted-2">
-                              <th className="text-left px-2.5 py-1.5 font-medium">Player</th>
-                              <th className="text-left px-2 py-1.5 font-medium">Line</th>
-                              <th className="text-right px-2 py-1.5 font-medium">Over</th>
-                              <th className="text-right px-2.5 py-1.5 font-medium">Under</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {g.players.map((p) =>
-                              p.props.map((prop, pi) => (
-                                <tr key={`${p.name}-${prop.market}`} className="text-fs-text/75" style={pi % 2 === 1 ? { backgroundColor: `${teamColor}05` } : undefined}>
-                                  {pi === 0 ? (
-                                    <td className="px-2.5 py-1 font-medium text-fs-text/90 whitespace-nowrap" rowSpan={p.props.length}>
-                                      {p.name}
-                                    </td>
-                                  ) : null}
-                                  <td className="px-2 py-1 whitespace-nowrap">
-                                    {prop.label} <span className="font-mono text-fs-text">{prop.line}</span>
-                                  </td>
-                                  <td className="px-2 py-1 text-right font-mono tabular-nums">{formatPrice(prop.over)}</td>
-                                  <td className="px-2.5 py-1 text-right font-mono tabular-nums">{formatPrice(prop.under)}</td>
-                                </tr>
-                              ))
-                            )}
-                          </tbody>
-                        </table>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </div>
-      )}
 
       {/* Fantasy updates for star players */}
       {sport.toUpperCase() === 'NFL' && !compact && (

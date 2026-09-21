@@ -75,7 +75,7 @@ export async function getOdds(
       let path = `/api/odds?sport=${sport}&team=${teamAbbr}`
       if (eventId && date) path += `&eventId=${encodeURIComponent(eventId)}&date=${date}`
       const res = await fetch(apiUrl(path, origin), { signal: AbortSignal.timeout(10000) })
-      if (!res.ok) return null
+      if (!res.ok) return { odds: null, source: 'espn', status: 'error' }
       return res.json()
     },
   )

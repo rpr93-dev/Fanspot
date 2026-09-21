@@ -118,7 +118,7 @@ export async function GET(request: Request) {
   const payload = await fetchOrCache(
     `odds:${sport.toUpperCase()}:${team.toUpperCase()}:${eventId ?? ''}:${providedDate ?? ''}`,
     TTL.ODDS,
-    async (): Promise<{ odds: any; source: string }> => {
+    async (): Promise<{ odds: any; source: string; status: 'found' | 'none' | 'no-game' | 'error' }> => {
       try {
         let gameDate: string
         let homeAbbr: string | undefined
@@ -137,7 +137,7 @@ export async function GET(request: Request) {
           const schedRes = await fetch(schedUrl, { signal: AbortSignal.timeout(15000) })
           if (!schedRes.ok) {
             console.error(`[odds] schedule fetch failed: ${schedRes.status} ${schedRes.statusText}`)
-            return { odds: null, source: 'espn' }
+            return { odds: null, source: 'espn', status: 'error' }
           }
 
           const schedData = await schedRes.json()
@@ -152,7 +152,7 @@ export async function GET(request: Request) {
           })
 
           if (!upcoming) {
-            return { odds: null, source: 'espn' }
+            return { odds: null, source: 'espn', status: 'no-game' }
           }
 
           eventIdStr = String(upcoming.id)
@@ -174,7 +174,7 @@ export async function GET(request: Request) {
         const sbRes = await fetch(sbUrl, { signal: AbortSignal.timeout(15000) })
         if (!sbRes.ok) {
           console.error(`[odds] scoreboard fetch failed: ${sbRes.status} ${sbRes.statusText}`)
-          return { odds: null, source: 'espn' }
+          return { odds: null, source: 'espn', status: 'error' }
         }
 
         const sbData = await sbRes.json()
@@ -214,7 +214,7 @@ export async function GET(request: Request) {
         }
 
         if (!sbEvent) {
-          return { odds: null, source: 'espn' }
+          return { odds: null, source: 'espn', status: 'no-game' }
         }
 
         const sbCompetitors = sbEvent.competitions?.[0]?.competitors ?? []
@@ -222,7 +222,7 @@ export async function GET(request: Request) {
 
         if (!sbHome || !sbAway) {
           console.warn('[odds] could not determine home/away teams in scoreboard event')
-          return { odds: null, source: 'espn' }
+          return { odds: null, source: 'espn', status: 'error' }
         }
 
         const sbHomeAbbr = getTeamAbbr(sbHome)
@@ -248,7 +248,7 @@ export async function GET(request: Request) {
         }
 
         if (!oddsArr || oddsArr.length === 0) {
-          return { odds: null, source: 'espn' }
+          return { odds: null, source: 'espn', status: 'none' }
         }
 
         const oddsObj = oddsArr[0]
@@ -262,7 +262,7 @@ export async function GET(request: Request) {
         const overUnder = parseFloatValue(oddsObj?.overUnder)
 
         if (homeML === null || awayML === null) {
-          return { odds: null, source: 'espn' }
+          return { odds: null, source: 'espn', status: 'error' }
         }
 
         // Step 8: Determine which team is ours and compute probabilities. ESPN's `spread`
@@ -311,10 +311,11 @@ export async function GET(request: Request) {
             isHome,
           },
           source: 'espn',
+          status: 'found',
         }
       } catch (err) {
         console.error(`[odds] unexpected error: ${err instanceof Error ? err.message : String(err)}`)
-        return { odds: null, source: 'espn' }
+        return { odds: null, source: 'espn', status: 'error' }
       }
     }
   )

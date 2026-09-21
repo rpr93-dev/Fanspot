@@ -8,41 +8,54 @@ import { fetchOrCache } from '@/lib/cache/cacheService'
 import { espnSportMap } from '@/lib/providers/espn'
 import type { SportKey, StatLeader } from '@/lib/models'
 
+export type LeaderGroup = 'offense' | 'defense'
+
 export interface LeaderCategory {
   key: string
   label: string
+  group: LeaderGroup
 }
 
 export const LEADER_CATEGORIES: Record<SportKey, LeaderCategory[]> = {
   NFL: [
-    { key: 'passingYards', label: 'Pass Yds' },
-    { key: 'passingTouchdowns', label: 'Pass TD' },
-    { key: 'rushingYards', label: 'Rush Yds' },
-    { key: 'receivingYards', label: 'Rec Yds' },
-    { key: 'sacks', label: 'Sacks' },
+    { key: 'passingYards', label: 'Pass Yds', group: 'offense' },
+    { key: 'passingTouchdowns', label: 'Pass TD', group: 'offense' },
+    { key: 'rushingYards', label: 'Rush Yds', group: 'offense' },
+    { key: 'receivingYards', label: 'Rec Yds', group: 'offense' },
+    { key: 'sacks', label: 'Sacks', group: 'defense' },
+    { key: 'interceptions', label: 'INT', group: 'defense' },
+    { key: 'totalTackles', label: 'Tackles', group: 'defense' },
   ],
   NBA: [
-    { key: 'pointsPerGame', label: 'PPG' },
-    { key: 'reboundsPerGame', label: 'RPG' },
-    { key: 'assistsPerGame', label: 'APG' },
-    { key: 'stealsPerGame', label: 'SPG' },
-    { key: 'blocksPerGame', label: 'BPG' },
+    { key: 'pointsPerGame', label: 'PPG', group: 'offense' },
+    { key: 'reboundsPerGame', label: 'RPG', group: 'offense' },
+    { key: 'assistsPerGame', label: 'APG', group: 'offense' },
+    { key: 'stealsPerGame', label: 'SPG', group: 'defense' },
+    { key: 'blocksPerGame', label: 'BPG', group: 'defense' },
   ],
   NHL: [
-    { key: 'goals', label: 'Goals' },
-    { key: 'assists', label: 'Assists' },
-    { key: 'points', label: 'Points' },
-    { key: 'savePct', label: 'SV%' },
-    { key: 'wins', label: 'Goalie Wins' },
+    { key: 'goals', label: 'Goals', group: 'offense' },
+    { key: 'assists', label: 'Assists', group: 'offense' },
+    { key: 'points', label: 'Points', group: 'offense' },
+    { key: 'savePct', label: 'SV%', group: 'defense' },
+    { key: 'wins', label: 'Goalie Wins', group: 'defense' },
   ],
   MLB: [
-    { key: 'avg', label: 'AVG' },
-    { key: 'homeRuns', label: 'HR' },
-    { key: 'RBIs', label: 'RBI' },
-    { key: 'hits', label: 'Hits' },
-    { key: 'ERA', label: 'ERA' },
-    { key: 'strikeouts', label: 'SO' },
+    { key: 'avg', label: 'AVG', group: 'offense' },
+    { key: 'homeRuns', label: 'HR', group: 'offense' },
+    { key: 'RBIs', label: 'RBI', group: 'offense' },
+    { key: 'hits', label: 'Hits', group: 'offense' },
+    { key: 'ERA', label: 'ERA', group: 'defense' },
+    { key: 'strikeouts', label: 'SO', group: 'defense' },
   ],
+}
+
+/** Section headings per sport (MLB/NHL groups aren't offense/defense). */
+export const LEADER_GROUP_LABELS: Record<SportKey, Record<LeaderGroup, string>> = {
+  NFL: { offense: 'Offense', defense: 'Defense' },
+  NBA: { offense: 'Offense', defense: 'Defense' },
+  NHL: { offense: 'Skaters', defense: 'Goalies' },
+  MLB: { offense: 'Batting', defense: 'Pitching' },
 }
 
 /** Season year the core API expects (mirrors the roster route's convention). */
@@ -159,7 +172,20 @@ async function resolveTeamAbbr(sport: SportKey, teamRef: string): Promise<string
 export interface LeaderBoard {
   key: string
   label: string
+  group: LeaderGroup
   leaders: StatLeader[]
+}
+
+/** Boards in category order, split into offense then defense sections. */
+export function groupLeaderBoards(boards: LeaderBoard[]): { group: LeaderGroup; boards: LeaderBoard[] }[] {
+  const out: { group: LeaderGroup; boards: LeaderBoard[] }[] = []
+  for (const group of ['offense', 'defense'] as const) {
+    const mine = boards.filter((b) => b.group === group)
+    if (mine.length > 0) out.push({ group, boards: mine })
+  }
+  const ungrouped = boards.filter((b) => b.group !== 'offense' && b.group !== 'defense')
+  if (ungrouped.length > 0) out.push({ group: 'offense', boards: ungrouped })
+  return out
 }
 
 const LEADERS_PER_CATEGORY = 5
@@ -181,7 +207,7 @@ async function boardsForSeason(sport: SportKey, season: number): Promise<LeaderB
   const categories: any[] = Array.isArray(data?.categories) ? data.categories : []
   const wanted = LEADER_CATEGORIES[sport]
 
-  const boards = await mapLimit(wanted, 3, async ({ key, label }) => {
+  const boards = await mapLimit(wanted, 3, async ({ key, label, group }) => {
       const cat = categories.find((c) => c?.name === key)
       const raw: any[] = Array.isArray(cat?.leaders) ? cat.leaders.slice(0, LEADERS_PER_CATEGORY) : []
       const leaders = await mapLimit(raw, 5, async (entry, i): Promise<StatLeader | null> => {
@@ -202,7 +228,7 @@ async function boardsForSeason(sport: SportKey, season: number): Promise<LeaderB
             rank: i + 1,
           }
         })
-      return { key, label, leaders: leaders.filter((l): l is StatLeader => l != null) }
+      return { key, label, group, leaders: leaders.filter((l): l is StatLeader => l != null) }
     },
   )
   return boards.filter((b) => b.leaders.length > 0)

@@ -1,11 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { teams, sportConfig } from '@/data/teams'
 import NextGamePanel from '@/components/NextGamePanel'
 import { GameStatsSection, LastPlayBlock } from '@/components/box-score/GameStatsSection'
+import { LiveGameSummary } from '@/components/game/GameSummary'
 import { GameHeader } from '@/components/game/GameHeader'
 import { LinescoreTable, PlayerBoxScore } from '@/components/game/PlayerBoxScore'
 import { PlayByPlay } from '@/components/game/PlayByPlay'
@@ -43,6 +44,7 @@ export default function GamePage() {
   const [scraperData, setScraperData] = useState<Record<string, any>>({})
   const [scraperLoading, setScraperLoading] = useState<Record<string, boolean>>({})
   const [modelLoaded, setModelLoaded] = useState(false)
+  const [oddsStatus, setOddsStatus] = useState<Record<string, 'loading' | 'found' | 'none' | 'no-game' | 'error'>>({})
 
   const isLive = game?.status.phase === 'live'
   const isFinal = game?.status.phase === 'final'
@@ -131,8 +133,28 @@ export default function GamePage() {
     }
   }, [loadGame, loadBoxScore, loadPlays])
 
-  // Live polling: box score fast while live; plays too (server-cached).
-  useLivePoll(loadBoxScore, () => (isLive ? 15_000 : null), [loadBoxScore, isLive])
+  // Box-score retry: a single failed first load must not leave the page
+  // without team stats. Retry a few times until the payload arrives (a ref
+  // mirror avoids restarting the timer on every live score update).
+  const boxScoreRef = useRef<any>(null)
+  boxScoreRef.current = boxScore
+  const boxScoreAttempts = useRef(0)
+  useEffect(() => {
+    boxScoreAttempts.current = 0
+  }, [sport, eventId])
+  useLivePoll(
+    loadBoxScore,
+    () => {
+      if (isLive) return 15_000
+      if (boxScoreRef.current) return null
+      if (boxScoreAttempts.current >= 8) return null
+      boxScoreAttempts.current += 1
+      return 10_000
+    },
+    [loadBoxScore, isLive],
+  )
+
+  // Live polling: plays too (server-cached).
   useLivePoll(loadPlays, () => (isLive ? 15_000 : null), [loadPlays, isLive])
 
   const teamsInfo = useMemo(() => {
@@ -161,14 +183,19 @@ export default function GamePage() {
     const homeAbbr = game.home.abbr
     const gameDate = game.date.slice(0, 10).replace(/-/g, '')
     const loadForTeam = async (teamAbbr: string, opponentAbbr: string) => {
+      setOddsStatus((prev) => ({ ...prev, [teamAbbr]: 'loading' }))
       try {
         const oddsRes = await fetch(`/api/odds?sport=${sport}&team=${teamAbbr}&eventId=${eventId}&date=${gameDate}`)
         if (oddsRes.ok) {
           const oddsData = await oddsRes.json()
           setOdds((prev) => ({ ...prev, [teamAbbr]: oddsData.odds }))
+          setOddsStatus((prev) => ({ ...prev, [teamAbbr]: oddsData.status ?? (oddsData.odds ? 'found' : 'none') }))
+        } else {
+          setOddsStatus((prev) => ({ ...prev, [teamAbbr]: 'error' }))
         }
       } catch (err) {
         console.error(`[odds] Failed for ${teamAbbr}:`, err)
+        setOddsStatus((prev) => ({ ...prev, [teamAbbr]: 'error' }))
       }
       if (sport === 'NFL') {
         setScraperLoading((prev) => ({ ...prev, [teamAbbr]: true }))
@@ -272,9 +299,7 @@ export default function GamePage() {
 
             {activeTab === 'summary' && (
               <div className="space-y-4" role="tabpanel">
-                {boxScore?.lastPlay ? (
-                  <LastPlayBlock play={boxScore.lastPlay} sport={sport} />
-                ) : game.status.phase === 'pre' ? (
+                {game.status.phase === 'pre' ? (
                   <div className="fs-panel p-5">
                     <h2 className="fs-title text-lg mb-2">Pregame</h2>
                     <p className="text-sm text-fs-muted">
@@ -299,10 +324,24 @@ export default function GamePage() {
                     )}
                   </div>
                 ) : (
-                  <EmptyState title="Summary will appear here once the game begins." />
-                )}
-                {game.status.phase !== 'pre' && !boxScore?.lastPlay && (
-                  <p className="text-sm text-fs-muted">Live details fill in as the game progresses.</p>
+                  <LiveGameSummary
+                    sport={sport}
+                    away={{ abbr: game.away.abbr, name: game.away.name }}
+                    home={{ abbr: game.home.abbr, name: game.home.name }}
+                    boxScore={boxScore}
+                    plays={plays}
+                    playsChecked={playsChecked}
+                    playsError={playsError}
+                    onRetryPlays={loadPlays}
+                    lastPlayBlock={
+                      boxScore?.lastPlay ? (
+                        <LastPlayBlock play={boxScore.lastPlay} sport={sport} />
+                      ) : null
+                    }
+                    onViewTeamStats={() => {
+                      if (hasTeamStats) setTab('teams')
+                    }}
+                  />
                 )}
               </div>
             )}
@@ -359,6 +398,7 @@ export default function GamePage() {
                   teamName={teamsInfo.away.name}
                   opponentName={teamsInfo.home.name}
                   odds={odds[teamsInfo.away.abbr]}
+                  oddsStatus={oddsStatus[teamsInfo.away.abbr] ?? 'loading'}
                   isPreseason={isPreseason}
                   scraperLoading={scraperLoading[teamsInfo.away.abbr] ?? false}
                   scraperData={scraperData[teamsInfo.away.abbr]}
@@ -379,6 +419,7 @@ export default function GamePage() {
                   teamName={teamsInfo.home.name}
                   opponentName={teamsInfo.away.name}
                   odds={odds[teamsInfo.home.abbr]}
+                  oddsStatus={oddsStatus[teamsInfo.home.abbr] ?? 'loading'}
                   isPreseason={isPreseason}
                   scraperLoading={scraperLoading[teamsInfo.home.abbr] ?? false}
                   scraperData={scraperData[teamsInfo.home.abbr]}

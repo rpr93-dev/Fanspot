@@ -197,6 +197,7 @@ export default function TeamDashboard() {
   const [scraperData, setScraperData] = useState<any>(null)
   const [scraperError, setScraperError] = useState<string | null>(null)
   const [hasAutoScraped, setHasAutoScraped] = useState(false)
+  const [oddsStatus, setOddsStatus] = useState<'loading' | 'found' | 'none' | 'no-game' | 'error'>('loading')
   const liveGameIdRef = useRef<string | null>(null)
   const upcomingGameRef = useRef<{ id: string; date: string; kickoff?: string } | null>(null)
 
@@ -253,6 +254,7 @@ export default function TeamDashboard() {
       spotlightEvent: schedForState.spotlightEvent,
       spotlightEventId: schedForState.spotlightEventId,
     })
+    setOddsStatus(dashboard.odds?.status ?? (dashboard.odds?.odds ? 'found' : 'none'))
     const live = schedForState.upcoming?.isLive
     setIsLiveGame(!!live)
     liveGameIdRef.current = live ? (schedForState.upcomingEventId ?? null) : null
@@ -342,6 +344,7 @@ export default function TeamDashboard() {
         if (res.ok) {
           const json = await res.json()
           setData(p => p ? { ...p, oddsInfo: json.odds ?? null } : p)
+          setOddsStatus(json.status ?? (json.odds ? 'found' : 'none'))
         }
       } catch (e) { console.error('[odds poll]', e) }
       schedule()
@@ -684,7 +687,20 @@ export default function TeamDashboard() {
                     </div>
                   ) : (
                     <div className="mt-5 pt-4" style={{ borderTop: `1px solid ${team.colors.primary}20` }}>
-                      <p className="text-sm text-fs-muted-2">Odds not yet available</p>
+                      {oddsStatus === 'loading' ? (
+                        <div className="animate-pulse space-y-2">
+                          <div className="fs-skeleton h-4 w-2/3" />
+                          <div className="fs-skeleton h-4 w-1/3" />
+                        </div>
+                      ) : (
+                        <p className="text-sm text-fs-muted-2">
+                          {oddsStatus === 'no-game'
+                            ? 'Odds will appear once this game is posted on the board.'
+                            : oddsStatus === 'error'
+                              ? 'Odds are temporarily unavailable — check back soon.'
+                              : 'Odds not yet available'}
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>
@@ -741,6 +757,7 @@ export default function TeamDashboard() {
             teamName={team.name}
             opponentName={data.upcoming.opponent}
             odds={data.oddsInfo}
+            oddsStatus={oddsStatus}
             isPreseason={data.upcoming.isPreseason}
             onBack={() => setShowNextGame(false)}
             scraperLoading={scraperLoading}
@@ -790,6 +807,7 @@ export default function TeamDashboard() {
                 teamName={team.name}
                 opponentName={data.upcoming.opponent}
                 odds={data.oddsInfo}
+                oddsStatus={oddsStatus}
                 isPreseason={data.upcoming.isPreseason}
                 onBack={() => {}}
                 scraperLoading={scraperLoading}

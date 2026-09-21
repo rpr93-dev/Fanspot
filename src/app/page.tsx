@@ -16,7 +16,7 @@ const leagues = [
 export default function HomePage() {
   return (
     <div className={`min-h-screen fs-page ${fontVariables}`}>
-      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-8 max-w-6xl">
+      <div className="fs-shell px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 mb-8">
           <div>
             <p className="fs-eyebrow mb-2">Your sports command center</p>
@@ -30,48 +30,48 @@ export default function HomePage() {
 
           <DaySnapshot />
 
-          <section aria-label="League hubs">
-            <SectionHeader eyebrow="Go deeper" title="Leagues" />
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
-              {leagues.map((league) => (
-                <Link
-                  key={league.id}
-                  href={`/${league.id}`}
-                  className="league-card fs-panel group flex items-center gap-3 p-3 sm:p-4 text-left transition-all duration-300 hover:-translate-y-1"
-                  style={{
-                    '--tint': league.color,
-                    '--tint-border': `${league.color}38`,
-                    '--glow-color': `${league.color}60`,
-                  } as React.CSSProperties}
-                >
-                  <img
-                    src={`https://a.espncdn.com/i/teamlogos/leagues/500/${league.id}.png`}
-                    alt=""
-                    className="w-10 h-10 sm:w-12 sm:h-12 object-contain shrink-0"
-                    loading="lazy"
-                  />
-                  <span className="min-w-0">
-                    <span className="fs-title text-base block">{league.name}</span>
-                    <span className="fs-meta hidden sm:block truncate">{league.fullName}</span>
-                  </span>
-                </Link>
-              ))}
-            </div>
-          </section>
-
-          <section aria-label="Fantasy">
-            <div className="fs-panel p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-3">
-              <div className="flex-1 min-w-0">
-                <h2 className="fs-title text-lg">Fantasy Draft Prep</h2>
-                <p className="fs-meta mt-1">Steals · Mock draft · Auction — NFL live</p>
+          <div className="grid gap-4 lg:grid-cols-3 lg:items-start">
+            <section aria-label="League hubs" className="lg:col-span-2">
+              <SectionHeader eyebrow="Go deeper" title="Leagues" />
+              <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                {leagues.map((league) => (
+                  <Link
+                    key={league.id}
+                    href={`/${league.id}`}
+                    className="league-card fs-panel group flex items-center gap-3 p-3 sm:p-4 text-left transition-all duration-300 hover:-translate-y-1"
+                    style={{
+                      '--tint': league.color,
+                      '--tint-border': `${league.color}38`,
+                      '--glow-color': `${league.color}60`,
+                    } as React.CSSProperties}
+                  >
+                    <img
+                      src={`https://a.espncdn.com/i/teamlogos/leagues/500/${league.id}.png`}
+                      alt=""
+                      className="w-10 h-10 sm:w-12 sm:h-12 object-contain shrink-0"
+                      loading="lazy"
+                    />
+                    <span className="min-w-0">
+                      <span className="fs-title text-base block">{league.name}</span>
+                      <span className="fs-meta hidden sm:block truncate">{league.fullName}</span>
+                    </span>
+                  </Link>
+                ))}
               </div>
-              <Link href="/fantasy/nfl" className="fs-btn shrink-0 self-start sm:self-auto">
-                Open Fantasy →
-              </Link>
-            </div>
-          </section>
+            </section>
 
-          <section aria-label="Top stories" className="max-w-4xl">
+            <section aria-label="Fantasy">
+              <SectionHeader eyebrow="Fantasy" title="Draft Prep" />
+              <div className="fs-panel p-4 sm:p-5 flex flex-col gap-3">
+                <p className="fs-meta leading-relaxed">Steals · Mock draft · Auction — NFL live</p>
+                <Link href="/fantasy/nfl" className="fs-btn shrink-0 self-start">
+                  Open Fantasy →
+                </Link>
+              </div>
+            </section>
+          </div>
+
+          <section aria-label="Top stories">
             <SectionHeader
               eyebrow="Around the leagues"
               title="Top Stories"
@@ -81,7 +81,7 @@ export default function HomePage() {
                 </Link>
               }
             />
-            <NewsFeed ranking="balanced" limit={12} />
+            <NewsFeed ranking="balanced" limit={12} layout="grid" />
           </section>
         </div>
       </div>

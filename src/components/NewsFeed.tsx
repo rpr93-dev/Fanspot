@@ -56,12 +56,15 @@ export function NewsFeed({
   showScores = false,
   leagues,
   initialFilter = 'foryou',
+  layout = 'list',
 }: {
   ranking?: 'significance' | 'balanced'
   limit?: number
   showScores?: boolean
   leagues?: League[]
   initialFilter?: 'foryou' | 'all' | League
+  /** 'grid' renders stories two-up on wider screens (homepage). */
+  layout?: 'list' | 'grid'
 }) {
   const [stories, setStories] = useState<FeedStory[]>([])
   const [filter, setFilter] = useState<'foryou' | 'all' | League>(initialFilter)
@@ -136,7 +139,7 @@ export function NewsFeed({
       </div>
 
       {loading && (
-        <div className="space-y-2.5" aria-hidden="true">
+        <div className={layout === 'grid' ? 'grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3' : 'space-y-2.5'} aria-hidden="true">
           {[...Array(6)].map((_, i) => (
             <div key={i} className="fs-skeleton h-20" />
           ))}
@@ -153,7 +156,7 @@ export function NewsFeed({
         </p>
       )}
 
-      <div className="space-y-2.5">
+      <div className={layout === 'grid' ? 'grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 items-start' : 'space-y-2.5'}>
         {shown.map((s) => (
           <a
             key={s.url}

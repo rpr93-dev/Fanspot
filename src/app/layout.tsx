@@ -2,7 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import { fontVariables } from './fonts'
 import { GlobalNav } from '@/components/GlobalNav'
-import { GlobalScoreboard } from '@/components/GlobalScoreboard'
+import { SportScopedScoreboard } from '@/components/SportScopedScoreboard'
 
 export const metadata: Metadata = {
   title: 'Fanspot - Multi-Sport Dashboard',
@@ -32,9 +32,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className={`bg-fs-bg text-fs-text min-h-screen antialiased ${fontVariables}`}>
         <GlobalNav />
-        <div className="fs-shell px-4 sm:px-6 pt-4">
-          <GlobalScoreboard />
-        </div>
+        <SportScopedScoreboard />
         <main className="pb-24 md:pb-10">{children}</main>
       </body>
     </html>

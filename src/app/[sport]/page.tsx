@@ -60,14 +60,16 @@ export default async function SportPage({
             </section>
           )}
 
-          <section aria-label="Scores and schedule">
-            <SectionHeader
-              eyebrow={sportKey === 'NFL' ? 'Around the league' : 'Scores & schedule'}
-              title={sportKey === 'NFL' ? 'Scoreboard' : 'Schedule'}
-              tint={config.color}
-            />
-            <GlobalScoreboard sports={[sportKey]} />
-          </section>
+          {sportKey !== 'NFL' && (
+            <section aria-label="Scores and schedule">
+              <SectionHeader
+                eyebrow="Scores & schedule"
+                title="Schedule"
+                tint={config.color}
+              />
+              <GlobalScoreboard sports={[sportKey]} />
+            </section>
+          )}
 
           <section aria-label="Standings">
             <SectionHeader eyebrow="League table" title="Standings" tint={config.color} />
@@ -81,7 +83,7 @@ export default async function SportPage({
 
           <section aria-label="League news">
             <SectionHeader eyebrow="Latest" title={`${sportKey} News`} tint={config.color} />
-            <NewsFeed ranking="balanced" limit={12} leagues={[leagueSlug]} initialFilter="all" />
+            <NewsFeed ranking="balanced" limit={12} leagues={[leagueSlug]} initialFilter={leagueSlug} />
           </section>
 
           <section aria-label="Teams">
