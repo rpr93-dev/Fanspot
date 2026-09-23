@@ -3,10 +3,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { eventDateToAsOf, extractLiveStats, quartersPlayed, isGameComplete, namesMatch } from '@/lib/propLedger'
 import { isOutTier, parseRosterInjuries, teamQbs } from '@/lib/injury'
+import { computeOverUnderEdge, EDGE_STYLES, formatPrice, normalizePlayerName, pickConfidencePct } from '@/lib/propEdge'
+import { PlayerProjections, type BookPlayer, type ProjectionRow } from '@/components/PlayerProjections'
 
 interface PropLine {
   market: string
   label: string
+  stat?: string | null
   line: number
   over: number | null
   under: number | null
@@ -23,7 +26,9 @@ interface ProjectedLine {
   name: string
   position: string
   team: string
-  lines: { label: string; value: number }[]
+  status?: string | null
+  note?: string | null
+  lines: { stat?: string; label: string; value: number; sd?: number }[]
 }
 
 interface PropsResponse {
@@ -105,47 +110,6 @@ function slotLabel(pos: string): string {
   return pos === 'D/ST' ? 'D/ST' : `${pos}1`
 }
 
-function formatPrice(p: number | null): string {
-  if (p == null) return '—'
-  return p > 0 ? `+${p}` : `${p}`
-}
-
-/** Approximation of the standard normal CDF using the rational approximation. */
-function normalCdf(x: number): number {
-  // Abramowitz & Stegun approximation
-  const sign = x >= 0 ? 1 : -1
-  const ax = Math.abs(x)
-  const t = 1.0 / (1.0 + 0.2316419 * ax)
-  const d = 0.3989422804014327
-  const pdf = d * Math.exp(-ax * ax / 2)
-  const cdf = 1.0 - pdf * t * (0.319381530 + t * (-0.356563782 + t * (1.781477937 + t * (-1.821255978 + t * 1.330274429))))
-  return x < 0 ? 1.0 - cdf : cdf
-}
-
-/** Compute P(over) from a model projection with distribution and a given line. */
-function computeOverUnderEdge(modelProj: number | null, predSd: number | null, lineArg: unknown): { pick: string; prob: number; edge: number; strong: boolean } | null {
-  const line = typeof lineArg === 'number' ? lineArg : NaN
-  if (isNaN(line) || line <= 0) return null
-  if (modelProj == null || predSd == null || predSd <= 0) return { pick: 'fair', prob: 0.5, edge: 0, strong: false }
-  const mean = modelProj
-  const sd = Math.max(predSd, 0.01)
-  const edge = mean - line
-  const overProb = 1.0 - normalCdf((line - mean) / sd)
-  const absZ = Math.abs(edge / sd)
-  let pick: string
-  if (absZ < 0.3) pick = 'fair'
-  else pick = edge > 0 ? 'over' : 'under'
-  // Strong when confidence is decent and edge is meaningful
-  const strong = absZ >= 0.5 && ((pick === 'over' && overProb >= 0.65) || (pick === 'under' && overProb <= 0.35))
-  return { pick, prob: overProb, edge, strong }
-}
-
-const EDGE_STYLES: Record<string, { label: string; bg: string; fg: string; strongBg: string; strongFg: string }> = {
-  over: { label: 'OVER', bg: 'bg-fs-turf/15', fg: 'text-fs-turf', strongBg: 'bg-fs-turf', strongFg: 'text-fs-bg' },
-  under: { label: 'UNDER', bg: 'bg-fs-red/15', fg: 'text-fs-red', strongBg: 'bg-fs-red', strongFg: 'text-fs-bg' },
-  fair: { label: 'FAIR', bg: 'bg-fs-muted-2/10', fg: 'text-fs-muted-2', strongBg: 'bg-fs-muted-2/10', strongFg: 'text-fs-muted-2' },
-}
-
 const POS_ORDER = ['QB', 'RB', 'WR', 'TE']
 
 export default function NextGamePanel({
@@ -169,6 +133,9 @@ export default function NextGamePanel({
   liveBoxScore,
   isLive,
   compact,
+  phase: phaseProp,
+  projectionTeams = 'both',
+  hideWhenEmpty,
 }: {
   sport: string
   teamAbbr: string
@@ -190,7 +157,24 @@ export default function NextGamePanel({
   liveBoxScore?: any | null
   isLive?: boolean
   compact?: boolean
+  /**
+   * Game phase drives what the panel is for:
+   *  - pre:   preview — odds, lineups, projections; the model runs once and
+   *           its pre-game snapshot is locked.
+   *  - live:  model snapshot vs the live box score (never re-projects).
+   *  - final: model snapshot vs the final result, with a pick scorecard.
+   * Defaults to live when `isLive`, else pre.
+   */
+  phase?: 'pre' | 'live' | 'final'
+  /** 'ours' limits the non-NFL projection table to this panel's team. */
+  projectionTeams?: 'both' | 'ours'
+  /** Final phase without a saved snapshot renders nothing (team page). */
+  hideWhenEmpty?: boolean
 }) {
+  const phase = phaseProp ?? (isLive ? 'live' : 'pre')
+  const isNfl = sport.toUpperCase() === 'NFL'
+  // Live and final both compare the frozen snapshot against a box score.
+  const comparing = phase !== 'pre'
   const [props, setProps] = useState<PropsResponse | null>(null)
   const [ourStarters, setOurStarters] = useState<Starter[] | null>(null)
   const [oppStarters, setOppStarters] = useState<Starter[] | null>(null)
@@ -222,7 +206,8 @@ export default function NextGamePanel({
 
   // Fantasy updates for both teams' star players (starters at each position).
   useEffect(() => {
-    if (sport.toUpperCase() !== 'NFL') return
+    // Lineups only matter before the game; live/final work off the snapshot.
+    if (!isNfl || phase === 'final') return
     let cancelled = false
 
     async function load(abbr: string | undefined, setter: (s: Starter[] | null) => void) {
@@ -242,7 +227,7 @@ export default function NextGamePanel({
     load(teamFantasyAbbr, setOurStarters)
     load(opponentFantasyAbbr, setOppStarters)
     return () => { cancelled = true }
-  }, [sport, teamFantasyAbbr, opponentFantasyAbbr])
+  }, [sport, phase, teamFantasyAbbr, opponentFantasyAbbr])
 
   const ourProjected = props?.projections?.filter((p) => p.team === teamAbbr) ?? []
   const oppProjected = props?.projections?.filter((p) => p.team === opponentAbbr) ?? []
@@ -531,10 +516,11 @@ export default function NextGamePanel({
   // Auto-run once per game: hydrate from the saved snapshot when present,
   // otherwise run the model once now (it only ever reads pre-game data).
   useEffect(() => {
-    if (sport.toUpperCase() !== 'NFL') return
+    if (!isNfl) return
     if (autoRanRef.current || modelResults || modelLoading || !ledgerChecked) return
-    if (!ourProjected.length && !oppProjected.length) return
-    if (!ourStarters || !oppStarters) return
+    const hydrateOnly = phase === 'final' && !!ledger?.pre?.rows?.length
+    if (!hydrateOnly && !ourProjected.length && !oppProjected.length) return
+    if (!hydrateOnly && (!ourStarters || !oppStarters)) return
     if (ledger?.pre?.rows?.length) {
       autoRanRef.current = true
       setModelResults(ledger.pre.rows)
@@ -544,19 +530,22 @@ export default function NextGamePanel({
       if (ledger.pre.meta?.dataThrough) setPrevModelDataThrough(ledger.pre.meta.dataThrough)
       return
     }
+    // After the final whistle a fresh run would be graded against a result it
+    // was never blind to — only a snapshot locked before/during the game counts.
+    if (phase === 'final') return
     autoRanRef.current = true
     void runModel()
-  }, [sport, ledgerChecked, ledger, modelResults, modelLoading, ourProjected, oppProjected, ourStarters, oppStarters])
+  }, [sport, phase, ledgerChecked, ledger, modelResults, modelLoading, ourProjected, oppProjected, ourStarters, oppStarters])
 
   // ---- Live comparison: model snapshot vs ESPN box score ----
   const liveStats = useMemo(() => {
     const allRows = [...(modelResults ?? []), ...(backupProjections ?? [])]
-    if (!isLive || !liveBoxScore || !allRows.length) return null
+    if (!comparing || !liveBoxScore || !allRows.length) return null
     const names = Array.from(new Set(allRows.map((r) => r.player))).map((name) => ({ name }))
     try {
       return extractLiveStats(liveBoxScore, names)
     } catch { return null }
-  }, [isLive, liveBoxScore, modelResults, backupProjections])
+  }, [comparing, liveBoxScore, modelResults, backupProjections])
   const liveQuarters = liveBoxScore ? quartersPlayed(liveBoxScore) : 0
   const gameFinal = liveBoxScore ? isGameComplete(liveBoxScore) : false
   const liveStatusLabel = liveBoxScore?.status?.shortDetail ?? liveBoxScore?.status?.description ?? null
@@ -565,7 +554,7 @@ export default function NextGamePanel({
   // Record one live point per quarter (plus the final) — cheap, durable, and
   // exactly the per-game progression the optimizer needs.
   useEffect(() => {
-    if (!isLive || !liveBoxScore || !liveStats || !ledgerChecked || !ledger?.pre) return
+    if (!comparing || !liveBoxScore || !liveStats || !ledgerChecked || !ledger?.pre) return
     if (!eventDate || liveQuarters <= 0) return
     const [t1, t2] = ledgerPair()
     const points = Array.isArray(ledger?.live) ? ledger.live : []
@@ -604,7 +593,7 @@ export default function NextGamePanel({
         }
       })
       .catch(() => {})
-  }, [isLive, liveBoxScore, liveStats, ledgerChecked, ledger, liveQuarters, gameFinal, eventDate, exitedQbs, backupProjections, teamAbbr])
+  }, [comparing, liveBoxScore, liveStats, ledgerChecked, ledger, liveQuarters, gameFinal, eventDate, exitedQbs, backupProjections, teamAbbr])
 
   // Project a mid-game backup QB through the same pipeline (single-target
   // run; no ESPN prior for backups, so the model leans on position history —
@@ -705,6 +694,18 @@ export default function NextGamePanel({
     }
   }, [isLive, liveBoxScore, rosterInjuries, effectiveLineup, sport, teamAbbr, opponentAbbr])
 
+  // The Odds API line (from /api/props when ODDS_API_KEY is set) — fallback
+  // when the Docker scraper has nothing for this player/stat.
+  const oddsApiLineFor = (name: string, stat: string): { line: number; book: string; over: number | null; under: number | null; books: number } | null => {
+    const pos = props?.projections?.find((x) => x.name === name)?.position ?? ''
+    const wantStat = stat === 'tds' ? (pos === 'QB' ? 'passing_tds' : null) : stat
+    if (!wantStat) return null
+    const want = normalizePlayerName(name)
+    const player = props?.players?.find((pl) => normalizePlayerName(pl.name) === want)
+    const hit = player?.props.find((x) => x.stat === wantStat && x.over != null && x.under != null)
+    return hit ? { line: hit.line, book: props?.bookmaker ?? 'sportsbook', over: hit.over, under: hit.under, books: 1 } : null
+  }
+
   // Scraped prop line for a model row: matches Action Network/Odds API props by
   // normalized player name + exact stat. Only real over/under lines qualify —
   // alternates ("25+ Rushing Yards"), milestones ("2+ Passing Touchdowns"),
@@ -716,7 +717,7 @@ export default function NextGamePanel({
     const want = norm(name)
     const all: { line: number; book: string; over: number | null; under: number | null }[] = []
     const results = scraperData?.results
-    if (!results || typeof results !== 'object') return null
+    if (!results || typeof results !== 'object') return oddsApiLineFor(name, stat)
     // Model "tds" is total TDs. The only standard O/U TD market is passing TDs
     // (QBs); for RB/WR/TE there is no O/U total-TD line — anytime/first/last TD
     // are odds-only (line 0.0, no over/under). Map QB tds → passing_tds.
@@ -729,7 +730,7 @@ export default function NextGamePanel({
       if (stat === 'receptions') return ['receptions']
       return [stat]
     })()
-    if (!wantStats.length) return null
+    if (!wantStats.length) return oddsApiLineFor(name, stat)
     for (const b of Object.values(results) as any[]) {
       const list = (b as any)?.props
       if (!Array.isArray(list)) continue
@@ -762,7 +763,7 @@ export default function NextGamePanel({
         }
       }
     }
-    if (!all.length) return null
+    if (!all.length) return oddsApiLineFor(name, stat)
     // All entries are real O/U lines now — prefer Consensus, else the median.
     const cons = all.filter((p) => p.book.toLowerCase().includes('consensus'))
     const pickable = all
@@ -844,29 +845,61 @@ export default function NextGamePanel({
   // Only show refresh button when the model's data vintage changed since last run
   const showRefreshButton = modelRunDate != null && modelDataThrough != null && modelDataThrough !== prevModelDataThrough
 
-  const confBadge = (conf: string, reliability: number) => {
-    if (conf === 'high') return { cls: 'text-fs-turf bg-fs-turf/15', score: reliability >= 70 ? 'strong' : 'moderate' }
-    if (conf === 'medium') return { cls: 'text-fs-gold bg-fs-gold/15', score: 'caution' }
-    return { cls: 'text-fs-red bg-fs-red/15', score: 'weak' }
+  const confStyle = (conf: string) =>
+    conf === 'high' ? 'text-fs-turf bg-fs-turf/15' : conf === 'medium' ? 'text-fs-gold bg-fs-gold/15' : 'text-fs-red bg-fs-red/15'
+
+  // Pick for every modeled row with a real book line (shared by the table,
+  // the "best edges" strip and the final scorecard).
+  const pickFor = (r: ModelProjection) => {
+    const book = scrapedLineFor(r.player, r.stat)
+    if (!book || r.projection == null || r.pred_sd == null) return null
+    const edge = computeOverUnderEdge(r.projection, r.pred_sd, book.line)
+    return edge ? { book, edge } : null
   }
 
-  const relColor = (reliability: number) => {
-    if (reliability >= 80) return 'text-fs-turf'
-    if (reliability >= 60) return 'text-fs-gold'
-    return 'text-fs-red'
-  }
+  const bestEdges = groupedModel
+    .flatMap((g) => g.rows)
+    .map((r) => ({ r, p: pickFor(r) }))
+    .filter((x): x is { r: ModelProjection; p: NonNullable<ReturnType<typeof pickFor>> } => !!x.p && x.p.edge.pick !== 'fair')
+    .sort((a, b) => pickConfidencePct(b.p.edge) - pickConfidencePct(a.p.edge))
+    .slice(0, 3)
 
-  const relLabel = (reliability: number) => {
-    if (reliability >= 80) return 'Strong'
-    if (reliability >= 60) return 'Moderate'
-    if (reliability >= 40) return 'Caution'
-    return 'Weak'
-  }
+  // Final scorecard: frozen picks graded against the final box score.
+  const scorecard = (() => {
+    if (!gameFinal || !liveStats) return null
+    let picks = 0
+    let hits = 0
+    let pushes = 0
+    const errors: number[] = []
+    for (const g of groupedModel) {
+      for (const r of g.rows) {
+        const actual = liveStats?.[r.player]?.[r.stat]
+        if (actual == null || r.projection == null) continue
+        errors.push(Math.abs(actual - r.projection))
+        const p = pickFor(r)
+        if (!p || p.edge.pick === 'fair') continue
+        if (actual === p.book.line) { pushes++; continue }
+        picks++
+        if ((p.edge.pick === 'over') === (actual > p.book.line)) hits++
+      }
+    }
+    if (!errors.length) return null
+    return { picks, hits, pushes, graded: errors.length }
+  })()
+
+  const heading = phase === 'final' ? 'Model vs Final' : phase === 'live' ? 'Model vs Live' : 'Game Preview'
+  const noSnapshot = phase === 'final' && isNfl && ledgerChecked && !ledger?.pre?.rows?.length
+  if (hideWhenEmpty && (noSnapshot || (phase === 'final' && !isNfl))) return null
+
+  // Non-NFL projection table: both teams on the team page, one per panel on the game page.
+  const projectionTeamList = projectionTeams === 'ours'
+    ? [{ abbr: teamAbbr, name: teamName }]
+    : [{ abbr: teamAbbr, name: teamName }, { abbr: opponentAbbr, name: opponentName }]
 
   return (
     <div className="animate-fade-in-up mt-4 pt-3" style={{ borderTop: `1px solid ${teamColor}20` }}>
       <div className="flex items-center justify-between gap-2 mb-3">
-        <h3 className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>{compact && isLive ? 'Model vs Live' : 'Next Game Preview'}</h3>
+        <h3 className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>{heading}</h3>
         {!compact ? (
         <button
           onClick={onBack}
@@ -883,8 +916,8 @@ export default function NextGamePanel({
         {eventDate ? <span className="text-fs-muted-2"> &middot; {eventDate.slice(4, 6)}/{eventDate.slice(6, 8)}/{eventDate.slice(0, 4)}</span> : null}
       </p>
 
-      {/* Game odds: moneyline + spread + total */}
-      {!compact && (odds ? (
+      {/* Game odds: moneyline + spread + total (pre-game only — stale after kickoff) */}
+      {!compact && phase === 'pre' && (odds ? (
         <div className="rounded-lg p-4 mb-4" style={{ backgroundColor: `${teamColor}0a`, border: `1px solid ${teamColor}18` }}>
           <p className="fs-eyebrow mb-2" style={{ '--tint': teamColor } as React.CSSProperties}>Game Odds &middot; {odds.sportsbook}</p>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -921,7 +954,7 @@ export default function NextGamePanel({
       ))}
 
       {/* Fantasy updates for star players */}
-      {sport.toUpperCase() === 'NFL' && !compact && (
+      {isNfl && !compact && phase === 'pre' && (
         <div>
           <p className="fs-eyebrow mb-2" style={{ '--tint': teamColor } as React.CSSProperties}>Fantasy Updates</p>
           {fantasyError && !ourStarters && !oppStarters ? (
@@ -967,8 +1000,27 @@ export default function NextGamePanel({
         </div>
       )}
 
-      {/* Prop Model projections (Python pipeline) — Run Model lives here now */}
-      {sport.toUpperCase() === 'NFL' && (ourProjected.length > 0 || oppProjected.length > 0) && (
+      {!isNfl && (
+        <PlayerProjections
+          projections={(props?.projections ?? null) as ProjectionRow[] | null}
+          bookPlayers={(props?.players ?? null) as BookPlayer[] | null}
+          bookmaker={props?.bookmaker}
+          teams={projectionTeamList}
+          teamColor={teamColor}
+          loading={props == null}
+          matchup={props?.matchup ?? null}
+        />
+      )}
+
+      {noSnapshot && (
+        <p className="mt-4 text-sm text-fs-muted-2">
+          No pre-game model snapshot was saved for this game, so there is nothing to grade. Snapshots are
+          locked automatically when a game page is opened before kickoff.
+        </p>
+      )}
+
+      {/* Prop Model projections (Python pipeline) */}
+      {isNfl && !noSnapshot && (ourProjected.length > 0 || oppProjected.length > 0 || (phase !== 'pre' && (modelResults?.length ?? 0) > 0)) && (
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Prop Model</p>
@@ -977,6 +1029,8 @@ export default function NextGamePanel({
               <span className="text-xs font-semibold px-4 py-2 rounded-lg shadow-sm" style={{ backgroundColor: `${teamColor}20`, color: teamColor }}>
                 Running…
               </span>
+            ) : phase !== 'pre' ? (
+              ledger?.pre ? <span className="text-xs text-fs-muted-2">Pre-game snapshot</span> : null
             ) : modelResults && showRefreshButton ? (
               <button
                 onClick={runModel}
@@ -1000,35 +1054,52 @@ export default function NextGamePanel({
           </div>
           
           <p className="text-xs text-fs-muted-2 mb-2">
-            {modelResults
-              ? 'Probabilistic projection from the Python model: recency-weighted baseline × opponent defense × game script with role-change detection and distributional uncertainty.'
-              : 'Own projection from recent games, opponent defense, and the Vegas game script — compare against the scraped prop lines.'}
-            {modelDataThrough && (
-              <>
-                {' '}· Data through {modelDataThrough}
-              </>
-            )}
-            {isLive ? (
+            {phase === 'pre'
+              ? 'Our projection per player (recent form × opponent defense × Vegas game script) against the sportsbook line.'
+              : phase === 'live'
+                ? 'Pre-game projections, locked before kickoff, against the live box score.'
+                : 'Pre-game projections, locked before kickoff, graded against the final box score.'}
+            {modelDataThrough ? <> · Data through {modelDataThrough}</> : null}
+            {phase === 'live' ? (
               <>
                 {' '}·{' '}
-                <span className="font-bold text-fs-red">
-                  ● LIVE{liveQuarters > 0 ? ` Q${liveQuarters}` : ''}
-                </span>
+                <span className="font-bold text-fs-red">● LIVE{liveQuarters > 0 ? ` Q${liveQuarters}` : ''}</span>
                 {liveStatusLabel ? <span> · {liveStatusLabel}</span> : null}
-                {ledger?.pre ? (
-                  <span title={`Pre-game snapshot locked ${ledger.pre.recordedAt}`}>
-                    {' '}· snapshot locked{(ledger?.live?.length ?? 0) > 0 ? ` · ${ledger.live.length} live pt${ledger.live.length === 1 ? '' : 's'} saved` : ''}
-                  </span>
-                ) : (
-                  <span> · locking pre-game snapshot…</span>
-                )}
+                {!ledger?.pre ? <span> · locking pre-game snapshot…</span> : null}
                 {backupLoading ? <span> · projecting backup…</span> : null}
               </>
             ) : null}
           </p>
+
+          {phase === 'pre' && bestEdges.length > 0 && !modelLoading ? (
+            <div className="flex flex-wrap gap-2 mb-3" aria-label="Best edges">
+              {bestEdges.map(({ r, p }) => {
+                const st = EDGE_STYLES[p.edge.pick]
+                return (
+                  <span key={`${r.player}-${r.stat}`} className="rounded-lg px-2.5 py-1.5 text-xs" style={{ backgroundColor: `${teamColor}0c`, border: `1px solid ${teamColor}1c` }}>
+                    <span className={`font-bold ${st.fg}`}>{st.label} {p.book.line}</span>{' '}
+                    <span className="text-fs-text/85">{r.player.split(' ').slice(-1)[0]} {r.stat_label}</span>{' '}
+                    <span className="text-fs-muted-2">· proj {r.projection} · {pickConfidencePct(p.edge)}%</span>
+                  </span>
+                )
+              })}
+            </div>
+          ) : null}
+
+          {scorecard ? (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mb-3 rounded-lg px-3 py-2 text-xs" style={{ backgroundColor: `${teamColor}0c`, border: `1px solid ${teamColor}1c` }}>
+              <span className="text-fs-text font-semibold">
+                Picks {scorecard.hits}/{scorecard.picks}
+                {scorecard.picks > 0 ? ` (${Math.round((scorecard.hits / scorecard.picks) * 100)}%)` : ''}
+              </span>
+              {scorecard.pushes > 0 ? <span className="text-fs-muted">{scorecard.pushes} push{scorecard.pushes === 1 ? '' : 'es'}</span> : null}
+              <span className="text-fs-muted">{scorecard.graded} projections graded</span>
+            </div>
+          ) : null}
+
           {showLive && !gameFinal ? (
             <p className="text-[11px] text-fs-muted-2 mb-2">
-              Live = ESPN box score · Δ = live − model × Q/4 (green = ahead of model pace)
+              Live column: stat so far, and how far ahead (+) or behind (−) the projection's pace it is.
             </p>
           ) : null}
 
@@ -1048,13 +1119,12 @@ export default function NextGamePanel({
                   <tr className="text-fs-muted-2" style={{ backgroundColor: `${teamColor}08` }}>
                     <th className="text-left px-2.5 py-1.5 font-medium">Player</th>
                     <th className="text-left px-2 py-1.5 font-medium">Stat</th>
-                    <th className="text-right px-2 py-1.5 font-medium">Model</th>
-                    <th className="text-right px-2 py-1.5 font-medium">Prop line</th>
-                    <th className="text-right px-2 py-1.5 font-medium">Edge</th>
+                    <th className="text-right px-2 py-1.5 font-medium" title="Projection, with the likely range (25th–75th percentile) underneath">Proj</th>
+                    <th className="text-right px-2 py-1.5 font-medium">Line</th>
+                    <th className="text-right px-2 py-1.5 font-medium">Pick</th>
                     {showLive ? (
                       <th className="text-right px-2 py-1.5 font-medium">{gameFinal ? 'Final' : 'Live'}</th>
                     ) : null}
-                    <th className="text-right px-2 py-1.5 font-medium">Distribution</th>
                     <th className="text-right px-2.5 py-1.5 font-medium">Conf</th>
                   </tr>
                 </thead>
@@ -1063,7 +1133,7 @@ export default function NextGamePanel({
                     group.rows.map((r, idx) => {
                       const scraped = scrapedLineFor(r.player, r.stat)
                       const isFirst = idx === 0
-                      const conf = confBadge(r.confidence, r.reliability ?? 0)
+                      const pick = pickFor(r)
                       return (
                         <tr
                           key={`${r.player}-${r.stat}`}
@@ -1114,16 +1184,22 @@ export default function NextGamePanel({
                               })()}
                             </td>
                           ) : null}
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted" title={r.note ?? undefined}>
+                          <td className="px-2 py-1.5 text-fs-muted" title={r.note ?? undefined}>
                             {r.stat_label}
-                            {r.note && !r.warnings && (
-                              <span className="block text-[10px] text-fs-muted-2 max-w-[16ch] truncate">
-                                {r.note}
-                              </span>
-                            )}
                           </td>
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-text">
-                            {r.projection != null ? r.projection : <span className="text-fs-muted-2">refused</span>}
+                          <td
+                            className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-text"
+                            title={[
+                              r.p10 != null ? `p10 ${r.p10} · p25 ${r.p25} · p50 ${r.p50} · p75 ${r.p75} · p90 ${r.p90}` : null,
+                              r.refused_reason,
+                            ].filter(Boolean).join(' · ') || undefined}
+                          >
+                            {r.projection != null ? r.projection : <span className="text-fs-muted-2" title={r.refused_reason ?? undefined}>n/a</span>}
+                            {r.projection != null && (r.p25 != null && r.p75 != null ? (
+                              <span className="block text-[10px] text-fs-muted-2">{r.p25}–{r.p75}</span>
+                            ) : r.low != null && r.high != null ? (
+                              <span className="block text-[10px] text-fs-muted-2">{r.low}–{r.high}</span>
+                            ) : null)}
                           </td>
                           <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted" title={
                             scraped
@@ -1137,38 +1213,18 @@ export default function NextGamePanel({
                             {scraped != null ? scraped.line : '—'}
                           </td>
                           <td className="px-2 py-1.5 text-right font-mono tabular-nums">
-                            {(() => {
-                              // Edge badge only when a real sportsbook line exists.
-                              // No scraped line (e.g. non-QB TDs, unposted markets)
-                              // → no badge, just like the Prop line column.
-                              if (!scraped) return <span className="text-fs-muted-2">—</span>
-                              const line = scraped.line
-                              const lineSource = `${scraped.book ?? 'book'} ${scraped.line}`
-                              const picked = computeOverUnderEdge(r.projection, r.pred_sd ?? null, line) as any
-                              if (!picked || r.projection == null || r.pred_sd == null) return <span className="text-fs-muted-2">—</span>
-                              const s = EDGE_STYLES[picked.pick]
-                              // Confidence: pick-direction probability for
-                              // over/under; the majority side for fair (coin-flip).
-                              const confPct = Math.round((picked.pick === 'fair'
-                                ? Math.max(picked.prob, 1 - picked.prob)
-                                : picked.pick === 'over' ? picked.prob : 1 - picked.prob) * 100)
+                            {pick ? (() => {
+                              const st = EDGE_STYLES[pick.edge.pick]
+                              const pct = pickConfidencePct(pick.edge)
                               return (
-                                <div className="flex flex-col items-end gap-0.5">
-                                  <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded ${picked.strong ? s.strongBg : s.bg} ${picked.strong ? s.strongFg : s.fg} whitespace-nowrap`}
-                                    title={`${s.label} vs ${lineSource}: ${confPct}% confidence, edge ${picked.edge > 0 ? '+' : ''}${picked.edge.toFixed(1)} ${r.unit}`}
-                                  >
-                                    {s.label} {confPct}%
-                                  </span>
-                                  {picked.pick !== 'fair' && (
-                                  <span className={`text-[10px] tabular-nums ${picked.edge > 0 ? 'text-fs-turf' : 'text-fs-red'}`}
-                                    title="Model mean − line (units)"
-                                  >
-                                    {picked.edge > 0 ? '+' : ''}{picked.edge.toFixed(1)}
-                                  </span>
-                                  )}
-                                </div>
+                                <span
+                                  className={`text-[11px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap ${pick.edge.strong ? st.strongBg : st.bg} ${pick.edge.strong ? st.strongFg : st.fg}`}
+                                  title={`${st.label} vs ${pick.book.book} ${pick.book.line}: ${pct}% · projection ${pick.edge.edge > 0 ? '+' : ''}${pick.edge.edge.toFixed(1)} ${r.unit} vs line`}
+                                >
+                                  {st.label} {pct}%
+                                </span>
                               )
-                            })()}
+                            })() : <span className="text-fs-muted-2">—</span>}
                           </td>
                           {showLive ? (
                             <td className="px-2 py-1.5 text-right font-mono tabular-nums" title={
@@ -1178,16 +1234,18 @@ export default function NextGamePanel({
                                 const lv = liveStats?.[r.player]?.[r.stat]
                                 if (lv == null) return <span className="text-fs-muted-2">—</span>
                                 if (gameFinal) {
-                                  // Post-game: final actual vs the frozen model number.
-                                  const err = r.projection != null ? lv - r.projection : null
+                                  // Post-game: final actual, and whether the pick cashed.
+                                  const graded = pick && pick.edge.pick !== 'fair'
+                                    ? (lv === pick.book.line ? 'PUSH' : (pick.edge.pick === 'over') === (lv > pick.book.line) ? 'HIT' : 'MISS')
+                                    : null
                                   return (
                                     <>
                                       <span className="text-fs-text">{lv}</span>
-                                      {err != null && (
-                                        <span className={`block text-[10px] tabular-nums ${err >= 0 ? 'text-fs-turf' : 'text-fs-red'}`}>
-                                          {err > 0 ? '+' : ''}{err.toFixed(1)}
+                                      {graded ? (
+                                        <span className={`block text-[10px] font-bold ${graded === 'HIT' ? 'text-fs-turf' : graded === 'MISS' ? 'text-fs-red' : 'text-fs-muted'}`}>
+                                          {graded}
                                         </span>
-                                      )}
+                                      ) : null}
                                     </>
                                   )
                                 }
@@ -1212,34 +1270,21 @@ export default function NextGamePanel({
                               })()}
                             </td>
                           ) : null}
-                          <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted" title={
-                            [
-                              r.p10 != null ? `p10:${r.p10} p25:${r.p25} p50:${r.p50} p75:${r.p75} p90:${r.p90}` : null,
-                              r.role_factor != null ? `role:${r.role_factor}` : null,
-                              r.recent_form_factor != null ? `form:${r.recent_form_factor}` : null,
-                            ].filter(Boolean).join(' · ') || undefined
-                          }>
-                            {r.p25 != null && r.p75 != null ? `${r.p25}–${r.p75}` : (r.low != null && r.high != null ? `${r.low}–${r.high}` : '—')}
-                          </td>
                           <td className="px-2.5 py-1.5 text-right whitespace-nowrap">
-                            <div className="flex items-center gap-1.5 justify-end">
-                              <span className={`text-[11px] font-bold px-2 py-0.5 rounded ${conf.cls}`} title={r.confidence_score != null ? `confidence_score:${r.confidence_score}` : undefined}>
-                                {r.confidence.toUpperCase()}
-                              </span>
-                              <span className={`text-[10px] font-mono tabular-nums ${relColor(r.reliability ?? 0)}`}>
-                                {r.reliability ?? '?'}
-                              </span>
-                            </div>
-                            {Array.isArray(r.warnings) && r.warnings.length > 0 && (
-                              <span className="block text-[10px] text-fs-muted-2 max-w-[16ch] truncate" title={r.warnings.join('; ')}>
-                                ⚠ {r.warnings[0]}
-                              </span>
-                            )}
-                            {r.role_factor != null && Math.abs(r.role_factor - 1) > 0.08 && (
-                              <span className="block text-[10px] text-fs-gold max-w-[16ch] truncate" title={`role_factor:${r.role_factor} recent_form:${r.recent_form_factor ?? '—'}`}>
-                                role {r.role_factor > 1 ? '+' : ''}{((r.role_factor - 1) * 100).toFixed(0)}%
-                              </span>
-                            )}
+                            <span
+                              className={`text-[11px] font-bold px-2 py-0.5 rounded ${confStyle(r.confidence)}`}
+                              title={[
+                                r.reliability != null ? `reliability ${r.reliability}/100` : null,
+                                `${r.n_games} games of history`,
+                                r.role_factor != null && Math.abs(r.role_factor - 1) > 0.08 ? `role ${r.role_factor > 1 ? '+' : ''}${((r.role_factor - 1) * 100).toFixed(0)}%` : null,
+                                ...(Array.isArray(r.warnings) ? r.warnings : []),
+                              ].filter(Boolean).join(' · ')}
+                            >
+                              {r.confidence.toUpperCase()}
+                            </span>
+                            {Array.isArray(r.warnings) && r.warnings.length > 0 ? (
+                              <span className="ml-1 text-fs-gold" title={r.warnings.join('; ')}>⚠</span>
+                            ) : null}
                           </td>
                         </tr>
                       )
@@ -1252,7 +1297,8 @@ export default function NextGamePanel({
             <p className="text-sm text-fs-muted-2">No projections returned.</p>
           ) : null}
 
-          {/* Scraped sportsbook lines — collapsed by default */}
+          {/* Scraped sportsbook lines — collapsed by default, pre-game only */}
+          {phase === 'pre' && (
           <div className="mt-2 rounded-lg overflow-hidden" style={{ border: `1px solid ${teamColor}16` }}>
             <button
               onClick={() => setShowScraper((v) => !v)}
@@ -1314,6 +1360,7 @@ export default function NextGamePanel({
               </div>
             )}
           </div>
+          )}
         </div>
       )}
     </div>

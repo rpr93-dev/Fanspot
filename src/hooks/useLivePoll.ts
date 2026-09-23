@@ -49,18 +49,3 @@ export function useLivePoll(
   }, deps)
 }
 
-/** Polling cadence driven by the game clock. */
-export function pollIntervalForGame(args: {
-  isLive: boolean
-  startsAtMs: number | null
-  nowMs?: number
-}): number | null {
-  const { isLive, startsAtMs, nowMs = Date.now() } = args
-  if (isLive) return 15_000
-  if (startsAtMs == null) return null
-  const msUntil = startsAtMs - nowMs
-  if (msUntil < 0) return 30_000 // should have started — check often
-  if (msUntil <= 60 * 60 * 1000) return 30_000
-  if (msUntil <= 24 * 60 * 60 * 1000) return 5 * 60_000
-  return null // far future — static
-}

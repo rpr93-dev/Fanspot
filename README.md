@@ -29,19 +29,20 @@ src/
 │   ├── layout.tsx              # Root layout (dark theme, global nav)
 │   ├── page.tsx                # Home page — for you / league selection
 │   ├── scores/                 # Multi-team scoreboard
-│   ├── standings/              # Not used (league routes below)
 │   ├── search/                 # Search page
 │   ├── news/                   # Global news feed
 │   ├── favorites/              # Saved teams
 │   ├── [sport]/
 │   │   ├── page.tsx            # League overview — team grid
-│   │   └── [team]/
-│   │       ├── page.tsx        # Team dashboard
-│   │       └── [eventId]/      # Game detail page
+│   │   ├── [team]/
+│   │   │   └── page.tsx        # Team dashboard
+│   │   ├── game/
+│   │   │   └── [eventId]/      # Game detail page (summary, box, plays, props)
 │   │   └── player/
 │   │       └── [playerId]/     # Player profile page
 │   ├── api/
 │   │   ├── roster/route.ts     # Roster + per-player season stats
+│   │   ├── props/route.ts      # Player projections (all sports) + Odds API prop lines
 │   │   ├── box-score/route.ts  # Box score with per-sport extraction
 │   │   ├── schedule/route.ts   # ESPN schedule proxy
 │   │   ├── standings/route.ts  # ESPN standings proxy
@@ -75,7 +76,8 @@ src/
 │   │   ├── ScoreCard.tsx       # Individual game card
 │   │   ├── GameStatusBadge.tsx # Live/pre/post status
 │   │   └── TeamIdentity.tsx    # Team colors/nickname
-│   └── BiggestStories.tsx      # Top news cards
+│   ├── NextGamePanel.tsx       # Game preview / model vs live / model vs final
+│   └── PlayerProjections.tsx   # NBA/NHL/MLB projection vs book-line table
 ├── hooks/
 │   ├── useLivePoll.ts          # Auto-refresh for live games
 │   ├── useFavorites.ts         # Favorites state management

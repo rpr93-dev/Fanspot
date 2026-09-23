@@ -34,8 +34,10 @@ describe('leadersSeasonYear', () => {
   it('follows season boundaries', () => {
     expect(leadersSeasonYear('NFL', new Date(2026, 8, 14))).toBe(2026) // Sep
     expect(leadersSeasonYear('NFL', new Date(2026, 2, 1))).toBe(2025) // Mar
-    expect(leadersSeasonYear('NBA', new Date(2026, 8, 14))).toBe(2025) // Sep
-    expect(leadersSeasonYear('NBA', new Date(2026, 10, 15))).toBe(2026) // Nov
+    // NBA/NHL seasons are labeled by their ending year (2025-26 = 2026).
+    expect(leadersSeasonYear('NBA', new Date(2026, 8, 14))).toBe(2026) // Sep: 2025-26 just ended
+    expect(leadersSeasonYear('NBA', new Date(2026, 10, 15))).toBe(2027) // Nov: 2026-27 underway
+    expect(leadersSeasonYear('NHL', new Date(2027, 1, 1))).toBe(2027) // Feb: 2026-27 mid-season
     expect(leadersSeasonYear('MLB', new Date(2026, 8, 14))).toBe(2026)
   })
 })

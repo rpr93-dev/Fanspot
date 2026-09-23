@@ -47,115 +47,73 @@ export const playerStatLabels: Record<string, string> = {
 }
 
 export const sportPositionOrder: Record<string, string[]> = {
-  NFL: ['QB', 'RB', 'FB', 'WR', 'TE', 'OT', 'OG', 'C', 'DE', 'DT', 'NT', 'OLB', 'MLB', 'ILB', 'LB', 'CB', 'S', 'SS', 'FS', 'K', 'P', 'LS'],
-  NBA: ['PG', 'SG', 'SF', 'PF', 'C'],
-  NHL: ['G', 'D', 'LW', 'C', 'RW'],
-  MLB: ['P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'DH', 'IF', 'OF'],
+  NFL: ['QB', 'RB', 'FB', 'WR', 'TE', 'OT', 'OG', 'C', 'DE', 'DT', 'NT', 'OLB', 'MLB', 'ILB', 'LB', 'CB', 'S', 'SS', 'FS', 'K', 'PK', 'P', 'LS'],
+  NBA: ['PG', 'SG', 'G', 'SF', 'PF', 'F', 'C'],
+  NHL: ['C', 'LW', 'RW', 'F', 'D', 'G'],
+  MLB: ['SP', 'RP', 'P', 'C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF', 'IF', 'DH'],
 }
 
-export const nflStatKey: Record<string, string> = {
-  cmp: 'completions', att: 'passingAttempts', passYd: 'passingYards',
-  passTd: 'passingTouchdowns', int: 'interceptions', qbr: 'QBRating',
-  car: 'rushingAttempts', rushYd: 'rushingYards', rushTd: 'rushingTouchdowns',
-  rec: 'receptions', recYd: 'receivingYards', tgt: 'receivingTargets',
-  recTd: 'receivingTouchdowns', fgm: 'fieldGoalsMade', fga: 'fieldGoalsAttempted',
-  xpm: 'kickExtraPointsMade', xpa: 'kickExtraPointsAttempted',
-  solo: 'soloTackles', ast: 'assistTackles', sack: 'sacks',
-  tfl: 'tacklesForLoss', qbHit: 'QBHits', defInt: 'interceptions',
-  pd: 'passesDefensed', ff: 'forcedFumbles', fr: 'fumbleRecoveries',
-  punt: 'punts', puntYd: 'puntYards', puntAvg: 'grossAvgPuntYards',
-  puntIn20: 'puntsInside20',
+/** One roster column: `key` is the ESPN core-API season stat name. */
+export interface RosterStatColumn {
+  key: string
+  label: string
 }
 
-const nflDefSchema = [
-  { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
-  { key: 'sack', label: 'SACK' }, { key: 'tfl', label: 'TFL' },
+const col = (key: string, label: string): RosterStatColumn => ({ key, label })
+
+const NFL_DEF = [col('soloTackles', 'SOLO'), col('assistTackles', 'AST'), col('sacks', 'SACK'), col('tacklesForLoss', 'TFL')]
+const NFL_LB = [...NFL_DEF, col('QBHits', 'QBHIT'), col('passesDefended', 'PD')]
+const NFL_DB = [col('soloTackles', 'SOLO'), col('assistTackles', 'AST'), col('interceptions', 'INT'), col('passesDefended', 'PD'), col('fumblesForced', 'FF')]
+const NFL_RB = [col('rushingAttempts', 'CAR'), col('rushingYards', 'YD'), col('rushingTouchdowns', 'TD'), col('receptions', 'REC'), col('receivingYards', 'REC YD')]
+const NFL_REC = [col('receptions', 'REC'), col('receivingYards', 'YD'), col('receivingTargets', 'TGT'), col('receivingTouchdowns', 'TD')]
+const NFL_K = [col('fieldGoalsMade', 'FGM'), col('fieldGoalAttempts', 'FGA'), col('extraPointsMade', 'XPM'), col('extraPointAttempts', 'XPA')]
+
+const NFL_COLUMNS: Record<string, RosterStatColumn[]> = {
+  QB: [col('completions', 'CMP'), col('passingAttempts', 'ATT'), col('passingYards', 'YD'), col('passingTouchdowns', 'TD'), col('interceptions', 'INT'), col('QBRating', 'RTG')],
+  RB: NFL_RB, FB: NFL_RB,
+  WR: NFL_REC, TE: NFL_REC,
+  K: NFL_K, PK: NFL_K,
+  P: [col('punts', 'PUNT'), col('puntYards', 'YD'), col('grossAvgPuntYards', 'AVG'), col('puntsInside20', 'IN20')],
+  DE: NFL_DEF, DT: NFL_DEF, NT: NFL_DEF,
+  OLB: NFL_LB, MLB: NFL_LB, ILB: NFL_LB, LB: NFL_LB,
+  CB: NFL_DB, S: NFL_DB, SS: NFL_DB, FS: NFL_DB,
+}
+
+const NBA_COLUMNS = [
+  col('avgPoints', 'PTS'), col('avgRebounds', 'REB'), col('avgAssists', 'AST'), col('avgSteals', 'STL'),
+  col('avgBlocks', 'BLK'), col('avgMinutes', 'MIN'), col('fieldGoalPct', 'FG%'), col('threePointPct', '3P%'),
+]
+const NHL_SKATER_COLUMNS = [
+  col('goals', 'G'), col('assists', 'A'), col('points', 'PTS'), col('plusMinus', '+/-'),
+  col('shotsTotal', 'SOG'), col('timeOnIcePerGame', 'TOI'), col('penaltyMinutes', 'PIM'),
+]
+const NHL_GOALIE_COLUMNS = [
+  col('wins', 'W'), col('losses', 'L'), col('avgGoalsAgainst', 'GAA'), col('savePct', 'SV%'), col('saves', 'SV'), col('shutouts', 'SO'),
+]
+const MLB_HITTER_COLUMNS = [
+  col('avg', 'AVG'), col('homeRuns', 'HR'), col('RBIs', 'RBI'), col('runs', 'R'),
+  col('onBasePct', 'OBP'), col('OPS', 'OPS'), col('stolenBases', 'SB'),
+]
+const MLB_PITCHER_COLUMNS = [
+  col('ERA', 'ERA'), col('WHIP', 'WHIP'), col('wins', 'W'), col('losses', 'L'),
+  col('saves', 'SV'), col('strikeouts', 'K'), col('innings', 'IP'),
 ]
 
-export const nflStatSchema: Record<string, { key: string; label: string }[]> = {
-  QB: [
-    { key: 'cmp', label: 'CMP' }, { key: 'att', label: 'ATT' },
-    { key: 'passYd', label: 'YD' }, { key: 'passTd', label: 'TD' },
-    { key: 'int', label: 'INT' }, { key: 'qbr', label: 'QBR' },
-  ],
-  RB: [
-    { key: 'car', label: 'CAR' }, { key: 'rushYd', label: 'YD' },
-    { key: 'rushTd', label: 'TD' }, { key: 'rec', label: 'REC' },
-    { key: 'recYd', label: 'REC YD' },
-  ],
-  FB: [
-    { key: 'car', label: 'CAR' }, { key: 'rushYd', label: 'YD' },
-    { key: 'rushTd', label: 'TD' }, { key: 'rec', label: 'REC' },
-    { key: 'recYd', label: 'REC YD' },
-  ],
-  WR: [
-    { key: 'rec', label: 'REC' }, { key: 'recYd', label: 'YD' },
-    { key: 'tgt', label: 'TGT' }, { key: 'recTd', label: 'TD' },
-  ],
-  TE: [
-    { key: 'rec', label: 'REC' }, { key: 'recYd', label: 'YD' },
-    { key: 'tgt', label: 'TGT' }, { key: 'recTd', label: 'TD' },
-  ],
-  K: [
-    { key: 'fgm', label: 'FGM' }, { key: 'fga', label: 'FGA' },
-    { key: 'xpm', label: 'XPM' }, { key: 'xpa', label: 'XPA' },
-  ],
-  P: [
-    { key: 'punt', label: 'PUNT' }, { key: 'puntYd', label: 'YD' },
-    { key: 'puntAvg', label: 'AVG' }, { key: 'puntIn20', label: 'IN20' },
-  ],
-  DE: nflDefSchema, DT: nflDefSchema, NT: nflDefSchema,
-  PK: [
-    { key: 'fgm', label: 'FGM' }, { key: 'fga', label: 'FGA' },
-    { key: 'xpm', label: 'XPM' }, { key: 'xpa', label: 'XPA' },
-  ],
-  OLB: [...nflDefSchema, { key: 'qbHit', label: 'QBHIT' }, { key: 'pd', label: 'PD' }],
-  MLB: [...nflDefSchema, { key: 'qbHit', label: 'QBHIT' }, { key: 'pd', label: 'PD' }],
-  ILB: [...nflDefSchema, { key: 'qbHit', label: 'QBHIT' }, { key: 'pd', label: 'PD' }],
-  LB: [...nflDefSchema, { key: 'qbHit', label: 'QBHIT' }, { key: 'pd', label: 'PD' }],
-  CB: [
-    { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
-    { key: 'defInt', label: 'INT' }, { key: 'pd', label: 'PD' },
-    { key: 'ff', label: 'FF' },
-  ],
-  S: [
-    { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
-    { key: 'defInt', label: 'INT' }, { key: 'pd', label: 'PD' },
-    { key: 'ff', label: 'FF' },
-  ],
-  SS: [
-    { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
-    { key: 'defInt', label: 'INT' }, { key: 'pd', label: 'PD' },
-    { key: 'ff', label: 'FF' },
-  ],
-  FS: [
-    { key: 'solo', label: 'SOLO' }, { key: 'ast', label: 'AST' },
-    { key: 'defInt', label: 'INT' }, { key: 'pd', label: 'PD' },
-    { key: 'ff', label: 'FF' },
-  ],
-  OT: [], OG: [], C: [], LS: [],
-}
+export const MLB_PITCHER_POSITIONS = new Set(['P', 'SP', 'RP'])
 
-export const relevantStats: Record<string, { label: string; key: string }[]> = {
-  NBA: [
-    { label: 'PTS', key: 'avgPoints' }, { label: 'AST', key: 'avgAssists' },
-    { label: 'REB', key: 'avgRebounds' }, { label: 'STL', key: 'avgSteals' },
-    { label: 'BLK', key: 'avgBlocks' }, { label: 'MIN', key: 'avgMinutes' },
-    { label: 'FG%', key: 'fieldGoalPct' }, { label: '3P%', key: 'threePointPct' },
-    { label: 'FT%', key: 'freeThrowPct' },
-  ],
-  NHL: [
-    { label: 'G', key: 'goals' }, { label: 'A', key: 'assists' },
-    { label: 'PTS', key: 'points' }, { label: '+/-', key: 'plusMinus' },
-    { label: 'PIM', key: 'penaltyMinutes' }, { label: 'SOG', key: 'shotsOnGoal' },
-    { label: 'TOI', key: 'timeOnIce' },
-  ],
-  MLB: [
-    { label: 'AVG', key: 'battingAvg' }, { label: 'HR', key: 'homeRuns' },
-    { label: 'RBI', key: 'runsBattedIn' }, { label: 'OBP', key: 'onBasePercentage' },
-    { label: 'SLG', key: 'sluggingPercentage' }, { label: 'SB', key: 'stolenBases' },
-    { label: 'ERA', key: 'era' }, { label: 'W', key: 'wins' },
-    { label: 'L', key: 'losses' }, { label: 'SO', key: 'strikeouts' },
-    { label: 'BB', key: 'walks' }, { label: 'SV', key: 'saves' },
-  ],
+/**
+ * Season-stat columns for a roster row. Every sport goes through this one
+ * schema so rows are column-aligned (missing values render as a dash) and
+ * position groups get the stats that matter for them — hitters vs pitchers,
+ * skaters vs goalies — instead of one mixed list.
+ */
+export function rosterStatColumns(sport: string, position: string): RosterStatColumn[] {
+  const pos = position.toUpperCase()
+  switch (sport.toUpperCase()) {
+    case 'NFL': return NFL_COLUMNS[pos] ?? []
+    case 'NBA': return NBA_COLUMNS
+    case 'NHL': return pos === 'G' ? NHL_GOALIE_COLUMNS : NHL_SKATER_COLUMNS
+    case 'MLB': return MLB_PITCHER_POSITIONS.has(pos) ? MLB_PITCHER_COLUMNS : MLB_HITTER_COLUMNS
+    default: return []
+  }
 }
