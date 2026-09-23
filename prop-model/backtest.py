@@ -267,6 +267,8 @@ def main() -> int:
     ap.add_argument("--opp-shrink", type=float, default=DEFAULT_OPP_SHRINK)
     ap.add_argument("--sd-mult-continuous", type=float, default=ModelWeights.sd_mult_continuous)
     ap.add_argument("--sd-mult-count", type=float, default=ModelWeights.sd_mult_count)
+    ap.add_argument("--winsor-mad-mult", type=float, default=ModelWeights.winsor_mad_mult,
+                    help="outlier clip width in MADs from the median (large = off)")
     ap.add_argument("--cache-dir", default="cache")
     ap.add_argument("--json-out", help="write per-evaluation detail JSON here")
     args = ap.parse_args()
@@ -275,6 +277,7 @@ def main() -> int:
         halflife=args.halflife, opponent=args.opponent_w, min_games=args.min_games,
         prior_strength=args.prior_strength, opp_shrink=args.opp_shrink,
         sd_mult_continuous=args.sd_mult_continuous, sd_mult_count=args.sd_mult_count,
+        winsor_mad_mult=args.winsor_mad_mult,
     )
 
     weekly = load_cached_frames(args.cache_dir)
