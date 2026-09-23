@@ -5,14 +5,27 @@ import { getEspnAbbr } from '@/lib/providers/espn'
 import { buildMasterPlayerList } from '@/lib/fantasy/sleeper-master'
 import { buildUnifiedDatabase } from '@/lib/fantasy/unified-db'
 import type { UnifiedPlayer } from '@/lib/fantasy/player-types'
+import { fetchTeamRoster } from '@/lib/teamRoster'
+import { groupByPlayer, type MarketInfo, type PropMarket } from '@/lib/oddsProps'
+import {
+  buildSeasonProjections,
+  matchupMultiplier,
+  type ProjectionSport,
+  type SeasonProjection,
+} from '@/lib/seasonProjections'
+import { espnSportMap } from '@/lib/providers/espn'
+import { DATE_RE, EVENT_ID_RE, isValidTeam } from '@/lib/api-validation'
+import type { SportKey } from '@/lib/models'
 
 /**
  * Player prop lines (QB passing yards O/U, RB rushing yards O/U, etc.) for a game.
  *
  * ESPN's public API does not expose player props, so this route uses The Odds API
  * (https://the-odds-api.com) when an `ODDS_API_KEY` env var is present. Without a
- * key it returns `{ available: false }` quickly so the UI can fall back to showing
- * fantasy updates only.
+ * key it returns `{ available: false }` plus keyless `projections` for both teams:
+ *  - NFL: per-game lines from the ESPN fantasy season projections.
+ *  - NBA / NHL / MLB: per-game season averages from ESPN (see seasonProjections).
+ * Both are scaled by the Vegas implied team total when the game odds are known.
  *
  * The Odds API assigns its own event ids (different from ESPN's), so we first fetch
  * the list of upcoming games (h2h market, 1 credit) and match by team names + date,
@@ -28,33 +41,44 @@ const SPORT_KEY: Record<string, string> = {
   MLB: 'baseball_mlb',
 }
 
-/** Market key → display label + implied position (for grouping by position). */
-const MARKET_INFO: Record<string, { label: string; position: string | null }> = {
-  player_pass_yds: { label: 'Pass Yds', position: 'QB' },
-  player_pass_tds: { label: 'Pass TDs', position: 'QB' },
-  player_pass_attempts: { label: 'Pass Attempts', position: 'QB' },
-  player_pass_completions: { label: 'Completions', position: 'QB' },
-  player_pass_interceptions: { label: 'INTs', position: 'QB' },
-  player_rush_yds: { label: 'Rush Yds', position: 'RB' },
-  player_rush_attempts: { label: 'Rush Att', position: 'RB' },
-  player_rush_tds: { label: 'Rush TDs', position: 'RB' },
-  player_reception_yds: { label: 'Rec Yds', position: 'WR/TE' },
-  player_receptions: { label: 'Receptions', position: 'WR/TE' },
-  player_reception_tds: { label: 'Rec TDs', position: 'WR/TE' },
-  player_anytime_td: { label: 'Anytime TD', position: null },
-}
+const m = (label: string, position: string | null, stat: string | null): MarketInfo => ({ label, position, stat })
 
-// Markets to request. Costs ~1 credit each on the free tier, so keep the list
-// focused on the positions fans actually care about (QB/RB/WR/TE).
-const REQUESTED_MARKETS = [
-  'player_pass_yds',
-  'player_pass_tds',
-  'player_rush_yds',
-  'player_rush_attempts',
-  'player_reception_yds',
-  'player_receptions',
-  'player_anytime_td',
-].join(',')
+/**
+ * The Odds API player-prop markets per sport (~1 credit each on the free tier,
+ * so each list is the handful of markets fans actually bet). Asking for NFL
+ * market keys on an NBA/NHL/MLB event returns nothing, so every sport needs
+ * its own list.
+ */
+const MARKETS: Record<string, Record<string, MarketInfo>> = {
+  NFL: {
+    player_pass_yds: m('Pass Yds', 'QB', 'passing_yards'),
+    player_pass_tds: m('Pass TDs', 'QB', 'passing_tds'),
+    player_rush_yds: m('Rush Yds', 'RB', 'rushing_yards'),
+    player_rush_attempts: m('Rush Att', 'RB', null),
+    player_reception_yds: m('Rec Yds', 'WR/TE', 'receiving_yards'),
+    player_receptions: m('Receptions', 'WR/TE', 'receptions'),
+    player_anytime_td: m('Anytime TD', null, null),
+  },
+  NBA: {
+    player_points: m('PTS', null, 'points'),
+    player_rebounds: m('REB', null, 'rebounds'),
+    player_assists: m('AST', null, 'assists'),
+    player_threes: m('3PM', null, 'threes'),
+  },
+  NHL: {
+    player_points: m('PTS', null, 'points'),
+    player_shots_on_goal: m('SOG', null, 'shots'),
+    player_goals: m('Goals', null, 'goals'),
+    player_total_saves: m('Saves', 'G', 'saves'),
+  },
+  MLB: {
+    batter_hits: m('Hits', null, 'hits'),
+    batter_total_bases: m('Total Bases', null, 'total_bases'),
+    batter_rbis: m('RBIs', null, 'rbis'),
+    batter_home_runs: m('HR', null, 'home_runs'),
+    pitcher_strikeouts: m('Strikeouts', 'P', 'strikeouts'),
+  },
+}
 
 const log = (msg: string) => console.log(`[props] ${msg}`)
 
@@ -88,27 +112,6 @@ function teamAbbrVariants(sport: string): Map<string, Set<string>> {
   return m
 }
 
-function parseLine(val: unknown): number | null {
-  if (typeof val === 'number') return val
-  if (typeof val === 'string') {
-    const n = parseFloat(val)
-    if (!isNaN(n)) return n
-  }
-  return null
-}
-
-interface PropOutcome {
-  name: string
-  description?: string
-  point?: number | string
-  price?: number
-}
-
-interface PropMarket {
-  key: string
-  outcomes?: PropOutcome[]
-}
-
 interface OddsBookmaker {
   key: string
   title: string
@@ -121,61 +124,6 @@ interface OddsEvent {
   home_team?: string
   away_team?: string
   bookmakers?: OddsBookmaker[]
-}
-
-interface NormalizedProp {
-  market: string
-  label: string
-  position: string | null
-  line: number
-  over: number | null
-  under: number | null
-}
-
-interface NormalizedPlayer {
-  name: string
-  position: string | null
-  team?: string | null
-  props: NormalizedProp[]
-}
-
-/**
- * Each props market carries two outcomes for the same player+point (the Over and the
- * Under side). Prefer explicit Over/Under in the description; otherwise take the two
- * prices in order.
- */
-function normalizeMarket(market: PropMarket): NormalizedProp[] {
-  const info = MARKET_INFO[market.key]
-  if (!info || !market.outcomes?.length) return []
-
-  const byKey = new Map<string, { point: number; prices: number[]; descs: string[] }>()
-  for (const o of market.outcomes) {
-    const point = parseLine(o.point)
-    if (point == null) continue
-    const k = `${o.name}::${point}`
-    const entry = byKey.get(k) ?? { point, prices: [], descs: [] }
-    if (o.price != null) entry.prices.push(o.price)
-    if (o.description) entry.descs.push(o.description)
-    byKey.set(k, entry)
-  }
-
-  const out: NormalizedProp[] = []
-  for (const [, entry] of byKey) {
-    const lower = entry.descs.join(' ').toLowerCase()
-    let over: number | null = null
-    let under: number | null = null
-    if (lower.includes('over') || lower.includes('under')) {
-      for (let i = 0; i < entry.descs.length; i++) {
-        if (entry.descs[i].toLowerCase().includes('over')) over = entry.prices[i] ?? null
-        if (entry.descs[i].toLowerCase().includes('under')) under = entry.prices[i] ?? null
-      }
-    } else {
-      over = entry.prices[0] ?? null
-      under = entry.prices[1] ?? null
-    }
-    out.push({ market: market.key, label: info.label, position: info.position, line: entry.point, over, under })
-  }
-  return out
 }
 
 function normalizeName(name: string): string {
@@ -206,32 +154,6 @@ async function playerTeamLookup(): Promise<Map<string, string> | null> {
   }
 }
 
-function groupByPlayer(markets: PropMarket[]): NormalizedPlayer[] {
-  const result = new Map<string, NormalizedPlayer>()
-  for (const m of markets) {
-    const info = MARKET_INFO[m.key]
-    const props = normalizeMarket(m)
-    if (props.length === 0) continue
-    const nameOf = (prop: NormalizedProp): string | null => {
-      // The Odds API returns two outcomes per player+point (Over/Under), each with
-      // the same player name — so match by name and line.
-      for (const o of m.outcomes ?? []) {
-        if (o.name && parseLine(o.point) === prop.line) return o.name
-      }
-      return null
-    }
-    for (const prop of props) {
-      const name = nameOf(prop)
-      if (!name) continue
-      const existing = result.get(name) ?? { name, position: prop.position, props: [] }
-      if (!existing.position) existing.position = prop.position ?? info?.position ?? null
-      existing.props.push(prop)
-      result.set(name, existing)
-    }
-  }
-  return [...result.values()].sort((a, b) => a.name.localeCompare(b.name))
-}
-
 // ESPN fantasy projection stat ids (season totals). Dividing by the 17-game regular
 // season gives a rough per-game "projected line" — a keyless stand-in for betting
 // props that works even without an Odds API key. In preseason, starters only play a
@@ -240,19 +162,10 @@ function groupByPlayer(markets: PropMarket[]): NormalizedPlayer[] {
 const PROJ_GAMES = 17
 const PRESEASON_FACTOR = 0.4
 
-// Matchup adjustment via Vegas totals. League-average NFL team scoring (~22 pts per
-// team per game) is the baseline a "typical" game total implies. A team's implied
-// total from the book (favorite ≈ (total+spread)/2) divided by that baseline gives a
-// per-player line multiplier, so facing a bad defense (high implied total) boosts
-// every line and a good defense (low total) cuts them. Clamped so a weird line can't
-// produce absurd numbers.
-const LEAGUE_AVG_TEAM_TOTAL = 22
-const MATCHUP_MULT_MIN = 0.6
-const MATCHUP_MULT_MAX = 1.4
-
-function clamp(n: number, lo: number, hi: number): number {
-  return Math.min(hi, Math.max(lo, n))
-}
+// Matchup adjustment via Vegas totals: a team's implied total from the book
+// divided by the league-average team total gives a per-player line multiplier,
+// clamped per sport (see matchupMultiplier) so a weird line can't produce
+// absurd numbers.
 
 /** Position rank for display ordering: QBs, then RBs, then WRs, then TEs. */
 function posRank(pos: string | null | undefined): number {
@@ -368,6 +281,71 @@ async function buildProjectedLines(
   }
 }
 
+/** MLB probable starters for the event (ESPN scoreboard), keyed by nothing — ids only. */
+async function mlbProbablePitcherIds(eventId: string | null, date: string | null): Promise<string[]> {
+  if (!eventId || !date) return []
+  try {
+    const board = await fetchOrCache(`props:mlb-board:${date}`, 30 * 60 * 1000, async () => {
+      const res = await fetch(
+        `https://site.api.espn.com/apis/site/v2/sports/${espnSportMap.MLB}/scoreboard?dates=${date}`,
+        { signal: AbortSignal.timeout(10000) },
+      )
+      if (!res.ok) throw new Error(`scoreboard:${res.status}`)
+      return res.json()
+    })
+    const event = (board?.events ?? []).find((e: any) => String(e?.id) === eventId)
+    const ids: string[] = []
+    for (const c of event?.competitions?.[0]?.competitors ?? []) {
+      for (const p of c?.probables ?? []) {
+        if (p?.athlete?.id) ids.push(String(p.athlete.id))
+      }
+    }
+    return ids
+  } catch (e) {
+    console.warn('[props] MLB probables unavailable:', e)
+    return []
+  }
+}
+
+async function cachedRoster(sport: SportKey, abbr: string): Promise<any[]> {
+  const data = await fetchOrCache(`props:roster:${sport}:${abbr}`, 6 * 60 * 60 * 1000, () => fetchTeamRoster(sport, abbr))
+  return Array.isArray(data?.athletes) ? data.athletes : []
+}
+
+/** Keyless NBA/NHL/MLB lines for both teams + a name→team map for book lines. */
+async function buildNonNflProjections(
+  sport: ProjectionSport,
+  team: string,
+  opponent: string,
+  ourMult: number,
+  oppMult: number,
+  eventId: string | null,
+  date: string | null,
+): Promise<{ projections: SeasonProjection[]; teamByName: Map<string, string> }> {
+  const teamByName = new Map<string, string>()
+  try {
+    const [ours, theirs, probables] = await Promise.all([
+      cachedRoster(sport, team),
+      cachedRoster(sport, opponent),
+      sport === 'MLB' ? mlbProbablePitcherIds(eventId, date) : Promise.resolve([]),
+    ])
+    for (const [athletes, abbr] of [[ours, team], [theirs, opponent]] as const) {
+      for (const a of athletes) {
+        const name = a?.displayName ?? a?.fullName
+        if (name) teamByName.set(normalizeName(name), abbr)
+      }
+    }
+    const projections = [
+      ...buildSeasonProjections(sport, ours, team, ourMult, { probablePitcherIds: probables }),
+      ...buildSeasonProjections(sport, theirs, opponent, oppMult, { probablePitcherIds: probables }),
+    ]
+    return { projections, teamByName }
+  } catch (e) {
+    console.warn('[props] season projections unavailable:', e)
+    return { projections: [], teamByName }
+  }
+}
+
 function pickBestBookmaker(bookmakers: OddsBookmaker[]): OddsBookmaker | null {
   const preferred = ['draftkings', 'fanduel', 'betmgm', 'caesars']
   for (const key of preferred) {
@@ -383,6 +361,7 @@ export async function GET(request: Request) {
   const team = (searchParams.get('team') ?? '').toUpperCase()
   const opponent = (searchParams.get('opponent') ?? '').toUpperCase()
   const date = searchParams.get('date') // YYYYMMDD
+  const eventId = searchParams.get('eventId')
   const preseason = searchParams.get('preseason') === '1'
 
   // Matchup context from the Vegas lines the dashboard already fetched. `spread` is
@@ -393,8 +372,9 @@ export async function GET(request: Request) {
   const hasMatchupOdds = !isNaN(total) && total > 0 && !isNaN(spread)
   const ourImplied = hasMatchupOdds ? (total - spread) / 2 : NaN
   const oppImplied = hasMatchupOdds ? (total + spread) / 2 : NaN
-  const ourMult = hasMatchupOdds ? clamp(ourImplied / LEAGUE_AVG_TEAM_TOTAL, MATCHUP_MULT_MIN, MATCHUP_MULT_MAX) : 1
-  const oppMult = hasMatchupOdds ? clamp(oppImplied / LEAGUE_AVG_TEAM_TOTAL, MATCHUP_MULT_MIN, MATCHUP_MULT_MAX) : 1
+  const multSport = (SPORT_KEY[sport] ? sport : 'NFL') as 'NFL' | ProjectionSport
+  const ourMult = hasMatchupOdds ? matchupMultiplier(multSport, ourImplied) : 1
+  const oppMult = hasMatchupOdds ? matchupMultiplier(multSport, oppImplied) : 1
   const matchup = hasMatchupOdds
     ? {
         total,
@@ -409,14 +389,30 @@ export async function GET(request: Request) {
   if (!SPORT_KEY[sport] || !team || !opponent) {
     return NextResponse.json({ error: 'Missing sport, team or opponent' }, { status: 400 })
   }
+  if (!isValidTeam(team) || !isValidTeam(opponent)) {
+    return NextResponse.json({ error: 'INVALID_PARAM', message: 'team/opponent must be 2-4 character abbreviations' }, { status: 400 })
+  }
+  if ((date && !DATE_RE.test(date)) || (eventId && !EVENT_ID_RE.test(eventId))) {
+    return NextResponse.json({ error: 'INVALID_PARAM', message: 'date must be YYYYMMDD and eventId numeric' }, { status: 400 })
+  }
+
+  // Keyless projections for both teams, every sport. Computed lazily once and
+  // reused by every response branch below.
+  let keyless: Promise<{ projections: (ProjectedLine | SeasonProjection)[]; teamByName: Map<string, string> | null }> | null = null
+  const getKeyless = () => {
+    keyless ??= sport === 'NFL'
+      ? buildProjectedLines(team, opponent, preseason, ourMult, oppMult).then((projections) => ({ projections, teamByName: null }))
+      : buildNonNflProjections(sport as ProjectionSport, team, opponent, ourMult, oppMult, eventId, date)
+    return keyless
+  }
+  const projectionSource = sport === 'NFL' ? 'espn-fantasy' : 'espn-season-avg'
 
   const apiKey = getApiKey()
   if (!apiKey) {
-    // No betting props available — fall back to keyless projected lines from the
-    // ESPN fantasy projections the pipeline already carries.
+    // No betting props available — fall back to keyless projected lines.
     log(`No ODDS_API_KEY configured — falling back to projected lines`)
-    const projected = sport === 'NFL' ? await buildProjectedLines(team, opponent, preseason, ourMult, oppMult) : []
-    return NextResponse.json({ available: false, reason: 'no-api-key', props: null, projections: projected, preseason, matchup })
+    const { projections } = await getKeyless()
+    return NextResponse.json({ available: false, reason: 'no-api-key', props: null, projections, projectionSource, preseason, matchup })
   }
 
   const names = teamNameByAbbr(sport)
@@ -454,14 +450,14 @@ export async function GET(request: Request) {
 
     if (!evt) {
       log(`No Odds API event found for ${teamName} vs ${oppName} (${date})`)
-      const projected = sport === 'NFL' ? await buildProjectedLines(team, opponent, preseason, ourMult, oppMult) : []
-      return NextResponse.json({ available: false, reason: 'no-event', props: null, projections: projected, preseason, matchup })
+      const { projections } = await getKeyless()
+      return NextResponse.json({ available: false, reason: 'no-event', props: null, projections, projectionSource, preseason, matchup })
     }
 
     // Step 2: fetch the props markets for that event (~1 credit per market).
     const propsKey = `props:${sportKey}:${evt.id}`
     const props = await fetchOrCache(propsKey, 10 * 60 * 1000, async () => {
-      const url = `${ODDS_API_BASE}/${sportKey}/events/${evt.id}/odds/?apiKey=${apiKey}&regions=us&markets=${REQUESTED_MARKETS}&oddsFormat=american`
+      const url = `${ODDS_API_BASE}/${sportKey}/events/${evt.id}/odds/?apiKey=${apiKey}&regions=us&markets=${Object.keys(MARKETS[sport]).join(',')}&oddsFormat=american`
       const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
       if (!res.ok) {
         const body = await res.text().catch(() => '')
@@ -477,11 +473,11 @@ export async function GET(request: Request) {
 
     if (!bookmaker?.markets?.length) {
       log(`No props markets returned for ${evt.id} (${bookmaker?.title ?? 'no bookmaker'})`)
-      const projected = sport === 'NFL' ? await buildProjectedLines(team, opponent, preseason, ourMult, oppMult) : []
-      return NextResponse.json({ available: false, reason: 'no-props', props: null, projections: projected, preseason, matchup })
+      const { projections } = await getKeyless()
+      return NextResponse.json({ available: false, reason: 'no-props', props: null, projections, projectionSource, preseason, matchup })
     }
 
-    const players = groupByPlayer(bookmaker.markets)
+    const players = groupByPlayer(bookmaker.markets, MARKETS[sport])
     // Order the display: QBs, then RBs, then WRs/TEs, then unknown — matches how the
     // panel groups projected lines by position.
     players.sort((a, b) => {
@@ -491,16 +487,17 @@ export async function GET(request: Request) {
       return a.name.localeCompare(b.name)
     })
 
-    // The Odds API doesn't tag players with a team, so resolve each player's team from
-    // the cached Sleeper master list. Best-effort: unmatched players render ungrouped.
-    // Sleeper's abbreviation for a team can differ from the one the dashboard passes
-    // (e.g. WAS vs WSH), so accept every variant of the two teams' abbreviations and
-    // return the dashboard's abbreviation (team / opponent) for client-side grouping.
-    const teamLookup = await playerTeamLookup()
+    // The Odds API doesn't tag players with a team. NFL resolves it from the cached
+    // Sleeper master list (accepting every abbreviation variant, e.g. WAS vs WSH);
+    // other sports use the two ESPN rosters the keyless projections already loaded.
+    // Best-effort: unmatched players render ungrouped.
+    const { projections, teamByName } = await getKeyless()
+    const teamLookup = sport === 'NFL' ? await playerTeamLookup() : null
     const variants = teamAbbrVariants(sport)
     const ourAbbrs = variants.get(teamName) ?? new Set<string>()
     const oppAbbrs = variants.get(oppName) ?? new Set<string>()
     const teamOf = (name: string): string | null => {
+      if (teamByName) return teamByName.get(normalizeName(name)) ?? null
       const playerTeam = teamLookup?.get(normalizeName(name))
       if (!playerTeam) return null
       if (ourAbbrs.has(playerTeam)) return team
@@ -511,10 +508,6 @@ export async function GET(request: Request) {
     const homeTeam = evt.home_team
     const awayTeam = evt.away_team
 
-    // Include keyless projected lines alongside the betting props so the panel can
-    // always show something, even when a given market isn't posted.
-    const projected = sport === 'NFL' ? await buildProjectedLines(team, opponent, preseason, ourMult, oppMult) : []
-
     return NextResponse.json(
       {
         available: true,
@@ -524,7 +517,10 @@ export async function GET(request: Request) {
         homeTeam,
         awayTeam,
         players: players.map((p) => ({ ...p, team: teamOf(p.name) })),
-        projections: projected,
+        // Keyless projected lines ride along so the panel can always show
+        // something, even when a given market isn't posted.
+        projections,
+        projectionSource,
         preseason,
         matchup,
         updatedAt: new Date().toISOString(),

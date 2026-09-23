@@ -23,7 +23,7 @@ const TAB_LABELS: Record<TabId, string> = {
   box: 'Box Score',
   plays: 'Plays',
   teams: 'Team Stats',
-  model: 'Model & Props',
+  model: 'Props',
 }
 
 export default function GamePage() {
@@ -174,8 +174,9 @@ export default function GamePage() {
     [sport],
   )
 
-  // NFL Model & Props data loads lazily when the tab opens (avoids slow
-  // scraper/odds waterfalls for visitors who never look at modeling).
+  // Props data loads lazily when the tab opens (avoids slow scraper/odds
+  // waterfalls for visitors who never look at modeling). Every sport gets odds
+  // + projections; the NFL additionally gets the Docker line scraper.
   useEffect(() => {
     if (tab !== 'model' || modelLoaded || !game || !sport) return
     setModelLoaded(true)
@@ -246,7 +247,9 @@ export default function GamePage() {
     ...(hasPlayerStats || boxScore ? ['box' as TabId] : []),
     ...(playsChecked && hasPlays ? ['plays' as TabId] : []),
     ...(hasTeamStats ? ['teams' as TabId] : []),
-    ...(sport === 'NFL' ? ['model' as TabId] : []),
+    // NFL keeps the tab after the game (model graded vs final); other sports'
+    // projections are pre-game only, so the tab retires once the game is final.
+    ...(sport === 'NFL' || !isFinal ? ['model' as TabId] : []),
   ]
   const activeTab = availableTabs.includes(tab) ? tab : 'summary'
   const eventDate = game?.date?.slice(0, 10).replace(/-/g, '')
@@ -384,7 +387,7 @@ export default function GamePage() {
               </div>
             )}
 
-            {activeTab === 'model' && sport === 'NFL' && teamsInfo.away && teamsInfo.home && (
+            {activeTab === 'model' && teamsInfo.away && teamsInfo.home && (
               <div className="space-y-6" role="tabpanel">
                 <NextGamePanel
                   sport={sportParam}
@@ -403,8 +406,10 @@ export default function GamePage() {
                   scraperLoading={scraperLoading[teamsInfo.away.abbr] ?? false}
                   scraperData={scraperData[teamsInfo.away.abbr]}
                   isLive={isLive}
+                  phase={isFinal ? 'final' : isLive ? 'live' : 'pre'}
                   liveBoxScore={boxScore}
-                  compact={isLive}
+                  compact={isLive || isFinal}
+                  projectionTeams="ours"
                   onBack={() => {}}
                 />
                 <NextGamePanel
@@ -424,8 +429,10 @@ export default function GamePage() {
                   scraperLoading={scraperLoading[teamsInfo.home.abbr] ?? false}
                   scraperData={scraperData[teamsInfo.home.abbr]}
                   isLive={isLive}
+                  phase={isFinal ? 'final' : isLive ? 'live' : 'pre'}
                   liveBoxScore={boxScore}
-                  compact={isLive}
+                  compact={isLive || isFinal}
+                  projectionTeams="ours"
                   onBack={() => {}}
                 />
               </div>

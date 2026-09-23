@@ -15,6 +15,7 @@ import type { SportKey } from '@/lib/models'
 import { sportPositionOrder, rosterStatColumns } from '@/lib/roster-stats'
 import { GameStatsSection } from '@/components/box-score/GameStatsSection'
 import { LinescoreTable, PlayerBoxScore } from '@/components/game/PlayerBoxScore'
+import { isGameComplete } from '@/lib/propLedger'
 
 function useTeamDashboard(sport: string, teamId: string, teamName: string) {
   const [data, setData] = useState<any>(null)
@@ -94,7 +95,7 @@ interface OddsInfo {
 
 interface TeamDashboardData {
   upcoming: { date: string; opponent: string; opponentAbbr?: string; opponentLogo: string; location: 'home' | 'away'; venue?: string; isPreseason?: boolean; isLive?: boolean; eventId?: string; eventDate?: string; kickoff?: string; homeScore?: string; awayScore?: string; homeAbbr?: string; awayAbbr?: string; statusDetail?: string; seasonTypeName?: string } | null
-  lastFive: { date: string; opponent: string; opponentAbbr: string; opponentLogo: string; result: GameResult; score: string; eventId: string; isPreseason?: boolean; seasonTypeName?: string }[]
+  lastFive: { date: string; eventDate: string; opponent: string; opponentAbbr: string; opponentLogo: string; result: GameResult; score: string; eventId: string; isPreseason?: boolean; seasonTypeName?: string }[]
   oddsInfo: OddsInfo | null
   news: { title: string; source: string; date: string; snippet: string; url: string }[]
   standings: ConferenceGroup[]
@@ -776,6 +777,7 @@ function TeamDashboard({ sport, teamId }: { sport: string; teamId: string }) {
             odds={data.oddsInfo}
             oddsStatus={oddsStatus}
             isPreseason={data.upcoming.isPreseason}
+            phase="pre"
             onBack={() => setShowNextGame(false)}
             scraperLoading={scraperLoading}
             scraperData={scraperData}
@@ -831,10 +833,37 @@ function TeamDashboard({ sport, teamId }: { sport: string; teamId: string }) {
                 scraperData={scraperData}
                 scraperError={scraperError}
                 isLive
+                phase="live"
                 liveBoxScore={liveBoxScore}
                 compact
               />
-            ) : null}
+            ) : (() => {
+              // Finished NFL game: grade the locked pre-game snapshot against the
+              // final box score (renders nothing when no snapshot was saved).
+              const past = team.sport === 'NFL' ? data?.lastFive.find((g) => g.eventId === selectedGameId) : null
+              if (!past || !boxScoreData || !isGameComplete(boxScoreData)) return null
+              return (
+                <NextGamePanel
+                  key={past.eventId}
+                  sport={team.sport}
+                  teamAbbr={getEspnAbbr(team.id, team.abbreviation)}
+                  opponentAbbr={past.opponentAbbr}
+                  teamFantasyAbbr={team.abbreviation}
+                  opponentFantasyAbbr={getOpponentFantasyAbbr(past.opponentAbbr, past.opponent, team.sport)}
+                  eventId={past.eventId}
+                  eventDate={past.eventDate}
+                  teamColor={team.colors.primary}
+                  teamName={team.name}
+                  opponentName={past.opponent}
+                  odds={null}
+                  phase="final"
+                  liveBoxScore={boxScoreData}
+                  compact
+                  hideWhenEmpty
+                  onBack={() => {}}
+                />
+              )
+            })()}
           </>
         ) : (
           <>
@@ -1184,6 +1213,7 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
     const opp = getOpponent(e, espnAbbr, sport)
     return {
       date: getShortDate(e),
+      eventDate: (e.date ?? '').slice(0, 10).replace(/-/g, ''),
       opponent: opp.name,
       opponentAbbr: opp.abbr,
       opponentLogo: opp.logo,
@@ -1278,6 +1308,7 @@ function rosterStatCells(sport: string, athlete: any): { key: string; label: str
 
 interface LastFiveGame {
   date: string
+  eventDate: string
   opponent: string
   opponentAbbr: string
   opponentLogo: string
