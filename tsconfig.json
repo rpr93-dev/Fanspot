@@ -37,6 +37,9 @@
   ],
   "exclude": [
     "node_modules",
+    "draft-bot",
+    "prop-model",
+    "scraper",
     "**/__tests__/**"
   ]
 }

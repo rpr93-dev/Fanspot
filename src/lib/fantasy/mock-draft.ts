@@ -679,12 +679,6 @@ export function simulate(
   return s
 }
 
-/** Sum of projected points for a manager index. */
-export function teamProjection(state: DraftState, manager: number): number {
-  const t = state.teams[manager]
-  return t?.projected ?? 0
-}
-
 /**
  * End-of-draft verdict: how the user's roster projects against the simulated league.
  * Surplus is a points measure: if your picks earned ADPs that were each later than the

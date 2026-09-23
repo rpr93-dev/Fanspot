@@ -7,7 +7,7 @@
  */
 
 import { teams } from '@/data/teams'
-import { espnSportMap, getEspnAbbr } from '@/lib/providers/espn'
+import { getEspnAbbr } from '@/lib/providers/espn'
 
 /* ------------------------------------------------------------------ */
 /* Sport                                                               */
@@ -28,10 +28,6 @@ export function normalizeSportKey(input: unknown): SportKey | null {
   if (typeof input !== 'string') return null
   const up = input.toUpperCase()
   return (SPORT_KEYS as string[]).includes(up) ? (up as SportKey) : null
-}
-
-export function espnPathFor(sport: SportKey): string {
-  return espnSportMap[sport]
 }
 
 /* ------------------------------------------------------------------ */

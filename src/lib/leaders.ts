@@ -176,18 +176,6 @@ export interface LeaderBoard {
   leaders: StatLeader[]
 }
 
-/** Boards in category order, split into offense then defense sections. */
-export function groupLeaderBoards(boards: LeaderBoard[]): { group: LeaderGroup; boards: LeaderBoard[] }[] {
-  const out: { group: LeaderGroup; boards: LeaderBoard[] }[] = []
-  for (const group of ['offense', 'defense'] as const) {
-    const mine = boards.filter((b) => b.group === group)
-    if (mine.length > 0) out.push({ group, boards: mine })
-  }
-  const ungrouped = boards.filter((b) => b.group !== 'offense' && b.group !== 'defense')
-  if (ungrouped.length > 0) out.push({ group: 'offense', boards: ungrouped })
-  return out
-}
-
 const LEADERS_PER_CATEGORY = 5
 
 export interface LeaderBoardsResult {

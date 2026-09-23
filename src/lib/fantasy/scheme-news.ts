@@ -105,15 +105,6 @@ let schemeCache: { data: Map<string, SchemeSignal> | null; fetchedAt: number } =
 }
 let refreshing: Promise<unknown> | null = null
 
-/** Last completed refresh time, for the UI to say how fresh the scheme data is. */
-export function getSchemeCacheAge(): number {
-  return schemeCache.fetchedAt > 0 ? Date.now() - schemeCache.fetchedAt : -1
-}
-
-export function getSchemeCacheSize(): number {
-  return schemeCache.data?.size ?? 0
-}
-
 /**
  * Returns the cached scheme map immediately and triggers a background refresh when
  * it is missing or older than the TTL. Callers must treat an empty map as "no scheme
