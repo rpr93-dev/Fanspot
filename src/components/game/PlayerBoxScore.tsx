@@ -3,16 +3,25 @@ import { playerPageHref, type SportKey } from '@/lib/models'
 import { playerStatLabels } from '@/lib/roster-stats'
 import { EmptyState, SkeletonRows } from '@/components/feedback'
 
-export function getPeriodLabels(sport: SportKey | string): string[] {
+/**
+ * Column labels for a linescore with `count` periods. Overtimes / extra
+ * innings are generated rather than capped, so a 4OT NBA game or a 14-inning
+ * MLB game still gets a label on every column.
+ */
+export function getPeriodLabels(sport: SportKey | string, count = 0): string[] {
   const key = sport.toUpperCase()
-  if (key === 'NBA' || key === 'NFL') {
-    return ['Q1', 'Q2', 'Q3', 'Q4', 'OT1', 'OT2', 'OT3', 'OT4', 'OT5', 'OT6', 'OT7', 'OT8']
-  }
-  if (key === 'NHL') return ['1st', '2nd', '3rd', 'OT', 'SO', '', '', '', '', '', '', '']
-  if (key === 'MLB') {
-    return ['1st', '2nd', '3rd', '4th', '5th', '6th', '7th', '8th', '9th', '10th', '11th', '12th']
-  }
-  return ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11', '12']
+  const n = Math.max(count, key === 'MLB' ? 9 : key === 'NHL' ? 3 : 4)
+  return Array.from({ length: n }, (_, i) => {
+    const p = i + 1
+    if (key === 'NBA' || key === 'NFL') return p <= 4 ? `Q${p}` : p === 5 ? 'OT' : `${p - 4}OT`
+    if (key === 'NHL') {
+      if (p <= 3) return ['1st', '2nd', '3rd'][i]
+      if (p === 4) return 'OT'
+      // Exactly five columns is a regular-season shootout; more means playoff multi-OT.
+      return p === 5 && n === 5 ? 'SO' : `${p - 3}OT`
+    }
+    return String(p)
+  })
 }
 
 function prettifyName(name: string): string {
@@ -33,7 +42,7 @@ export function LinescoreTable({ sport, away, home }: { sport: SportKey; away: B
   if (!away && !home) return null
   const maxPeriods = Math.max(away?.linescores?.length ?? 0, home?.linescores?.length ?? 0)
   if (maxPeriods === 0) return null
-  const labels = getPeriodLabels(sport)
+  const labels = getPeriodLabels(sport, maxPeriods)
   const sum = (arr: number[] = []) => arr.reduce((a, b) => a + b, 0)
 
   const row = (team: BoxTeam | null, fallback: string) => (

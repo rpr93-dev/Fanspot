@@ -58,14 +58,19 @@ export const LEADER_GROUP_LABELS: Record<SportKey, Record<LeaderGroup, string>> 
   MLB: { offense: 'Batting', defense: 'Pitching' },
 }
 
-/** Season year the core API expects (mirrors the roster route's convention). */
+/**
+ * Season year the ESPN core API expects. NFL and MLB seasons are labeled by the
+ * year they start; NBA and NHL seasons span two calendar years and ESPN labels
+ * them by the year they END (2025-26 = 2026). Shared by the roster, player and
+ * leaders routes so every sport resolves the same "current" season.
+ */
 export function leadersSeasonYear(sport: SportKey, now: Date = new Date()): number {
   const year = now.getFullYear()
   const month = now.getMonth() + 1
   switch (sport) {
     case 'NFL': return month >= 8 ? year : year - 1
     case 'NBA':
-    case 'NHL': return month >= 10 ? year : year - 1
+    case 'NHL': return month >= 10 ? year + 1 : year
     case 'MLB': return year
   }
 }

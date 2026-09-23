@@ -1,24 +1,8 @@
 import { NextResponse } from 'next/server'
 import { espnSportMap } from '@/lib/providers/espn'
 import { invalidParam, isKnownEspnSport, isValidTeam } from '@/lib/api-validation'
-
-function getSeasonYear(sport: string): number {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
-  switch (sport) {
-    case 'NFL': return month >= 8 ? year : year - 1
-    case 'NBA': case 'NHL': return month >= 10 ? year : year - 1
-    case 'MLB': return year
-    default: return year - 1
-  }
-}
-
-const sportPrimaryStat: Record<string, string> = {
-  NBA: 'points',
-  NHL: 'points',
-  NFL: 'fantasyPoints',
-}
+import { leadersSeasonYear } from '@/lib/leaders'
+import { MLB_PITCHER_POSITIONS } from '@/lib/roster-stats'
 
 function extractPrimaryValue(sport: string, stats: Record<string, string>, positionAbbr: string): { value: number; label: string } {
   let val = 0
@@ -32,21 +16,28 @@ function extractPrimaryValue(sport: string, stats: Record<string, string>, posit
       label = 'PTS'
       break
     case 'NHL':
-      val = pv('points')
-      label = 'PTS'
+      // Goalies score no points — rank them by games played instead.
+      if (positionAbbr === 'G') {
+        val = pv('games')
+        label = 'GP'
+      } else {
+        val = pv('points')
+        label = 'PTS'
+      }
       break
     case 'NFL':
       val = pv('fantasyPoints') || pv('totalYards')
       label = val === pv('fantasyPoints') && pv('fantasyPoints') > 0 ? 'FPTS' : 'YDS'
       break
     case 'MLB':
-      if (['P', 'SP', 'RP'].includes(positionAbbr)) {
-        const era = pv('era')
-        val = era > 0 ? Math.round((10 - Math.min(era, 10)) / 10 * 1000) : 0
-        label = 'ERA'
+      // Rank by playing time so regulars lead each position group; rate stats
+      // (ERA/OPS) put a 2-inning reliever or a 5-PA call-up on top.
+      if (MLB_PITCHER_POSITIONS.has(positionAbbr)) {
+        val = pv('innings')
+        label = 'IP'
       } else {
-        val = pv('ops') * 1000 || pv('onBasePlusSlugging') * 1000 || pv('battingAvg') * 1000
-        label = 'OPS'
+        val = pv('plateAppearances')
+        label = 'PA'
       }
       break
   }
@@ -98,7 +89,7 @@ export async function GET(request: Request) {
     // Fetch season stats for each athlete
     if (Array.isArray(data.athletes) && data.athletes.length > 0) {
       const [sportName, leagueName] = espnPath.split('/')
-      const season = getSeasonYear(sportKey)
+      const season = leadersSeasonYear(sportKey)
 
       const statsResults = await Promise.allSettled(
         data.athletes.map((a: any) => {
