@@ -1,6 +1,8 @@
+import { lookup } from 'node:dns/promises'
 import { NextResponse } from 'next/server'
 import { XMLParser } from 'fast-xml-parser'
 import { invalidParam } from '@/lib/api-validation'
+import { checkRateLimit } from '@/lib/rate-limit'
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -100,10 +102,48 @@ async function readCapped(res: Response): Promise<string | null> {
   )
 }
 
+function isPrivateIp(ip: string): boolean {
+  const v4 = /^(\d+)\.(\d+)\.(\d+)\.(\d+)$/.exec(ip)
+  if (v4) {
+    const [, a, b] = v4.map(Number)
+    return (
+      a === 10 || a === 127 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254) || a === 0
+    )
+  }
+  const low = ip.toLowerCase()
+  return low === '::1' || low === '::' || low.startsWith('fe80:') || low.startsWith('fc') || low.startsWith('fd') || low.startsWith('::ffff:')
+}
+
+/**
+ * Article URLs come from Google News RSS, which anyone can poison — never
+ * fetch a URL that resolves to loopback / link-local / private space, or a
+ * redirect could turn this route into an SSRF probe of the internal network.
+ */
+async function isSafeArticleUrl(raw: string): Promise<boolean> {
+  let parsed: URL
+  try {
+    parsed = new URL(raw)
+  } catch {
+    return false
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false
+  const host = parsed.hostname.toLowerCase()
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal')) return false
+  if (isPrivateIp(host)) return false
+  try {
+    const records = await lookup(host)
+    const addrs = Array.isArray(records) ? records : [records]
+    if (addrs.some((r: any) => isPrivateIp(typeof r === 'string' ? r : r.address))) return false
+  } catch {
+    return false
+  }
+  return true
+}
+
 async function enrichWithContent(articles: WigoloArticle[], maxContent: number): Promise<WigoloArticle[]> {
   const enriched = await Promise.all(
     articles.slice(0, maxContent).map(async (a) => {
-      if (a.url && a.url !== '#' && a.url.startsWith('http')) {
+      if (a.url && a.url !== '#' && (await isSafeArticleUrl(a.url))) {
         try {
           const res = await fetch(a.url, {
             signal: AbortSignal.timeout(8000),
@@ -141,6 +181,11 @@ async function enrichWithContent(articles: WigoloArticle[], maxContent: number):
 const MAX_QUERY_LEN = 120
 
 export async function GET(request: Request) {
+  // content=true fans out to third-party article fetches — rate-limit it
+  // like the other expensive external-fetch routes.
+  const limited = checkRateLimit(request, 'wigolo')
+  if (limited) return limited
+
   const { searchParams } = new URL(request.url)
   const q = searchParams.get('q')
   const sport = searchParams.get('sport') ?? ''
