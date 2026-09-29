@@ -248,6 +248,11 @@ async function buildUnifiedDatabaseInternal(options: BuildOptions = {}): Promise
   return { players: unified, report }
 }
 
+// Returns a loose record (callers cast to FantasyPlayerEnriched) because the
+// upstream Sleeper row is an untyped Record<string, unknown> — asserting the
+// full SleeperPlayer shape here would silently drop real players whose rows
+// omit optional fields. The converter fills every required FantasyPlayerEnriched
+// field, so the cast at the call sites is shape-correct in practice.
 export function unifiedToFantasyPlayerEnriched(
   unified: UnifiedPlayer,
 ): Record<string, unknown> {
