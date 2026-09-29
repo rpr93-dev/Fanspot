@@ -196,6 +196,12 @@ export default function GamePage() {
     return { home: game.home, away: game.away }
   }, [game])
 
+  useEffect(() => {
+    if (game?.away && game?.home) {
+      document.title = `${game.away.abbr} vs ${game.home.abbr} - Fanspot`
+    }
+  }, [game?.away, game?.home])
+
   const opponentFantasyAbbr = useCallback(
     (abbr: string) => {
       if (!sport) return undefined

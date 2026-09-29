@@ -163,6 +163,10 @@ export default function PlayerPage() {
     }
   }, [sport, playerId])
 
+  useEffect(() => {
+    if (data?.player.name) document.title = `${data.player.name} - Fanspot`
+  }, [data?.player.name])
+
   const seasonCats = data?.season?.categories ?? null
   const keyCat = useMemo(() => {
     const fromSeason = keyCategory(seasonCats, data?.player.position ?? null)

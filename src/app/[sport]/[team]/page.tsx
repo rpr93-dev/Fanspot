@@ -225,6 +225,10 @@ function TeamDashboard({ sport, teamId }: { sport: string; teamId: string }) {
   const team = teams.find((t) => t.id === teamId && t.sport === sport.toUpperCase())
   const config = sportConfig[sport.toUpperCase()]
 
+  useEffect(() => {
+    if (team) document.title = `${team.name} - Fanspot`
+  }, [team])
+
   const { dashboard, loading: dashLoading } = useTeamDashboard(sport, teamId, team?.name ?? '')
 
   useEffect(() => {
