@@ -46,6 +46,7 @@ export default function HomePage() {
                     } as React.CSSProperties}
                   >
                     <img
+                      aria-hidden="true"
                       src={`https://a.espncdn.com/i/teamlogos/leagues/500/${league.id}.png`}
                       alt=""
                       className="w-10 h-10 sm:w-12 sm:h-12 object-contain shrink-0"

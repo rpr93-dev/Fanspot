@@ -20,6 +20,7 @@ function AddFavorites({ query }: { query: string }) {
         teams.slice(0, 5).map((t) => (
           <div key={`${t.sport}:${t.teamId}`} className="flex items-center gap-3 p-2">
             <img
+              aria-hidden="true"
               src={`https://a.espncdn.com/i/teamlogos/${t.sport.toLowerCase()}/500/${t.abbr.toLowerCase()}.png`}
               alt=""
               className="w-7 h-7 object-contain"
@@ -89,6 +90,7 @@ export default function FavoritesPage() {
                     f.kind === 'team' ? (
                       <div key={`team:${f.sport}:${f.teamId}`} className="fs-panel p-3 flex items-center gap-3">
                         <img
+                          aria-hidden="true"
                           src={`https://a.espncdn.com/i/teamlogos/${f.sport.toLowerCase()}/500/${f.abbr.toLowerCase()}.png`}
                           alt=""
                           className="w-9 h-9 object-contain shrink-0"

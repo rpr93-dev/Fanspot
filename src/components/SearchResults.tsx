@@ -14,6 +14,7 @@ function TeamRow({ team, onNavigate }: { team: SearchData['teams'][number]; onNa
       className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/5 transition-colors"
     >
       <img
+        aria-hidden="true"
         src={`https://a.espncdn.com/i/teamlogos/${team.sport.toLowerCase()}/500/${team.abbr.toLowerCase()}.png`}
         alt=""
         className="w-9 h-9 object-contain shrink-0"
@@ -45,7 +46,7 @@ function PlayerRow({ player, onNavigate }: { player: SearchData['players'][numbe
     >
       <span className="w-9 h-9 rounded-full bg-fs-panel-2 border border-fs-line overflow-hidden shrink-0 flex items-center justify-center">
         {player.headshot ? (
-          <img src={player.headshot} alt="" className="w-full h-full object-cover" loading="lazy" />
+          <img aria-hidden="true" src={player.headshot} alt="" className="w-full h-full object-cover" loading="lazy" />
         ) : (
           <span className="fs-mono text-xs text-fs-muted-2">
             {player.name.split(' ').map((w) => w[0]).slice(0, 2).join('')}

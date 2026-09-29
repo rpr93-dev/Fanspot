@@ -240,7 +240,7 @@ export default function WeeklySchedule({
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
                           {awayTeam.team?.logo && (
-                            <img src={awayTeam.team.logo} alt="" className="w-8 h-8 object-contain" />
+                            <img aria-hidden="true" src={awayTeam.team.logo} alt="" className="w-8 h-8 object-contain" />
                           )}
                           <span className="font-semibold text-sm truncate">{awayTeam.team?.abbreviation}</span>
                           {awayTeam.winner === true && !isLive && (
@@ -259,7 +259,7 @@ export default function WeeklySchedule({
                       <div className="flex items-center justify-between gap-3">
                         <div className="flex items-center gap-3 min-w-0">
                           {homeTeam.team?.logo && (
-                            <img src={homeTeam.team.logo} alt="" className="w-8 h-8 object-contain" />
+                            <img aria-hidden="true" src={homeTeam.team.logo} alt="" className="w-8 h-8 object-contain" />
                           )}
                           <span className="font-semibold text-sm truncate">{homeTeam.team?.abbreviation}</span>
                           {homeTeam.winner === true && !isLive && (

@@ -213,6 +213,7 @@ export default function StandingsBox({
 
                               {/* logo */}
                               <img
+                                aria-hidden="true"
                                 src={entry.logo}
                                 alt=""
                                 className="w-3.5 h-3.5 object-contain shrink-0"
