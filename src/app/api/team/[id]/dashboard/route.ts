@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { getTeamDashboard } from '@/lib/services/teamService'
 import { teams } from '@/data/teams'
+import { isValidEventId, invalidParam } from '@/lib/api-validation'
 
 export async function GET(
   request: Request,
@@ -20,9 +21,18 @@ export async function GET(
   }
 
   const eventId = searchParams.get('eventId') || undefined
+  if (eventId && !isValidEventId(eventId)) {
+    return invalidParam('eventId must be numeric')
+  }
   const includeRoster = searchParams.get('roster') !== 'false'
   const includeNews = searchParams.get('news') !== 'false'
+  // Origin for same-process sub-fetches. request.url's host comes from the
+  // Host header, so only http(s) origins without credentials are accepted —
+  // a poisoned Host must not turn these fetches into arbitrary-URL reads.
   const origin = new URL(request.url).origin
+  if (!/^https?:\/\/[^@/\\]+$/.test(origin)) {
+    return NextResponse.json({ error: 'DASHBOARD_UNAVAILABLE' }, { status: 500 })
+  }
 
   try {
     const dashboard = await getTeamDashboard(
@@ -38,6 +48,6 @@ export async function GET(
     })
   } catch (err) {
     console.error(`[dashboard-api] Error for ${sport}/${id}:`, err)
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    return NextResponse.json({ error: 'DASHBOARD_UNAVAILABLE', message: 'Unable to load team dashboard' }, { status: 500 })
   }
 }

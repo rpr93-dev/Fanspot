@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { TTL } from '@/lib/cache/ttl'
 import { fetchOrCache } from '@/lib/cache/cacheService'
+import { isValidEventId, invalidParam } from '@/lib/api-validation'
 import { liveSideStats } from '@/lib/scheduleWeek'
 import { espnFetch } from '@/lib/espn-fetch'
 
@@ -12,6 +13,9 @@ export async function GET(request: Request) {
 
   if (!eventId) {
     return NextResponse.json({ error: 'Missing eventId' }, { status: 400 })
+  }
+  if (!isValidEventId(eventId)) {
+    return invalidParam('eventId must be numeric')
   }
 
   try {
@@ -41,6 +45,7 @@ export async function GET(request: Request) {
       stats: sides,
     })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    console.error('[live-stats] request failed:', err)
+    return NextResponse.json({ error: 'LIVE_STATS_UNAVAILABLE', message: 'Unable to load live stats' }, { status: 500 })
   }
 }

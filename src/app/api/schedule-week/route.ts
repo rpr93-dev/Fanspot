@@ -34,6 +34,7 @@ export async function GET(request: Request) {
     const events = await fetchNflWeekEvents(weekNum, season)
     return NextResponse.json({ week: weekNum, season, sport: 'NFL', events })
   } catch (err) {
-    return NextResponse.json({ error: String(err) }, { status: 500 })
+    console.error('[schedule-week] request failed:', err)
+    return NextResponse.json({ error: 'SCHEDULE_WEEK_UNAVAILABLE', message: 'Unable to load weekly schedule' }, { status: 500 })
   }
 }
