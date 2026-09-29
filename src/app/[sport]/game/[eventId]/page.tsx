@@ -396,12 +396,18 @@ export default function GamePage() {
 
             {activeTab === 'box' && (
               <div role="tabpanel">
-                <LinescoreTable
-                  sport={sportKey}
-                  away={awayBs ? { abbreviation: awayBs.abbreviation, linescores: awayBs.linescores, homeAway: 'away' } : null}
-                  home={homeBs ? { abbreviation: homeBs.abbreviation, linescores: homeBs.linescores, homeAway: 'home' } : null}
-                />
-                <PlayerBoxScore sport={sportKey} playerStats={boxScore?.playerStats ?? null} loading={!boxScore} />
+                {game.status.phase === 'pre' && !hasPlayerStats ? (
+                  <EmptyState title="Box score opens at kickoff." />
+                ) : (
+                  <>
+                    <LinescoreTable
+                      sport={sportKey}
+                      away={awayBs ? { abbreviation: awayBs.abbreviation, linescores: awayBs.linescores, homeAway: 'away' } : null}
+                      home={homeBs ? { abbreviation: homeBs.abbreviation, linescores: homeBs.linescores, homeAway: 'home' } : null}
+                    />
+                    <PlayerBoxScore sport={sportKey} playerStats={boxScore?.playerStats ?? null} loading={!boxScore} />
+                  </>
+                )}
               </div>
             )}
 
