@@ -1,5 +1,5 @@
 import type { Metadata } from 'next'
-import { notFound } from 'next/navigation'
+import { notFound, redirect } from 'next/navigation'
 import { teams, sportConfig } from '@/data/teams'
 import { TeamDashboard } from './TeamDashboard'
 
@@ -34,6 +34,16 @@ export async function generateMetadata({
  */
 export default async function TeamPage({ params }: { params: Promise<TeamPageParams> }) {
   const { sport, team } = await params
-  if (!resolveTeam(sport, team)) notFound()
+  if (!resolveTeam(sport, team)) {
+    // Case-insensitive match (e.g. /nfl/PIT, /nfl/NE): redirect to the
+    // canonical lowercase URL instead of 404ing.
+    const canonical = teams.find(
+      (t) => t.id === team.toLowerCase() && t.sport === sport.toUpperCase(),
+    )
+    if (canonical && sportConfig[sport.toUpperCase()]) {
+      redirect(`/${sport.toLowerCase()}/${canonical.id}`)
+    }
+    notFound()
+  }
   return <TeamDashboard key={`${sport}/${team}`} sport={sport} teamId={team} />
 }
