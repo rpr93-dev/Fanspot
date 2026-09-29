@@ -166,19 +166,33 @@ export async function GET(request: Request) {
 
         // Step 3: Fetch scoreboard for the game date. ESPN groups games under their US
         // local date, but schedule event timestamps are UTC — a night game on the East
-        // coast is "tomorrow" in UTC, so a single-date query misses it. Search a ±1 day
-        // window instead; the exact event is matched by ID below.
-        const dateWindow = `${shiftDate(gameDate, -1)}-${shiftDate(gameDate, 1)}`
-        const sbUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${dateWindow}&limit=100`
-
-        const sbRes = await fetch(sbUrl, { signal: AbortSignal.timeout(15000) })
-        if (!sbRes.ok) {
-          console.error(`[odds] scoreboard fetch failed: ${sbRes.status} ${sbRes.statusText}`)
+        // coast is "tomorrow" in UTC, so query the date plus its neighbors. NOTE: ESPN
+        // rejects date *ranges* (dates=A-B → 400), so each date gets its own request.
+        const sbEvents: any[] = []
+        let sbOk = false
+        for (const d of [shiftDate(gameDate, -1), gameDate, shiftDate(gameDate, 1)]) {
+          try {
+            const sbRes = await fetch(
+              `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${d}`,
+              { signal: AbortSignal.timeout(15000) },
+            )
+            if (!sbRes.ok) {
+              console.warn(`[odds] scoreboard fetch failed for ${d}: ${sbRes.status}`)
+              continue
+            }
+            sbOk = true
+            const sbData = await sbRes.json()
+            for (const e of sbData?.events ?? []) {
+              if (!sbEvents.some((x) => String(x.id) === String(e.id))) sbEvents.push(e)
+            }
+          } catch (e: any) {
+            console.warn(`[odds] scoreboard fetch error for ${d}: ${e?.message ?? e}`)
+          }
+        }
+        if (!sbOk) {
+          console.error('[odds] all scoreboard date fetches failed')
           return { odds: null, source: 'espn', status: 'error' }
         }
-
-        const sbData = await sbRes.json()
-        const sbEvents: any[] = sbData?.events ?? []
 
         // Step 4: Match the game
         const getTeamAbbr = (c: any) => c?.team?.abbreviation?.toUpperCase()
