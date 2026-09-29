@@ -87,6 +87,15 @@ export default function StandingsBox({
 
   const hasMultipleConferences = standings.some((c) => c.name !== teamConference)
 
+  // Preseason (or a fresh season): every record is 0-0(-0). Say so instead
+  // of rendering a wall of zeros that reads as broken data.
+  const allZero = standings.length > 0 && standings.every((c) =>
+    c.divisions.every((d) => d.teams.every((t) => {
+      const { w, l } = parseRecord(t.record)
+      return w === 0 && l === 0
+    })),
+  )
+
   useEffect(() => {
     setCompact(showAll)
   }, [showAll])
@@ -121,6 +130,9 @@ export default function StandingsBox({
           </button>
         )}
       </div>
+      {allZero && !loading && (
+        <p className="fs-meta mb-3 -mt-1">Preseason — every team starts 0-0.</p>
+      )}
 
       {loading ? (
         <div className="animate-pulse space-y-3 flex-1">
