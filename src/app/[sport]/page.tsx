@@ -35,7 +35,11 @@ export default async function SportPage({
   if (!sportKey) return notFound()
   const config = sportConfig[sportKey]
 
-  const weekNum = week ? parseInt(week, 10) : undefined
+  // Strict week parsing: ?week=3junk or ?week=abc used to slip through
+  // parseInt (prefix match / NaN) into the schedule board. Garbage falls
+  // back to the current week instead of corrupting the view.
+  const weekNum = week && /^\d+$/.test(week) ? parseInt(week, 10) : undefined
+  const validWeekNum = weekNum != null && weekNum >= 1 && weekNum <= 18 ? weekNum : undefined
   const currentWeek = sportKey === 'NFL' ? await fetchCurrentNflWeek() : 1
   const leagueSlug = sportKey.toLowerCase() as 'nfl' | 'nba' | 'nhl' | 'mlb'
   const leagueTeams = teams.filter((t) => t.sport === sportKey).sort((a, b) => a.name.localeCompare(b.name))
@@ -56,7 +60,7 @@ export default async function SportPage({
         <div className="space-y-12">
           {sportKey === 'NFL' && (
             <section aria-label="Weekly schedule">
-              <WeeklySchedule week={weekNum} view={view ?? 'all'} currentWeek={currentWeek} />
+              <WeeklySchedule week={validWeekNum} view={view ?? 'all'} currentWeek={currentWeek} />
             </section>
           )}
 
