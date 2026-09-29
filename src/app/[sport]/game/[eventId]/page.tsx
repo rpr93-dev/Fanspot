@@ -180,6 +180,9 @@ export default function GamePage() {
   const boxScoreRef = useRef<any>(null)
   boxScoreRef.current = boxScore
   const boxScoreAttempts = useRef(0)
+  // Tracks which event already fired the Docker scrape (one call covers the
+  // whole game — see the model-tab effect below).
+  const scraperFiredRef = useRef<string | null>(null)
   useEffect(() => {
     boxScoreAttempts.current = 0
   }, [sport, eventId])
@@ -257,6 +260,11 @@ export default function GamePage() {
         setOddsStatus((prev) => ({ ...prev, [teamAbbr]: 'error' }))
       }
       if (sport === 'NFL') {
+        // One Docker scrape covers the whole game — skip the second
+        // per-team POST (halves scrape cost/rate-limit spend; the merge
+        // already handles a single-sided payload).
+        if (scraperFiredRef.current === eventId) return
+        scraperFiredRef.current = eventId
         setScraperLoading((prev) => ({ ...prev, [teamAbbr]: true }))
         try {
           const scraperRes = await fetch('/api/scraper', {
