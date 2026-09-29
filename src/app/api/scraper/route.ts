@@ -89,9 +89,15 @@ export async function POST(request: Request) {
       results,
     })
   } catch (err: any) {
+    const usingDefault = !process.env.SCRAPER_URL
     console.error('[scraper] scrape request failed:', err?.message ?? err)
     return NextResponse.json(
-      { error: 'SCRAPER_UNAVAILABLE', message: 'Scraper request failed' },
+      {
+        error: 'SCRAPER_UNAVAILABLE',
+        message: usingDefault
+          ? `Scraper request failed (SCRAPER_URL is not set; default ${SCRAPER_URL} is unreachable from here)`
+          : 'Scraper request failed',
+      },
       { status: 502 },
     )
   }
