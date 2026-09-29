@@ -44,14 +44,19 @@ function scoreArticle(title: string, snippet: string, teamName: string): number 
     'Twins', 'Mets', 'Padres', 'Rays', 'Nationals'
   ]
 
+  // Another single-word team name in the title. The title already contains the
+  // searched team (checked above), so this is a matchup story ("Steelers vs
+  // Ravens") — demote, don't drop. A hard zero hid valid matchup coverage.
+  let crossTeamPenalty = 0
   for (const name of EXCLUDED_SINGLE_WORD_TEAMS) {
     if (name.toLowerCase() === lastNameToken) continue
     if (title.toLowerCase().includes(name.toLowerCase())) {
-      return 0
+      crossTeamPenalty = 3
+      break
     }
   }
 
-  let score = 5
+  let score = 5 - crossTeamPenalty
 
   const keywords: [RegExp, number][] = [
     [/(injured?|injury|out\s+for)/i, 5],
