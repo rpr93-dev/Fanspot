@@ -116,7 +116,14 @@ export default function GamePage() {
             json.boxScore.teams?.find((t: any) => (t.abbreviation ?? '').toUpperCase() === abbr.toUpperCase())
           const patch = (side: typeof g.away) => {
             const t = known(side.abbr)
-            return t?.score?.displayValue != null ? { ...side, scoreDisplay: String(t.score.displayValue), score: Number(t.score.displayValue) || side.score } : side
+            if (t?.score?.displayValue == null) return side
+            // A real 0 is falsy — only fall back when the value isn't numeric.
+            const parsed = Number(t.score.displayValue)
+            return {
+              ...side,
+              scoreDisplay: String(t.score.displayValue),
+              score: Number.isFinite(parsed) ? parsed : side.score,
+            }
           }
           return {
             ...g,
