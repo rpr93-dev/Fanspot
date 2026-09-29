@@ -52,6 +52,9 @@ function useTeamDashboard(sport: string, teamId: string, teamName: string) {
 function getTeamLogoUrl(teamAbbr: string, sport: string): string {
   const path = sportPath[sport.toUpperCase()]
   if (!path) return ''
+  // TBD postseason placeholders (e.g. "Phillies/Braves") are not real
+  // abbreviations — building a URL from them just 404s (see issue #3).
+  if (!/^[a-z0-9]{2,4}$/i.test(teamAbbr.trim())) return ''
   return `https://a.espncdn.com/i/teamlogos/${path}/500/${teamAbbr.toLowerCase()}.png`
 }
 
@@ -611,7 +614,7 @@ function TeamDashboard({ sport, teamId }: { sport: string; teamId: string }) {
                 <div className="animate-fade-in-up">
                   <div className="flex items-center gap-3 mb-2">
                     {data.upcoming.opponentLogo && (
-                      <img src={data.upcoming.opponentLogo} alt="" className="w-7 h-7 object-contain" />
+                      <img onError={(e) => { e.currentTarget.style.display = 'none' }} src={data.upcoming.opponentLogo} alt="" className="w-7 h-7 object-contain" />
                     )}
                     <p className="text-xl font-medium text-fs-text">
                       {data.upcoming.location === 'home' ? 'vs' : '@'} {data.upcoming.opponent}
@@ -976,7 +979,7 @@ function TeamDashboard({ sport, teamId }: { sport: string; teamId: string }) {
                   }}>
                   <div className="flex items-center gap-3 min-w-0">
                     {data.upcoming.opponentLogo && (
-                      <img src={data.upcoming.opponentLogo} alt="" className="w-10 h-10 object-contain shrink-0" />
+                      <img onError={(e) => { e.currentTarget.style.display = 'none' }} src={data.upcoming.opponentLogo} alt="" className="w-10 h-10 object-contain shrink-0" />
                     )}
                     <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-fs-text truncate">
@@ -1036,7 +1039,7 @@ function TeamDashboard({ sport, teamId }: { sport: string; teamId: string }) {
                           {game.result}
                         </span>
                         {game.opponentLogo && (
-                          <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain shrink-0" />
+                          <img onError={(e) => { e.currentTarget.style.display = 'none' }} src={game.opponentLogo} alt="" className="w-6 h-6 object-contain shrink-0" />
                         )}
                         <div className="min-w-0">
                           <p className="text-xs font-medium text-fs-text/85 truncate">{game.opponentAbbr || game.opponent}</p>
