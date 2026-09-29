@@ -46,7 +46,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     )
   } catch (err) {
     return NextResponse.json(
-      { error: 'top-stories-failed', message: err instanceof Error ? err.message : 'unknown error' },
+      { error: 'top-stories-failed', message: 'Unable to load top stories' },
       { status: 500 },
     )
   }

@@ -111,7 +111,7 @@ export async function GET(
   } catch (err) {
     console.error('[api/fantasy/auction] error:', err)
     return NextResponse.json(
-      { error: 'auction-board-failed', message: err instanceof Error ? err.message : 'Unknown error' },
+      { error: 'auction-board-failed', message: 'Unable to load auction board' },
       { status: 500 },
     )
   }

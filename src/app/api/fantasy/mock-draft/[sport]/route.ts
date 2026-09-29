@@ -126,7 +126,7 @@ if (!(ADP_PLATFORMS as readonly string[]).includes(adpPlatform)) {
   } catch (err) {
     console.error('[api/fantasy/mock-draft] error:', err)
     return NextResponse.json(
-      { error: 'mock-draft-pool-failed', message: err instanceof Error ? err.message : 'Unknown error' },
+      { error: 'mock-draft-pool-failed', message: 'Unable to load mock draft pool' },
       { status: 500 },
     )
   }

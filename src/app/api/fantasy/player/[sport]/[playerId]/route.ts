@@ -119,7 +119,7 @@ export async function GET(
   } catch (err) {
     console.error('[api/fantasy/player]', err)
     return NextResponse.json(
-      { error: 'player-fetch-failed', message: err instanceof Error ? err.message : String(err) },
+      { error: 'player-fetch-failed', message: 'Unable to load fantasy player' },
       { status: 500 },
     )
   }

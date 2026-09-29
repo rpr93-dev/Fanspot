@@ -81,7 +81,7 @@ export async function GET(
     )
   } catch (err) {
     return NextResponse.json(
-      { error: 'team-outlook-failed', message: err instanceof Error ? err.message : 'unknown error' },
+      { error: 'team-outlook-failed', message: 'Unable to load team outlook' },
       { status: 500 },
     )
   }

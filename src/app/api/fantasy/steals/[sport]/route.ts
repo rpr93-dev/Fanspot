@@ -125,7 +125,7 @@ export async function GET(
   } catch (err) {
     console.error('[api/fantasy/steals]', err)
     return NextResponse.json(
-      { error: 'steals-fetch-failed', message: err instanceof Error ? err.message : String(err) },
+      { error: 'steals-fetch-failed', message: 'Unable to load steals board' },
       { status: 500 },
     )
   }
