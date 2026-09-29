@@ -34,6 +34,21 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <GlobalNav />
         <SportScopedScoreboard />
         <main className="pb-24 md:pb-10">{children}</main>
+        <footer className="border-t border-fs-line mt-8">
+          <div className="fs-shell px-4 sm:px-6 py-6 flex flex-col sm:flex-row items-center justify-between gap-3">
+            <p className="fs-meta">FANSPOT · scores, news, and fantasy edges</p>
+            <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 fs-meta" aria-label="Footer">
+              <a href="/scores" className="hover:text-fs-text">Scores</a>
+              <a href="/nfl" className="hover:text-fs-text">NFL</a>
+              <a href="/nba" className="hover:text-fs-text">NBA</a>
+              <a href="/nhl" className="hover:text-fs-text">NHL</a>
+              <a href="/mlb" className="hover:text-fs-text">MLB</a>
+              <a href="/fantasy/nfl" className="hover:text-fs-text">Fantasy</a>
+              <a href="/news" className="hover:text-fs-text">News</a>
+            </nav>
+            <p className="fs-meta">Data via ESPN · Unofficial fan project</p>
+          </div>
+        </footer>
       </body>
     </html>
   )
