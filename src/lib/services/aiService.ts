@@ -2,8 +2,8 @@ import { createHash } from 'crypto'
 import { TTL } from '@/lib/cache/ttl'
 import { setCached, getCached, isFresh } from '@/lib/cache/cacheService'
 
-// Set OLLAMA_BASE_URL in .env.local to move this off the checked-in tailnet address.
-const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || 'http://100.112.124.101:11434'
+// Set OLLAMA_BASE_URL in .env.local to point at your Ollama host.
+const OLLAMA_BASE = process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
 // Smaller model than llama3.1:70b-instruct-q4_K_M for faster load + generation.
 // Qwen3.5 emits a reasoning preamble (data.thinking) before its response (data.response);
 // num_predict must be large enough to cover thinking + final answer together.
