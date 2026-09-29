@@ -14,6 +14,11 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Weekly schedule only supported for NFL' }, { status: 400 })
   }
 
+  // Strict season parsing: parseInt('2026junk') === 2026 and parseInt('abc')
+  // is NaN — both used to slip into the ESPN fetch unchecked.
+  if (seasonParam && !/^\d{4}$/.test(seasonParam)) {
+    return NextResponse.json({ error: 'Invalid season, expected YYYY' }, { status: 400 })
+  }
   const season = seasonParam ? parseInt(seasonParam, 10) : nflSeasonYear()
   let weekNum: number
   if (weekParam) {
