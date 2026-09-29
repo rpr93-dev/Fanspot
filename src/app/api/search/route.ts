@@ -126,12 +126,17 @@ export async function GET(request: Request) {
     return invalidParam('q must be 2-50 characters')
   }
 
+  // Team matching is synchronous and instant. The ESPN player search can
+  // take up to 10s cold — never let it delay team results (favorites
+  // ADD TEAMS and typeahead depend on teams resolving fast).
+  const teamResults = matchTeams(q, 8)
+  const playerResults = await Promise.race([
+    searchPlayers(q, 8).catch(() => [] as PlayerResult[]),
+    new Promise<PlayerResult[]>((resolve) => setTimeout(() => resolve([]), 1500)),
+  ])
+
   try {
-    const [teamResults, playerResults] = await Promise.all([
-      Promise.resolve(matchTeams(q, 8)),
-      searchPlayers(q, 8).catch(() => [] as PlayerResult[]),
-    ])
-    // Player search failing must not take down team results.
+    // Player search failing or timing out must not take down team results.
     return NextResponse.json(
       { teams: teamResults, players: playerResults },
       { headers: { 'Cache-Control': 'public, s-maxage=60, stale-while-revalidate=300' } },
