@@ -51,6 +51,12 @@ function statLabel(key: string, fallback: string): string {
   return playerStatLabels[key] ?? fallback ?? key
 }
 
+/** Goalie-flavored categories — never the default for skaters. */
+function isGoalieCategory(name: string): boolean {
+  const n = name.toLowerCase().replace(/\s/g, '')
+  return n === 'goaltending' || n === 'goalie'
+}
+
 /** Most relevant category for the key-stats strip (passing for QBs, ...). */
 function keyCategory(season: StatCategory[] | null, position: string | null): StatCategory | null {  if (!season || season.length === 0) return null
   const pos = (position ?? '').toUpperCase()
@@ -60,6 +66,15 @@ function keyCategory(season: StatCategory[] | null, position: string | null): St
   if (['WR', 'TE'].includes(pos)) return byName('receiving') ?? season[0]
   if (['P', 'SP', 'RP', 'CP'].includes(pos)) return byName('pitching') ?? season[0]
   if (pos === 'G') return byName('goaltending') ?? byName('goalie') ?? season[0]
+  // NHL skaters: default to offensive output, never goalie stats (ESPN can
+  // list a goalie-flavored "defensive" category first for centers).
+  if (['C', 'LW', 'RW', 'D'].includes(pos)) {
+    return (
+      byName('offensive') ??
+      season.find((c) => c.name.toLowerCase() !== 'general' && !isGoalieCategory(c.name)) ??
+      season[0]
+    )
+  }
   return season.find((c) => c.name.toLowerCase() !== 'general') ?? season[0]
 }
 
@@ -70,6 +85,11 @@ const CATEGORY_RELEVANCE: Record<string, string[]> = {
   FB: ['rushing', 'receiving', 'general'],
   WR: ['receiving', 'rushing', 'general'],
   TE: ['receiving', 'general'],
+  C: ['offensive', 'general', 'defensive'],
+  LW: ['offensive', 'general', 'defensive'],
+  RW: ['offensive', 'general', 'defensive'],
+  D: ['offensive', 'defensive', 'general'],
+  G: ['goaltending', 'goalie', 'general'],
 }
 
 function relevanceRank(position: string | null, name: string): number {

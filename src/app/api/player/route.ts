@@ -51,7 +51,7 @@ function isZeroValue(v: string): boolean {
   return parseFloat(t) === 0
 }
 
-/** Primary stat category per position (NFL); other sports use API order. */
+/** Primary stat category per position (NFL + NHL); other sports use API order. */
 const PRIMARY_CATEGORY: Record<string, string[]> = {
   QB: ['passing'],
   RB: ['rushing', 'receiving'],
@@ -66,6 +66,13 @@ const PRIMARY_CATEGORY: Record<string, string[]> = {
   LB: ['defense', 'defensiveinterceptions'],
   CB: ['defensiveinterceptions', 'defense'],
   S: ['defensiveinterceptions', 'defense'],
+  // NHL skaters default to offensive output (never goalie stats); goalies
+  // keep goaltending first.
+  C: ['offensive'],
+  LW: ['offensive'],
+  RW: ['offensive'],
+  D: ['offensive', 'defensive'],
+  G: ['goaltending', 'goalie', 'defensive'],
 }
 
 /**
