@@ -1349,10 +1349,10 @@ function LastFiveTiles({ games, selectedId, onSelect, teamColor, standing, loadi
                 {game.result}
               </span>
               {game.opponentLogo && (
-                <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain shrink-0" />
+                <img src={game.opponentLogo} alt="" className="w-6 h-6 object-contain shrink-0" onError={(e) => { e.currentTarget.style.display = 'none' }} />
               )}
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-fs-text/85 truncate">
+                <p className="text-xs font-medium text-fs-text/85 truncate" title={game.opponent}>
                   <span className="sm:hidden">{game.opponentAbbr || game.opponent}</span>
                   <span className="hidden sm:inline">{game.opponent}</span>
                 </p>
