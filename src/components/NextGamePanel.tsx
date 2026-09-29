@@ -96,6 +96,12 @@ interface ModelProjection {
   last_updated?: string | null
   reliability?: number
   pred_sd?: number | null
+  /** Frozen book line locked in the pre-game ledger snapshot (present on hydrated rows). */
+  line?: number | null
+  book?: string | null
+  over?: number | null
+  under?: number | null
+  books?: number
 }
 
 const INJURY_LABEL: Record<string, string> = {
@@ -111,6 +117,20 @@ function slotLabel(pos: string): string {
 }
 
 const POS_ORDER = ['QB', 'RB', 'WR', 'TE']
+
+/**
+ * Team-code equality across ESPN and fantasy/local variants. ESPN scores games
+ * as WSH while Sleeper/fantasy (and /api/props projections) key Washington as
+ * WAS — a strict `===` drops one side of the matchup from the panel.
+ */
+function sameTeamCode(a: string | null | undefined, b: string | null | undefined): boolean {
+  const norm = (s: string | null | undefined): string => {
+    const up = (s ?? '').toUpperCase()
+    if (up === 'WSH') return 'WAS'
+    return up
+  }
+  return !!a && !!b && norm(a) === norm(b)
+}
 
 export default function NextGamePanel({
   sport,
@@ -205,9 +225,12 @@ export default function NextGamePanel({
   }, [sport, teamAbbr, opponentAbbr, eventId, eventDate, isPreseason, total, spread])
 
   // Fantasy updates for both teams' star players (starters at each position).
+  // Starters load in every phase: pre-game they drive the model run, and in
+  // final they drive position labels + the effective-lineup filter. (A final
+  // without starters used to blank the whole Model-vs-Final table even when a
+  // pre-game snapshot was saved, because the empty lineup filtered every row.)
   useEffect(() => {
-    // Lineups only matter before the game; live/final work off the snapshot.
-    if (!isNfl || phase === 'final') return
+    if (!isNfl) return
     let cancelled = false
 
     async function load(abbr: string | undefined, setter: (s: Starter[] | null) => void) {
@@ -229,8 +252,8 @@ export default function NextGamePanel({
     return () => { cancelled = true }
   }, [sport, phase, teamFantasyAbbr, opponentFantasyAbbr])
 
-  const ourProjected = props?.projections?.filter((p) => p.team === teamAbbr) ?? []
-  const oppProjected = props?.projections?.filter((p) => p.team === opponentAbbr) ?? []
+  const ourProjected = props?.projections?.filter((p) => sameTeamCode(p.team, teamAbbr)) ?? []
+  const oppProjected = props?.projections?.filter((p) => sameTeamCode(p.team, opponentAbbr)) ?? []
 
   // ---- Prop Model (Python pipeline) ----
   const [modelResults, setModelResults] = useState<ModelProjection[] | null>(null)
@@ -239,6 +262,10 @@ export default function NextGamePanel({
   const [modelRunDate, setModelRunDate] = useState<string | null>(null)
   const [prevModelDataThrough, setPrevModelDataThrough] = useState<string | null>(null)
   const [showScraper, setShowScraper] = useState(false)
+  // Manual line overrides, keyed `${player}|${stat}` (raw input text so partial
+  // typing works). The Line column is editable; the DraftKings/scraped line is
+  // the default and clearing the input restores it.
+  const [manualLines, setManualLines] = useState<Record<string, string>>({})
 
   // ---- Injury awareness ----
   const [rosterInjuries, setRosterInjuries] = useState<{ name: string; status: string; date: string | null }[] | null>(null)
@@ -711,7 +738,14 @@ export default function NextGamePanel({
   // alternates ("25+ Rushing Yards"), milestones ("2+ Passing Touchdowns"),
   // combo markets ("Pass + Rush Yds") and odds-only markets ("Anytime TD
   // Scorer", "First Touchdown Scorer") carry no O/U odds and are excluded.
-  // Prefers the Consensus line, else the median across books.
+  //
+  // Aggregator feeds (Consensus, DK NJ, …) mix the full-game line with
+  // derivatives (1st-half, alternates) under the same market label, so several
+  // distinct O/U numbers can qualify for one player+stat. Resolve by clustering
+  // on line value: the cluster backed by the most distinct books is the real
+  // full-game line. Within it the DraftKings entry wins, else the median.
+  const DK_RE = /draftkings|(^|\s)dk(\s|$)/i
+  const displayBook = (book: string): string => (DK_RE.test(book) ? 'DraftKings' : book)
   const scrapedLineFor = (name: string, stat: string): { line: number; book: string; over: number | null; under: number | null; books: number } | null => {
     const norm = (n: string) => n.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
     const want = norm(name)
@@ -731,7 +765,7 @@ export default function NextGamePanel({
       return [stat]
     })()
     if (!wantStats.length) return oddsApiLineFor(name, stat)
-    for (const b of Object.values(results) as any[]) {
+    for (const [bookKey, b] of Object.entries(results) as [string, any][]) {
       const list = (b as any)?.props
       if (!Array.isArray(list)) continue
       for (const p of list) {
@@ -759,16 +793,47 @@ export default function NextGamePanel({
           // "tagovailoa" which matches "tua tagovailoa".
           || (wantToks.length === 1 && want.length > 3 && scrapedName.includes(want.slice(1)))
         if (nameMatch) {
-          all.push({ line: p.line, book: p.sportsbook ?? '', over: p.over ?? null, under: p.under ?? null })
+          // Keep the sportsbook's own tag, falling back to the payload's book
+          // key (e.g. "draftkings") so the DK default can be identified.
+          all.push({ line: p.line, book: p.sportsbook ?? bookKey ?? '', over: p.over ?? null, under: p.under ?? null })
         }
       }
     }
     if (!all.length) return oddsApiLineFor(name, stat)
-    // All entries are real O/U lines now — prefer Consensus, else the median.
-    const cons = all.filter((p) => p.book.toLowerCase().includes('consensus'))
-    const pickable = all
-    const pick = cons.length ? cons[0] : [...pickable].sort((a, b) => a.line - b.line)[Math.floor(pickable.length / 2)]
-    return { ...pick, books: new Set(pickable.map((p) => p.book)).size }
+    if (all.length === 1) {
+      const only = all[0]
+      return { line: only.line, book: displayBook(only.book), over: only.over, under: only.under, books: 1 }
+    }
+    // Cluster candidate lines: sort, then cut a new cluster wherever the gap
+    // exceeds the tolerance (relative to the median, floored so small-unit
+    // stats like receptions still split genuinely different lines).
+    const sorted = [...all].sort((a, b) => a.line - b.line)
+    const median = sorted[Math.floor(sorted.length / 2)].line
+    const tol = Math.max(0.75, Math.abs(median) * 0.05)
+    const clusters: (typeof all)[] = []
+    for (const c of sorted) {
+      const last = clusters[clusters.length - 1]
+      if (last && c.line - last[last.length - 1].line <= tol) last.push(c)
+      else clusters.push([c])
+    }
+    const booksOf = (cl: typeof all): Set<string> =>
+      new Set(cl.map((c) => c.book.toLowerCase()))
+    const hasDk = (cl: typeof all): boolean => cl.some((c) => DK_RE.test(c.book))
+    clusters.sort((a, b) =>
+      booksOf(b).size - booksOf(a).size
+      || Number(hasDk(b)) - Number(hasDk(a))
+      || b.length - a.length,
+    )
+    const winner = clusters[0]
+    const dkEntry = winner.find((c) => DK_RE.test(c.book))
+    const chosen = dkEntry ?? [...winner].sort((a, b) => a.line - b.line)[Math.floor(winner.length / 2)]
+    return {
+      line: chosen.line,
+      book: displayBook(chosen.book),
+      over: chosen.over,
+      under: chosen.under,
+      books: booksOf(winner).size,
+    }
   }
 
   // Sort model rows QB → RB → WR → TE (same order as the player-lines tables),
@@ -782,7 +847,13 @@ export default function NextGamePanel({
   }
   const sortedModel = [...(modelResults ?? [])].filter((r) => {
     // Only show model results for the effective lineup (Out starters are
-    // replaced by their contender before the run).
+    // replaced by their contender before the run). In final phase the saved
+    // snapshot is the frozen truth — the live outlook may have shifted since
+    // (trades, depth-chart churn), so it must not filter snapshot rows out.
+    // And if the outlook failed to load at all, an empty set must not blank
+    // a valid model result.
+    if (phase === 'final') return true
+    if (effectiveNames.size === 0) return true
     return effectiveNames.has(r.player)
   }).sort((a, b) => posFor(a.player) - posFor(b.player) || a.player.localeCompare(b.player))
 
@@ -849,9 +920,33 @@ export default function NextGamePanel({
     conf === 'high' ? 'text-fs-turf bg-fs-turf/15' : conf === 'medium' ? 'text-fs-gold bg-fs-gold/15' : 'text-fs-red bg-fs-red/15'
 
   // Pick for every modeled row with a real book line (shared by the table,
-  // the "best edges" strip and the final scorecard).
+  // the "best edges" strip and the final scorecard). A manual line override
+  // wins over the scraped default when the user typed one.
+  const manualLineKey = (name: string, stat: string): string => `${name}|${stat}`
+  const manualLineFor = (name: string, stat: string): number | null => {
+    const raw = manualLines[manualLineKey(name, stat)]
+    if (raw == null || raw.trim() === '') return null
+    const v = Number(raw)
+    return Number.isFinite(v) && v > 0 ? v : null
+  }
+  const effectiveLineFor = (r: ModelProjection): { line: number; book: string; over: number | null; under: number | null; books: number; manual: boolean } | null => {
+    const manual = manualLineFor(r.player, r.stat)
+    if (manual != null) return { line: manual, book: 'manual', over: null, under: null, books: 0, manual: true }
+    const def = defaultLineFor(r)
+    return def ? { ...def, manual: false } : null
+  }
+  // Default (non-manual) line for a row: the frozen snapshot line when the row
+  // carries one, else the current scraped board — except after the final, when
+  // the current slate belongs to other games and must not impersonate this one.
+  const defaultLineFor = (r: ModelProjection): { line: number; book: string; over: number | null; under: number | null; books: number } | null => {
+    if (r.line != null && r.line > 0) {
+      return { line: r.line, book: r.book ?? 'snapshot', over: r.over ?? null, under: r.under ?? null, books: r.books ?? 0 }
+    }
+    if (phase === 'final') return null
+    return scrapedLineFor(r.player, r.stat)
+  }
   const pickFor = (r: ModelProjection) => {
-    const book = scrapedLineFor(r.player, r.stat)
+    const book = effectiveLineFor(r)
     if (!book || r.projection == null || r.pred_sd == null) return null
     const edge = computeOverUnderEdge(r.projection, r.pred_sd, book.line)
     return edge ? { book, edge } : null
@@ -860,7 +955,7 @@ export default function NextGamePanel({
   const bestEdges = groupedModel
     .flatMap((g) => g.rows)
     .map((r) => ({ r, p: pickFor(r) }))
-    .filter((x): x is { r: ModelProjection; p: NonNullable<ReturnType<typeof pickFor>> } => !!x.p && x.p.edge.pick !== 'fair')
+    .filter((x): x is { r: ModelProjection; p: NonNullable<ReturnType<typeof pickFor>> } => !!x.p)
     .sort((a, b) => pickConfidencePct(b.p.edge) - pickConfidencePct(a.p.edge))
     .slice(0, 3)
 
@@ -877,7 +972,7 @@ export default function NextGamePanel({
         if (actual == null || r.projection == null) continue
         errors.push(Math.abs(actual - r.projection))
         const p = pickFor(r)
-        if (!p || p.edge.pick === 'fair') continue
+        if (!p) continue
         if (actual === p.book.line) { pushes++; continue }
         picks++
         if ((p.edge.pick === 'over') === (actual > p.book.line)) hits++
@@ -1055,7 +1150,7 @@ export default function NextGamePanel({
           
           <p className="text-xs text-fs-muted-2 mb-2">
             {phase === 'pre'
-              ? 'Our projection per player (recent form × opponent defense × Vegas game script) against the sportsbook line.'
+              ? 'Our projection per player (recent form × opponent defense × Vegas game script) against the sportsbook line. Lines default to DraftKings — type any line to override.'
               : phase === 'live'
                 ? 'Pre-game projections, locked before kickoff, against the live box score.'
                 : 'Pre-game projections, locked before kickoff, graded against the final box score.'}
@@ -1120,7 +1215,7 @@ export default function NextGamePanel({
                     <th className="text-left px-2.5 py-1.5 font-medium">Player</th>
                     <th className="text-left px-2 py-1.5 font-medium">Stat</th>
                     <th className="text-right px-2 py-1.5 font-medium" title="Projection, with the likely range (25th–75th percentile) underneath">Proj</th>
-                    <th className="text-right px-2 py-1.5 font-medium">Line</th>
+                    <th className="text-right px-2 py-1.5 font-medium" title="Editable — defaults to the DraftKings line; type any line to override">Line</th>
                     <th className="text-right px-2 py-1.5 font-medium">Pick</th>
                     {showLive ? (
                       <th className="text-right px-2 py-1.5 font-medium">{gameFinal ? 'Final' : 'Live'}</th>
@@ -1131,7 +1226,7 @@ export default function NextGamePanel({
                 <tbody>
                   {groupedModel.map((group) =>
                     group.rows.map((r, idx) => {
-                      const scraped = scrapedLineFor(r.player, r.stat)
+                      const def = defaultLineFor(r)
                       const isFirst = idx === 0
                       const pick = pickFor(r)
                       return (
@@ -1202,15 +1297,37 @@ export default function NextGamePanel({
                             ) : null)}
                           </td>
                           <td className="px-2 py-1.5 text-right font-mono tabular-nums text-fs-muted" title={
-                            scraped
-                              ? `${scraped.book} · over ${scraped.over ?? '—'} / under ${scraped.under ?? '—'} · ${scraped.books} book${scraped.books === 1 ? '' : 's'}`
-                              : (!scraperData
-                                ? 'Scrape pending…'
-                                : (r.stat === 'tds' && (props?.projections?.find((x) => x.name === r.player)?.position ?? '') !== 'QB'
-                                  ? 'No O/U total-TD line is posted for non-QBs — books only price anytime/first/last TD as odds.'
-                                  : 'No scraped line for this market — the books have no O/U posted for this player/stat.'))
+                            manualLineFor(r.player, r.stat) != null
+                              ? `Manual line — clear the field to restore the ${def?.book ?? 'book'} default (${def?.line ?? '—'})`
+                              : def
+                                ? `${def.book} · over ${def.over ?? '—'} / under ${def.under ?? '—'}${def.books ? ` · ${def.books} book${def.books === 1 ? '' : 's'}` : ''} · type a number to override`
+                                : (phase === 'final'
+                                  ? 'No pre-game line was locked for this market — type a line to grade one.'
+                                  : (!scraperData
+                                    ? 'Scrape pending…'
+                                    : (r.stat === 'tds' && (props?.projections?.find((x) => x.name === r.player)?.position ?? '') !== 'QB'
+                                      ? 'No O/U total-TD line is posted for non-QBs — books only price anytime/first/last TD as odds. Type a line to grade one anyway.'
+                                      : 'No scraped line for this market — the books have no O/U posted for this player/stat. Type a line to grade one anyway.')))
                           }>
-                            {scraped != null ? scraped.line : '—'}
+                            <input
+                              type="number"
+                              step="0.5"
+                              min="0"
+                              aria-label={`${r.player} ${r.stat_label} line`}
+                              value={manualLines[manualLineKey(r.player, r.stat)] ?? ''}
+                              placeholder={def != null ? String(def.line) : '—'}
+                              onChange={(e) => {
+                                const v = e.target.value
+                                const k = manualLineKey(r.player, r.stat)
+                                setManualLines((prev) => {
+                                  const next = { ...prev }
+                                  if (v.trim() === '') delete next[k]
+                                  else next[k] = v
+                                  return next
+                                })
+                              }}
+                              className="w-20 bg-transparent text-right font-mono tabular-nums px-1 py-0.5 rounded border border-transparent hover:border-fs-line focus:border-fs-gold focus:outline-none placeholder:text-fs-muted"
+                            />
                           </td>
                           <td className="px-2 py-1.5 text-right font-mono tabular-nums">
                             {pick ? (() => {
@@ -1235,7 +1352,7 @@ export default function NextGamePanel({
                                 if (lv == null) return <span className="text-fs-muted-2">—</span>
                                 if (gameFinal) {
                                   // Post-game: final actual, and whether the pick cashed.
-                                  const graded = pick && pick.edge.pick !== 'fair'
+                                  const graded = pick
                                     ? (lv === pick.book.line ? 'PUSH' : (pick.edge.pick === 'over') === (lv > pick.book.line) ? 'HIT' : 'MISS')
                                     : null
                                   return (

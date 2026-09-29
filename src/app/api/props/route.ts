@@ -112,6 +112,24 @@ function teamAbbrVariants(sport: string): Map<string, Set<string>> {
   return m
 }
 
+/**
+ * Canonical (local/fantasy) abbreviation for a team code. The game pages pass
+ * ESPN abbreviations through (e.g. WSH for Washington) while the Sleeper-fed
+ * unified DB keys players by the local code (WAS) — without this the
+ * keyless projections silently drop one side of the matchup (SEA@WSH returned
+ * only SEA players). Falls back to the uppercased input for unknown codes.
+ */
+function canonicalTeamAbbr(sport: string, abbr: string): string {
+  const up = (abbr ?? '').toUpperCase()
+  for (const t of teams) {
+    if (t.sport !== sport.toUpperCase()) continue
+    if (t.abbreviation.toUpperCase() === up || getEspnAbbr(t.id, t.abbreviation) === up) {
+      return t.abbreviation.toUpperCase()
+    }
+  }
+  return up
+}
+
 interface OddsBookmaker {
   key: string
   title: string
@@ -196,8 +214,8 @@ interface ProjectedLine {
 function projectedLinesFor(player: UnifiedPlayer, teamAbbr: string, multiplier: number): ProjectedLine | null {
   const stats = player.projection?.stats ?? {}
   const pos = player.canonical.position
-  const team = (player.proTeamAbbr ?? player.canonical.team ?? '').toUpperCase()
-  if (team !== teamAbbr) return null
+  const team = canonicalTeamAbbr('NFL', (player.proTeamAbbr ?? player.canonical.team ?? ''))
+  if (team !== canonicalTeamAbbr('NFL', teamAbbr)) return null
 
   const perGame = (season: number | undefined): number =>
     season && season > 0 ? Math.round((season / PROJ_GAMES) * multiplier * 10) / 10 : 0
@@ -251,15 +269,17 @@ async function buildProjectedLines(
 ): Promise<ProjectedLine[]> {
   try {
     const { players } = await buildUnifiedDatabase({})
-    const want = new Set([teamAbbr.toUpperCase(), opponentAbbr.toUpperCase()])
+    const ourCode = canonicalTeamAbbr('NFL', teamAbbr)
+    const oppCode = canonicalTeamAbbr('NFL', opponentAbbr)
+    const want = new Set([ourCode, oppCode])
     const baseMult = preseason ? PRESEASON_FACTOR : 1
     const out: ProjectedLine[] = []
     for (const p of players) {
-      const team = (p.proTeamAbbr ?? p.canonical.team ?? '').toUpperCase()
+      const team = canonicalTeamAbbr('NFL', (p.proTeamAbbr ?? p.canonical.team ?? ''))
       if (!want.has(team)) continue
       // Playing-time (preseason) and matchup (Vegas implied team total vs league avg)
       // adjustments stack multiplicatively.
-      const teamMult = team === teamAbbr.toUpperCase() ? ourMult : oppMult
+      const teamMult = team === ourCode ? ourMult : oppMult
       const line = projectedLinesFor(p, team, baseMult * teamMult)
       if (line && line.lines.length > 0) out.push(line)
     }
@@ -321,6 +341,7 @@ async function buildNonNflProjections(
   oppMult: number,
   eventId: string | null,
   date: string | null,
+  preseason: boolean,
 ): Promise<{ projections: SeasonProjection[]; teamByName: Map<string, string> }> {
   const teamByName = new Map<string, string>()
   try {
@@ -336,8 +357,8 @@ async function buildNonNflProjections(
       }
     }
     const projections = [
-      ...buildSeasonProjections(sport, ours, team, ourMult, { probablePitcherIds: probables }),
-      ...buildSeasonProjections(sport, theirs, opponent, oppMult, { probablePitcherIds: probables }),
+      ...buildSeasonProjections(sport, ours, team, ourMult, { probablePitcherIds: probables, preseason }),
+      ...buildSeasonProjections(sport, theirs, opponent, oppMult, { probablePitcherIds: probables, preseason }),
     ]
     return { projections, teamByName }
   } catch (e) {
@@ -402,7 +423,7 @@ export async function GET(request: Request) {
   const getKeyless = () => {
     keyless ??= sport === 'NFL'
       ? buildProjectedLines(team, opponent, preseason, ourMult, oppMult).then((projections) => ({ projections, teamByName: null }))
-      : buildNonNflProjections(sport as ProjectionSport, team, opponent, ourMult, oppMult, eventId, date)
+      : buildNonNflProjections(sport as ProjectionSport, team, opponent, ourMult, oppMult, eventId, date, preseason)
     return keyless
   }
   const projectionSource = sport === 'NFL' ? 'espn-fantasy' : 'espn-season-avg'

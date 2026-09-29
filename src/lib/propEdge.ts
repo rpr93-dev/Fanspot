@@ -13,7 +13,7 @@ export function normalCdf(x: number): number {
   return x < 0 ? 1.0 - cdf : cdf
 }
 
-export type EdgePick = 'over' | 'under' | 'fair'
+export type EdgePick = 'over' | 'under'
 
 export interface OverUnderEdge {
   pick: EdgePick
@@ -28,26 +28,27 @@ export interface OverUnderEdge {
 export function computeOverUnderEdge(projection: number | null, sd: number | null, lineArg: unknown): OverUnderEdge | null {
   const line = typeof lineArg === 'number' ? lineArg : NaN
   if (isNaN(line) || line <= 0) return null
-  if (projection == null || sd == null || sd <= 0) return { pick: 'fair', prob: 0.5, edge: 0, strong: false }
+  // Every pick is Over or Under — there is no "fair". A missing projection
+  // sits exactly on the line (P(over) = 0.5), which breaks toward OVER.
+  if (projection == null || sd == null || sd <= 0) return { pick: 'over', prob: 0.5, edge: 0, strong: false }
   const s = Math.max(sd, 0.01)
   const edge = projection - line
   const overProb = 1.0 - normalCdf((line - projection) / s)
   const absZ = Math.abs(edge / s)
-  const pick: EdgePick = absZ < 0.3 ? 'fair' : edge > 0 ? 'over' : 'under'
+  const pick: EdgePick = edge >= 0 ? 'over' : 'under'
   const strong = absZ >= 0.5 && ((pick === 'over' && overProb >= 0.65) || (pick === 'under' && overProb <= 0.35))
   return { pick, prob: overProb, edge, strong }
 }
 
-/** Confidence shown on the badge: the picked side's probability (majority side for fair). */
+/** Confidence shown on the badge: the picked side's probability. */
 export function pickConfidencePct(e: OverUnderEdge): number {
-  const p = e.pick === 'fair' ? Math.max(e.prob, 1 - e.prob) : e.pick === 'over' ? e.prob : 1 - e.prob
+  const p = e.pick === 'over' ? e.prob : 1 - e.prob
   return Math.round(p * 100)
 }
 
 export const EDGE_STYLES: Record<EdgePick, { label: string; bg: string; fg: string; strongBg: string; strongFg: string }> = {
   over: { label: 'OVER', bg: 'bg-fs-turf/15', fg: 'text-fs-turf', strongBg: 'bg-fs-turf', strongFg: 'text-fs-bg' },
   under: { label: 'UNDER', bg: 'bg-fs-red/15', fg: 'text-fs-red', strongBg: 'bg-fs-red', strongFg: 'text-fs-bg' },
-  fair: { label: 'FAIR', bg: 'bg-fs-muted-2/10', fg: 'text-fs-muted-2', strongBg: 'bg-fs-muted-2/10', strongFg: 'text-fs-muted-2' },
 }
 
 export function formatPrice(p: number | null | undefined): string {

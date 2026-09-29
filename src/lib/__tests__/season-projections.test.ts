@@ -64,6 +64,20 @@ describe('buildSeasonProjections', () => {
     const slugger = withProbable.find((p) => p.name === 'Slugger')!
     expect(slugger.lines.find((l) => l.stat === 'home_runs')?.value).toBe(0.27)
   })
+
+  it('scales preseason / Spring Training lines by per-sport usage', () => {
+    const nba = buildSeasonProjections('NBA', [athlete('1', 'Star', 'SF', { gamesPlayed: '60', avgMinutes: '36', avgPoints: '28.4' })], 'BOS', 1, { preseason: true })
+    expect(nba[0].lines.find((l) => l.stat === 'points')?.value).toBe(14.2) // 28.4 × 0.5
+
+    const nhl = buildSeasonProjections('NHL', [athlete('1', 'Winger', 'LW', { games: '80', points: '80' })], 'EDM', 1, { preseason: true })
+    expect(nhl[0].lines.find((l) => l.stat === 'points')?.value).toBe(0.55) // 1.0 × 0.55
+
+    const mlb = buildSeasonProjections('MLB', [athlete('10', 'Slugger', 'RF', { gamesPlayed: '150', plateAppearances: '640', homeRuns: '40' })], 'NYY', 1, { preseason: true })
+    expect(mlb[0].lines.find((l) => l.stat === 'home_runs')?.value).toBe(0.16) // 0.27 × 0.6
+
+    const regular = buildSeasonProjections('NBA', [athlete('1', 'Star', 'SF', { gamesPlayed: '60', avgMinutes: '36', avgPoints: '28.4' })], 'BOS', 1)
+    expect(regular[0].lines.find((l) => l.stat === 'points')?.value).toBe(28.4)
+  })
 })
 
 describe('groupByPlayer (The Odds API player props)', () => {

@@ -12,6 +12,7 @@ import AiNalyst from '@/components/AiNalyst'
 import FantasyWidget from '@/components/FantasyWidget'
 import type { EspnEvent } from '@/lib/sports-api'
 import type { SportKey } from '@/lib/models'
+import { eventSeasonType, isPreseasonEvent, seasonTypeLabel } from '@/lib/season-types'
 import { sportPositionOrder, rosterStatColumns } from '@/lib/roster-stats'
 import { GameStatsSection } from '@/components/box-score/GameStatsSection'
 import { LinescoreTable, PlayerBoxScore } from '@/components/game/PlayerBoxScore'
@@ -579,7 +580,8 @@ function TeamDashboard({ sport, teamId }: { sport: string; teamId: string }) {
                     const disp = (s: any): string => (s == null ? '' : (typeof s === 'object' ? (s.displayValue ?? '') : String(s)))
                     const ourScore = disp(teamComp?.score)
                     const oppScore = disp(oppComp?.score)
-                    const weekText = e.week?.text ?? (e.seasonType?.type === 1 ? 'Preseason' : e.seasonType?.type === 2 ? 'Regular Season' : e.seasonType?.type === 3 ? 'Postseason' : '')
+                    const weekType = eventSeasonType(e)
+                    const weekText = e.week?.text ?? (weekType === 2 ? 'Regular Season' : seasonTypeLabel(team.sport, weekType) ?? '')
                     return (
                       <>
                         <div className="flex items-center gap-3 mb-2">
@@ -1199,13 +1201,8 @@ function BoxScorePanel({ data, loading, teamAbbr, teamColor, sport, isLive, even
   )
 }
 
-function getSeasonTypeName(e: EspnEvent): string | undefined {
-  const t = e.seasonType?.type ?? e.season?.type
-  if (!t) return undefined
-  if (t === 1) return 'Preseason'
-  if (t === 3) return 'Playoffs'
-  if (t === 4) return 'Summer League'
-  return e.seasonType?.name ?? undefined
+function getSeasonTypeName(e: EspnEvent, sport: string): string | undefined {
+  return seasonTypeLabel(sport, eventSeasonType(e)) ?? e.seasonType?.name
 }
 
 function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFive: EspnEvent[]; spotlightEventId?: string | null }, espnAbbr: string, sport: string) {
@@ -1220,8 +1217,8 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
       result: getResult(e, espnAbbr),
       score: getScore(e, espnAbbr),
       eventId: e.id,
-      isPreseason: e.seasonType?.type === 1 || e.season?.type === 1,
-      seasonTypeName: getSeasonTypeName(e),
+      isPreseason: isPreseasonEvent(e),
+      seasonTypeName: getSeasonTypeName(e, sport),
     }
   })
 
@@ -1262,7 +1259,7 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
       opponentLogo: opp.logo,
       location: opp.location,
       venue,
-      isPreseason: schedule.upcoming.seasonType?.type === 1 || schedule.upcoming.season?.type === 1,
+      isPreseason: isPreseasonEvent(schedule.upcoming),
       isLive,
       eventId: schedule.upcoming.id,
       eventDate: upcomingDateIso ? upcomingDateIso.slice(0, 10).replace(/-/g, '') : undefined,
@@ -1272,7 +1269,7 @@ function processScheduleForState(schedule: { upcoming: EspnEvent | null; lastFiv
       homeAbbr,
       awayAbbr,
       statusDetail: isLive ? (status?.detail ?? status?.shortDetail ?? 'In progress') : undefined,
-      seasonTypeName: getSeasonTypeName(schedule.upcoming),
+      seasonTypeName: getSeasonTypeName(schedule.upcoming, sport),
     }
     upcomingEventId = schedule.upcoming.id
     upcomingDate = schedule.upcoming.date.slice(0, 10).replace(/-/g, '')

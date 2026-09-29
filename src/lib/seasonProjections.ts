@@ -6,7 +6,8 @@ import { MLB_PITCHER_POSITIONS } from '@/lib/roster-stats'
  * season stats — the same method as the NFL fallback in /api/props (season
  * per-game rate × Vegas implied-team-total matchup multiplier), so every sport
  * gets a comparable "projection vs book line" table. NFL additionally runs the
- * Python prop model; these lines are the cross-sport baseline.
+ * Python prop model; these lines are the cross-sport baseline. Preseason /
+ * Spring Training games are scaled by per-sport usage (PRESEASON_USAGE).
  *
  * `sd` is a heuristic spread for the edge badge: sqrt(mean × φ), where φ is an
  * over-dispersion factor per stat (counts are roughly Poisson; NBA points
@@ -50,6 +51,17 @@ export const MATCHUP_CLAMP: Record<'NFL' | ProjectionSport, [number, number]> = 
   NBA: [0.85, 1.15],
   NHL: [0.8, 1.2],
   MLB: [0.8, 1.2],
+}
+
+/**
+ * Preseason usage heuristic: starters play a fraction of their normal
+ * minutes / ice time / innings (MLB = Spring Training, ~5.5 of 9 innings).
+ * Applied on top of the matchup multiplier for preseason games.
+ */
+export const PRESEASON_USAGE: Record<ProjectionSport, number> = {
+  NBA: 0.5,
+  NHL: 0.55,
+  MLB: 0.6,
 }
 
 export function matchupMultiplier(sport: 'NFL' | ProjectionSport, impliedTeamTotal: number): number {
@@ -140,20 +152,20 @@ function injuryStatus(athlete: any): { out: boolean; status: string | null } {
   return { out: isRosterOut(status), status }
 }
 
-function buildLines(specs: StatSpec[], stats: Record<string, string> | null, multiplier: number): SeasonProjectionLine[] {
+function buildLines(specs: StatSpec[], stats: Record<string, string> | null, multiplier: number, usage: number): SeasonProjectionLine[] {
   const r = reader(stats)
   const out: SeasonProjectionLine[] = []
   for (const spec of specs) {
     const base = spec.perGame(r)
     if (base == null || base <= 0) continue
-    const value = base * (spec.offensive ? multiplier : 1)
+    const value = base * (spec.offensive ? multiplier : 1) * usage
     out.push({ stat: spec.stat, label: spec.label, value: round(value), sd: Math.round(Math.sqrt(value * spec.phi) * 100) / 100 })
   }
   return out
 }
 
-function project(athlete: any, team: string, specs: StatSpec[], multiplier: number, note: string | null = null): SeasonProjection | null {
-  const lines = buildLines(specs, athlete.seasonStats, multiplier)
+function project(athlete: any, team: string, specs: StatSpec[], multiplier: number, usage: number, note: string | null = null): SeasonProjection | null {
+  const lines = buildLines(specs, athlete.seasonStats, multiplier, usage)
   if (!lines.length) return null
   return {
     name: athlete.displayName ?? athlete.fullName ?? '',
@@ -175,9 +187,10 @@ export function buildSeasonProjections(
   athletes: any[],
   team: string,
   multiplier: number,
-  opts: { probablePitcherIds?: string[] } = {},
+  opts: { probablePitcherIds?: string[]; preseason?: boolean } = {},
 ): SeasonProjection[] {
   const sel = SELECTION[sport]
+  const usage = opts.preseason ? PRESEASON_USAGE[sport] : 1
   const available = athletes.filter((a) => a?.seasonStats && !injuryStatus(a).out)
   const qualifies = (a: any) => (reader(a.seasonStats).num(sel.minGames) ?? 0) >= sel.minGamesValue
   const rank = (a: any) => reader(a.seasonStats).num(sel.rankKey) ?? 0
@@ -192,7 +205,7 @@ export function buildSeasonProjections(
 
   const specs = sport === 'NBA' ? NBA_STATS : sport === 'NHL' ? NHL_SKATER_STATS : MLB_HITTER_STATS
   const out = regulars
-    .map((a) => project(a, team, specs, multiplier))
+    .map((a) => project(a, team, specs, multiplier, usage))
     .filter((p): p is SeasonProjection => p != null)
 
   if (sport === 'NHL') {
@@ -200,7 +213,7 @@ export function buildSeasonProjections(
     const goalie = available
       .filter((a) => pos(a) === 'G')
       .sort((a, b) => (reader(b.seasonStats).num('gameStarted') ?? 0) - (reader(a.seasonStats).num('gameStarted') ?? 0))[0]
-    const g = goalie ? project(goalie, team, NHL_GOALIE_STATS, 1, 'Most starts — starter not confirmed') : null
+    const g = goalie ? project(goalie, team, NHL_GOALIE_STATS, 1, usage, 'Most starts — starter not confirmed') : null
     if (g) out.push(g)
   }
 
@@ -209,7 +222,7 @@ export function buildSeasonProjections(
     const ids = new Set(opts.probablePitcherIds)
     for (const a of available) {
       if (!ids.has(String(a.id))) continue
-      const p = project(a, team, MLB_PITCHER_STATS, 1, 'Probable starter')
+        const p = project(a, team, MLB_PITCHER_STATS, 1, usage, 'Probable starter')
       if (p) out.unshift(p)
     }
   }

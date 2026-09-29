@@ -66,7 +66,7 @@ class EdgeResult:
     line: float | None = None
     edge: float = 0.0
     over_prob: float = 0.5
-    pick: str = "fair"  # "over", "under", "fair"
+    pick: str = "over"  # "over" or "under" — every pick takes a side, never "fair"
     strong: bool = False  # strong pick: high edge AND high confidence
 
     def to_dict(self) -> dict:
@@ -543,7 +543,7 @@ def compute_edge(
         return EdgeResult(line=None)
 
     if projection is None or pred_sd is None:
-        return EdgeResult(line=line, edge=0.0, over_prob=0.5, pick="fair")
+        return EdgeResult(line=line, edge=0.0, over_prob=0.5, pick="over")
 
     mean = projection
     std = max(pred_sd, 0.01)  # avoid divide by zero
@@ -554,17 +554,12 @@ def compute_edge(
     # Edge = expected value beyond the line
     edge = mean - line
 
-    # Pick direction: use both probability and edge
-    # "Fair" when model is close to the line (within ~0.3 std dev)
+    # Pick direction: every pick takes a side — over when the projection sits
+    # at or above the line, else under. There is no "fair".
     z_score = (mean - line) / std
     abs_z = abs(z_score)
 
-    if abs_z < 0.3:
-        pick = "fair"
-    elif z_score > 0:
-        pick = "over"
-    else:
-        pick = "under"
+    pick = "over" if edge >= 0 else "under"
 
     # Strong: high confidence + meaningful edge (≥0.5 std dev or ≥40% probability tilt)
     strong = False
