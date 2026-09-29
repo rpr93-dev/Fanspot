@@ -3,6 +3,7 @@ import { espnSportMap } from '@/lib/providers/espn'
 import { getCached, setCachedChecked, isFresh } from '@/lib/cache/cacheService'
 import { TTL, scheduleTtlFor } from '@/lib/cache/ttl'
 import { invalidParam, isKnownEspnSport, isValidEventId } from '@/lib/api-validation'
+import { espnFetch } from '@/lib/espn-fetch'
 
 /** Translate an ESPN summary `header` (any event, any date) into the event
  *  shape the scoreboard feed returns, so client code works unchanged. */
@@ -56,8 +57,7 @@ async function fetchGame(sport: string, eventId: string): Promise<any | null> {
   // The scoreboard feed only carries the current window (last game → next
   // game). Upcoming games further out are missing there; the summary
   // endpoint has any event, so translate its header into the event shape.
-  const sbRes = await fetch(
-    `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?event=${encodeURIComponent(eventId)}`,
+  const sbRes = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?event=${encodeURIComponent(eventId)}`,
     { signal: AbortSignal.timeout(10000) },
   )
   if (sbRes.ok) {
@@ -68,8 +68,7 @@ async function fetchGame(sport: string, eventId: string): Promise<any | null> {
     throw new Error(`ESPN scoreboard error ${sbRes.status}`)
   }
 
-  const sumRes = await fetch(
-    `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventId)}`,
+  const sumRes = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventId)}`,
     { signal: AbortSignal.timeout(10000) },
   )
   if (!sumRes.ok) {

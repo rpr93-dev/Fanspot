@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { espnSportMap } from '@/lib/providers/espn'
 import { invalidParam, isKnownEspnSport, isValidEventId } from '@/lib/api-validation'
 import { extractLastPlay } from '@/lib/lastPlay'
+import { espnFetch } from '@/lib/espn-fetch'
 
 const reservedKeys = new Set(['athlete', 'stats', 'statistics', 'displayValue', 'value', 'team', 'id', 'uid', 'guid', 'type', 'slug', 'sequence'])
 
@@ -151,15 +152,13 @@ export async function GET(request: Request) {
 
   try {
     const fetchSummary = async (): Promise<any | null> => {
-      let res = await fetch(
-        `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventId)}`,
+      let res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventId)}`,
         { signal: AbortSignal.timeout(15000) }
       )
       if (!res.ok && sport.toUpperCase() === 'NBA') {
         // Fallback: Summer League games live under nba-summer path
         const slPath = 'basketball/nba-summer'
-        res = await fetch(
-          `https://site.api.espn.com/apis/site/v2/sports/${slPath}/summary?event=${encodeURIComponent(eventId)}`,
+        res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${slPath}/summary?event=${encodeURIComponent(eventId)}`,
           { signal: AbortSignal.timeout(15000) }
         )
       }

@@ -5,6 +5,7 @@ import { TTL } from '@/lib/cache/ttl'
 import { invalidParam, isAllowedSport } from '@/lib/api-validation'
 import { normalizeSportKey } from '@/lib/models'
 import { normalizeStandingsChildren, groupStandingsRows } from '@/lib/standings'
+import { espnFetch } from '@/lib/espn-fetch'
 
 /**
  * Full-league standings, normalized to Fanspot shapes (team rows clickable
@@ -29,8 +30,7 @@ export async function GET(request: Request) {
       `standings-league:${sport}`,
       TTL.STANDINGS,
       async () => {
-        const res = await fetch(
-          `https://site.web.api.espn.com/apis/v2/sports/${espnPath}/standings`,
+        const res = await espnFetch(`https://site.web.api.espn.com/apis/v2/sports/${espnPath}/standings`,
           { signal: AbortSignal.timeout(15000) },
         )
         if (!res.ok) throw new Error(`ESPN standings error ${res.status}`)

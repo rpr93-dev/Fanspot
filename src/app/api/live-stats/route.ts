@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { TTL } from '@/lib/cache/ttl'
 import { fetchOrCache } from '@/lib/cache/cacheService'
 import { liveSideStats } from '@/lib/scheduleWeek'
+import { espnFetch } from '@/lib/espn-fetch'
 
 /** Compact head-to-head team stat lines for a single game (live or final),
  *  derived from the ESPN summary boxscore with a live-cadence cache. */
@@ -18,8 +19,7 @@ export async function GET(request: Request) {
       `gamestats:${eventId}`,
       TTL.LIVE_SCORE,
       async () => {
-        const res = await fetch(
-          `https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${eventId}`,
+        const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/football/nfl/summary?event=${eventId}`,
           { signal: AbortSignal.timeout(10000) },
         )
         if (!res.ok) throw new Error(`ESPN summary error ${res.status}`)

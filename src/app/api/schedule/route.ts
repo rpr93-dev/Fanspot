@@ -3,6 +3,7 @@ import { espnSportMap } from '@/lib/providers/espn'
 import { getCached, setCached, isFresh } from '@/lib/cache/cacheService'
 import { scheduleTtlFor } from '@/lib/cache/ttl'
 import { invalidParam, isKnownEspnSport, isValidSeason, isValidDateRange, isValidTeam } from '@/lib/api-validation'
+import { espnFetch } from '@/lib/espn-fetch'
 
 /** Carries the upstream status through fetchOrCache so error responses stay uncached and exact. */
 class EspnStatusError extends Error {
@@ -67,7 +68,7 @@ export async function GET(request: Request) {
     if (peek && isFresh(peek.ts, scheduleTtlFor(peek.data?.events))) {
       return NextResponse.json(peek.data, { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=600' } })
     }
-    const res = await fetch(url, { signal: AbortSignal.timeout(15000) })
+    const res = await espnFetch(url, { signal: AbortSignal.timeout(15000) })
     if (!res.ok) {
       throw new EspnStatusError(res.status)
     }

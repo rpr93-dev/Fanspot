@@ -2,6 +2,7 @@ import { espnSportMap } from '@/lib/providers/espn'
 import { leadersSeasonYear } from '@/lib/leaders'
 import { MLB_PITCHER_POSITIONS } from '@/lib/roster-stats'
 import type { SportKey } from '@/lib/models'
+import { espnFetch } from './espn-fetch'
 
 /**
  * ESPN team roster with each athlete's current-season stats attached
@@ -61,8 +62,7 @@ function flattenSeasonStats(json: any): Record<string, string> {
 
 export async function fetchTeamRoster(sportKey: SportKey, team: string): Promise<any> {
   const espnPath = espnSportMap[sportKey]
-  const res = await fetch(
-    `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${encodeURIComponent(team.toUpperCase())}/roster`,
+  const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${encodeURIComponent(team.toUpperCase())}/roster`,
     { signal: AbortSignal.timeout(15000) },
   )
   if (!res.ok) {

@@ -4,6 +4,7 @@ import { getEspnAbbr, espnSportMap } from '@/lib/providers/espn'
 import { fetchOrCache } from '@/lib/cache/cacheService'
 import { invalidParam, isAllowedSport, isValidTeam } from '@/lib/api-validation'
 import { TTL } from '@/lib/cache/ttl'
+import { espnFetch } from '@/lib/espn-fetch'
 
 interface StandingRow {
   abbr: string
@@ -118,8 +119,7 @@ export async function GET(request: Request) {
       }
 
       try {
-        const res = await fetch(
-          `https://site.web.api.espn.com/apis/v2/sports/${espnPath}/standings`,
+        const res = await espnFetch(`https://site.web.api.espn.com/apis/v2/sports/${espnPath}/standings`,
           { signal: AbortSignal.timeout(15000) }
         )
 
@@ -166,8 +166,7 @@ export async function GET(request: Request) {
             const endMonth = sport.toUpperCase() === 'NFL' ? '02' : '06'
             const startMonth = sport.toUpperCase() === 'NFL' ? '08' : '10'
 
-            const res = await fetch(
-              `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${seasonYear}${startMonth}01-${year}${endMonth}28&limit=300`,
+            const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${seasonYear}${startMonth}01-${year}${endMonth}28&limit=300`,
               { signal: AbortSignal.timeout(15000) }
             )
             if (res.ok) {
@@ -201,8 +200,7 @@ export async function GET(request: Request) {
             const endDate = sport.toUpperCase() === 'NFL' ? '01-15' : '10-01'
             const nextYear = sport.toUpperCase() === 'NFL' ? year + 1 : year
 
-            const res = await fetch(
-              `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${year}${startMonth}01-${nextYear}${endDate}&limit=300`,
+            const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${year}${startMonth}01-${nextYear}${endDate}&limit=300`,
               { signal: AbortSignal.timeout(15000) }
             )
             if (res.ok) {

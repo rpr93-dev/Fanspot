@@ -4,6 +4,7 @@ import { getCached, setCachedChecked, isFresh } from '@/lib/cache/cacheService'
 import { TTL, scheduleTtlFor } from '@/lib/cache/ttl'
 import { invalidParam, isKnownEspnSport, isValidDate } from '@/lib/api-validation'
 import { todayKey } from '@/lib/models'
+import { espnFetch } from '@/lib/espn-fetch'
 
 /** Fetch one league's scoreboard day from ESPN (raw shape, cached). */
 export async function fetchScoreboardDay(sport: string, date: string): Promise<any> {
@@ -16,8 +17,7 @@ export async function fetchScoreboardDay(sport: string, date: string): Promise<a
     const ttl = date === todayKey() ? scheduleTtlFor(peek.data?.events) : TTL.SCHEDULE
     if (isFresh(peek.ts, ttl)) return peek.data
   }
-  const res = await fetch(
-    `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${encodeURIComponent(date)}`,
+  const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${encodeURIComponent(date)}`,
     { signal: AbortSignal.timeout(10000) },
   )
   if (!res.ok) throw new Error(`ESPN scoreboard error ${res.status}`)

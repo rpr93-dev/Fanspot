@@ -5,6 +5,7 @@ import { TTL } from '@/lib/cache/ttl'
 import { invalidParam, isKnownEspnSport, isValidEventId } from '@/lib/api-validation'
 import { normalizeSportKey } from '@/lib/models'
 import { normalizePlays } from '@/lib/plays'
+import { espnFetch } from '@/lib/espn-fetch'
 
 /**
  * Normalized play-by-play for a game. Empty list when the provider carries
@@ -30,8 +31,7 @@ export async function GET(request: Request) {
 
   const key = `plays:${sport}:${eventId}`
   try {
-    const res = await fetch(
-      `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventId)}`,
+    const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventId)}`,
       { signal: AbortSignal.timeout(15000) },
     )
     if (!res.ok) {

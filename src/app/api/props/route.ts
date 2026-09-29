@@ -16,6 +16,7 @@ import {
 import { espnSportMap } from '@/lib/providers/espn'
 import { DATE_RE, EVENT_ID_RE, isValidTeam } from '@/lib/api-validation'
 import type { SportKey } from '@/lib/models'
+import { espnFetch } from '@/lib/espn-fetch'
 
 /**
  * Player prop lines (QB passing yards O/U, RB rushing yards O/U, etc.) for a game.
@@ -306,8 +307,7 @@ async function mlbProbablePitcherIds(eventId: string | null, date: string | null
   if (!eventId || !date) return []
   try {
     const board = await fetchOrCache(`props:mlb-board:${date}`, 30 * 60 * 1000, async () => {
-      const res = await fetch(
-        `https://site.api.espn.com/apis/site/v2/sports/${espnSportMap.MLB}/scoreboard?dates=${date}`,
+      const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnSportMap.MLB}/scoreboard?dates=${date}`,
         { signal: AbortSignal.timeout(10000) },
       )
       if (!res.ok) throw new Error(`scoreboard:${res.status}`)

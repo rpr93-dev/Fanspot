@@ -1,5 +1,6 @@
 import { scheduleTtlFor } from './cache/ttl'
 import { getCached, setCached, isFresh } from './cache/cacheService'
+import { espnFetch } from './espn-fetch'
 
 export const NFL_SCOREBOARD_URL =
   'https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'
@@ -20,7 +21,7 @@ export async function fetchNflWeekEvents(week: number, season: number): Promise<
   const peek = getCached<any[]>(key)
   if (peek && isFresh(peek.ts, scheduleTtlFor(peek.data))) return peek.data
 
-  const res = await fetch(`${NFL_SCOREBOARD_URL}?week=${week}&season=${season}`, {
+  const res = await espnFetch(`${NFL_SCOREBOARD_URL}?week=${week}&season=${season}`, {
     signal: AbortSignal.timeout(10000),
   })
   if (!res.ok) throw new Error(`ESPN scoreboard error ${res.status}`)
@@ -40,7 +41,7 @@ export async function fetchCurrentNflWeek(): Promise<number> {
   const peek = getCached<number>(key)
   if (peek && isFresh(peek.ts, 3_600_000)) return peek.data
   try {
-    const res = await fetch(NFL_SCOREBOARD_URL, { signal: AbortSignal.timeout(10000) })
+    const res = await espnFetch(NFL_SCOREBOARD_URL, { signal: AbortSignal.timeout(10000) })
     if (!res.ok) return 1
     const data = await res.json()
     const week = data?.week?.number

@@ -4,6 +4,7 @@ import { fetchOrCache } from '@/lib/cache/cacheService'
 import { TTL } from '@/lib/cache/ttl'
 import { invalidParam } from '@/lib/api-validation'
 import { normalizeSportKey, SPORT_SLUGS, type SportKey } from '@/lib/models'
+import { espnFetch } from '@/lib/espn-fetch'
 
 export interface TeamResult {
   kind: 'team'
@@ -74,8 +75,7 @@ async function searchPlayers(q: string, limit: number): Promise<PlayerResult[]> 
     `search:players:${q.toLowerCase()}`,
     TTL.NEWS,
     async () => {
-      const res = await fetch(
-        `https://site.web.api.espn.com/apis/search/v2?query=${encodeURIComponent(q)}`,
+      const res = await espnFetch(`https://site.web.api.espn.com/apis/search/v2?query=${encodeURIComponent(q)}`,
         { signal: AbortSignal.timeout(10000) },
       )
       if (!res.ok) return []

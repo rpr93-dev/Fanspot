@@ -3,6 +3,7 @@ import { espnSportMap } from '@/lib/providers/espn'
 import { fetchOrCache } from '@/lib/cache/cacheService'
 import { TTL } from '@/lib/cache/ttl'
 import { invalidParam, isKnownEspnSport, isValidDate, isValidEventId, isValidTeam } from '@/lib/api-validation'
+import { espnFetch } from '@/lib/espn-fetch'
 
 /** Shift a YYYYMMDD date by ±days (returns YYYYMMDD). */
 function shiftDate(ymd: string, days: number): string {
@@ -134,7 +135,7 @@ export async function GET(request: Request) {
           // Fallback: fetch schedule to find upcoming game
           const schedUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/teams/${encodeURIComponent(team.toUpperCase())}/schedule`
 
-          const schedRes = await fetch(schedUrl, { signal: AbortSignal.timeout(15000) })
+          const schedRes = await espnFetch(schedUrl, { signal: AbortSignal.timeout(15000) })
           if (!schedRes.ok) {
             console.error(`[odds] schedule fetch failed: ${schedRes.status} ${schedRes.statusText}`)
             return { odds: null, source: 'espn', status: 'error' }
@@ -172,8 +173,7 @@ export async function GET(request: Request) {
         let sbOk = false
         for (const d of [shiftDate(gameDate, -1), gameDate, shiftDate(gameDate, 1)]) {
           try {
-            const sbRes = await fetch(
-              `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${d}`,
+            const sbRes = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${d}`,
               { signal: AbortSignal.timeout(15000) },
             )
             if (!sbRes.ok) {
@@ -249,7 +249,7 @@ export async function GET(request: Request) {
           // Fallback: fetch the summary endpoint for this event (may have odds during live games)
           const summaryUrl = `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/summary?event=${encodeURIComponent(eventIdStr ?? '')}`
           try {
-            const summaryRes = await fetch(summaryUrl, { signal: AbortSignal.timeout(10000) })
+            const summaryRes = await espnFetch(summaryUrl, { signal: AbortSignal.timeout(10000) })
             if (summaryRes.ok) {
               const summaryData = await summaryRes.json()
               oddsArr = summaryData?.header?.competitions?.[0]?.odds

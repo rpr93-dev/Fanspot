@@ -1,4 +1,5 @@
 import type { CanonicalPlayer, PlayerVegas, IntegrationLog } from '../player-types'
+import { espnFetch } from '../../espn-fetch'
 
 const logs: IntegrationLog[] = []
 
@@ -58,7 +59,7 @@ async function fetchWeekOdds(season: number, week: number): Promise<EspnScoreboa
   // NOTE: ESPN rejects date *ranges* (dates=A-B → 400), so the season is
   // swept week by week instead of with one seasonDateRange query.
   const url = `${ESPN_SCOREBOARD}?seasontype=2&week=${week}&limit=100`
-  const res = await fetch(url, {
+  const res = await espnFetch(url, {
     headers: { Accept: 'application/json' },
     signal: AbortSignal.timeout(20000),
   })

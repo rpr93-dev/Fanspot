@@ -5,12 +5,13 @@ import { invalidParam, isKnownEspnSport, isValidEventId } from '@/lib/api-valida
 import { findFanspotTeam, normalizeSportKey, SPORT_SLUGS } from '@/lib/models'
 import { espnSportMap } from '@/lib/providers/espn'
 import { leadersSeasonYear } from '@/lib/leaders'
+import { espnFetch } from '@/lib/espn-fetch'
 
 async function fetchJson(url: string): Promise<any | null> {
   for (const delay of [0, 600]) {
     if (delay) await new Promise((r) => setTimeout(r, delay))
     try {
-      const res = await fetch(url, { signal: AbortSignal.timeout(10000) })
+      const res = await espnFetch(url, { signal: AbortSignal.timeout(10000) })
       if (res.ok) return await res.json()
       if (res.status === 404) return null
     } catch {
