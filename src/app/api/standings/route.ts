@@ -159,19 +159,47 @@ export async function GET(request: Request) {
       } catch (err) {
         console.error(`[standings] v2 API failed for ${sport}:`, err)
 
+        // Fallback: extract records from scoreboard. NOTE: ESPN rejects date
+        // *ranges* (dates=A-B → 400), so sweep single dates instead — records
+        // ride on every game, one populated day is enough.
+        const dayKey = (d: Date) =>
+          `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+        const recentDays = (anchor: Date): string[] => {
+          const out: string[] = []
+          for (let i = 0; i < 5; i++) {
+            const d = new Date(anchor)
+            d.setDate(d.getDate() - i)
+            out.push(dayKey(d))
+          }
+          return out
+        }
+        const fetchFallbackEvents = async (anchors: Date[]): Promise<any[]> => {
+          for (const anchor of anchors) {
+            for (const day of recentDays(anchor)) {
+              try {
+                const res = await espnFetch(
+                  `https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${day}&limit=300`,
+                  { signal: AbortSignal.timeout(15000) },
+                )
+                if (!res.ok) continue
+                const events = (await res.json())?.events ?? []
+                if (events.length > 0) return events
+              } catch {
+                // try the next day
+              }
+            }
+          }
+          return []
+        }
+
         // Fallback: extract records from scoreboard
         try {
           if (!isInSeason(sport.toUpperCase())) {
             const seasonYear = sport.toUpperCase() === 'NFL' ? year - 1 : year
-            const endMonth = sport.toUpperCase() === 'NFL' ? '02' : '06'
-            const startMonth = sport.toUpperCase() === 'NFL' ? '08' : '10'
+            const endMonth = sport.toUpperCase() === 'NFL' ? 1 : 5 // 0-indexed: Feb / Jun
 
-            const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${seasonYear}${startMonth}01-${year}${endMonth}28&limit=300`,
-              { signal: AbortSignal.timeout(15000) }
-            )
-            if (res.ok) {
-              const data = await res.json()
-              const events = data?.events ?? []
+            const events = await fetchFallbackEvents([new Date(seasonYear, endMonth + 1, 0)])
+            {
               const seen = new Set<string>()
 
               for (const event of events) {
@@ -196,16 +224,8 @@ export async function GET(request: Request) {
               }
             }
           } else {
-            const startMonth = sport.toUpperCase() === 'NFL' ? '08' : '03'
-            const endDate = sport.toUpperCase() === 'NFL' ? '01-15' : '10-01'
-            const nextYear = sport.toUpperCase() === 'NFL' ? year + 1 : year
-
-            const res = await espnFetch(`https://site.api.espn.com/apis/site/v2/sports/${espnPath}/scoreboard?dates=${year}${startMonth}01-${nextYear}${endDate}&limit=300`,
-              { signal: AbortSignal.timeout(15000) }
-            )
-            if (res.ok) {
-              const data = await res.json()
-              const events = data?.events ?? []
+            const events = await fetchFallbackEvents([now])
+            {
               const seen = new Set<string>()
 
               for (const event of events) {
