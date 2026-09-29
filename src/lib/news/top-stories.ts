@@ -112,7 +112,14 @@ export async function getTopStories(
   const perLeague = await Promise.all(
     leagues.map(async (league) => {
       const batches = await Promise.all(QUERIES_PER_LEAGUE.map((q) => fetchLeagueQuery(league, q)))
-      return { league, raw: batches.flat() }
+      let raw = batches.flat()
+      if (raw.length === 0) {
+        // Narrow queries can all whiff (offseason lull or upstream hiccup),
+        // leaving a whole league tab empty — fall back to a broad league
+        // query before declaring the league empty.
+        raw = await fetchLeagueQuery(league, '')
+      }
+      return { league, raw }
     }),
   )
 
