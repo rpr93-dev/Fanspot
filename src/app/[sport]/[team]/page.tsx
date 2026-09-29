@@ -14,8 +14,13 @@ function resolveTeam(sport: string, teamId: string) {
   return team && config ? { team, config } : null
 }
 
-export function generateMetadata({ params }: { params: TeamPageParams }): Metadata {
-  const resolved = resolveTeam(params.sport, params.team)
+export async function generateMetadata({
+  params,
+}: {
+  params: Promise<TeamPageParams>
+}): Promise<Metadata> {
+  const { sport, team } = await params
+  const resolved = resolveTeam(sport, team)
   if (!resolved) return { title: 'Team not found - Fanspot' }
   return {
     title: `${resolved.team.name} - Fanspot`,
@@ -27,7 +32,8 @@ export function generateMetadata({ params }: { params: TeamPageParams }): Metada
  * Server wrapper: unknown team slugs 404 at the HTTP layer (a client-only
  * notFound() never changes the already-served 200 status).
  */
-export default function TeamPage({ params }: { params: TeamPageParams }) {
-  if (!resolveTeam(params.sport, params.team)) notFound()
-  return <TeamDashboard key={`${params.sport}/${params.team}`} sport={params.sport} teamId={params.team} />
+export default async function TeamPage({ params }: { params: Promise<TeamPageParams> }) {
+  const { sport, team } = await params
+  if (!resolveTeam(sport, team)) notFound()
+  return <TeamDashboard key={`${sport}/${team}`} sport={sport} teamId={team} />
 }
