@@ -1436,6 +1436,7 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
                           <span className="text-xs w-5 sm:w-6 text-right font-mono text-fs-muted-2 flex-shrink-0">{athlete.jersey}</span>
                           {athlete.id ? (
                             <Link
+                              prefetch={false}
                               href={`/${team.sport.toLowerCase()}/player/${athlete.id}`}
                               className="text-xs sm:text-sm flex-shrink-0 text-fs-text/85 whitespace-nowrap hover:text-fs-text hover:underline underline-offset-2"
                             >

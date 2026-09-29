@@ -9,6 +9,7 @@ function TeamRow({ team, onNavigate }: { team: SearchData['teams'][number]; onNa
   return (
     <Link
       href={team.href}
+      prefetch={false}
       onClick={onNavigate}
       className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/5 transition-colors"
     >
@@ -38,6 +39,7 @@ function PlayerRow({ player, onNavigate }: { player: SearchData['players'][numbe
   return (
     <Link
       href={player.href}
+      prefetch={false}
       onClick={onNavigate}
       className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/5 transition-colors"
     >

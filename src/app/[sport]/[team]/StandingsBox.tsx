@@ -177,6 +177,7 @@ export default function StandingsBox({
                           const playoff = PLAYOFF_SLOTS[sport.toUpperCase()] != null && i < PLAYOFF_SLOTS[sport.toUpperCase()]!
                           return (
                             <Link
+                              prefetch={false}
                               key={entry.abbr}
                               href={`/${sport}/${entry.teamId}`}
                               className={`hover-lift group flex items-center gap-1 rounded-md px-2 ${

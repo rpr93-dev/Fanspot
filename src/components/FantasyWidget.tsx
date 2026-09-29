@@ -118,6 +118,7 @@ export default function FantasyWidget({
         <div className="space-y-2 flex-1">
           {starters.map((s) => (
             <Link
+              prefetch={false}
               key={s.pos}
               href={stealsHref(s)}
               className="block rounded-lg p-3 transition hover:brightness-125"
