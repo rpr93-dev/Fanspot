@@ -4,7 +4,14 @@ import { checkRateLimit, rateLimitClientKey, resetRateLimits, RATE_LIMIT_ERR } f
 function request(ip: string): Request {
   return new Request('http://localhost/api/prop-model', {
     method: 'POST',
-    headers: { 'x-forwarded-for': `${ip}, 10.0.0.1` },
+    headers: { 'x-forwarded-for': ip },
+  })
+}
+
+function proxiedRequest(clientIp: string, proxyIp = '10.0.0.1'): Request {
+  return new Request('http://localhost/api/prop-model', {
+    method: 'POST',
+    headers: { 'x-forwarded-for': `${clientIp}, ${proxyIp}` },
   })
 }
 
@@ -54,8 +61,10 @@ describe('per-IP token bucket', () => {
     }
   })
 
-  it('client key derives from the first x-forwarded-for hop', () => {
+  it('client key derives from the last x-forwarded-for hop (nearest proxy)', () => {
     expect(rateLimitClientKey(request('8.8.8.8'), 'r')).toBe('r:8.8.8.8')
+    // Leftmost entry is client-controlled — it must not select the bucket.
+    expect(rateLimitClientKey(proxiedRequest('1.2.3.4', '10.0.0.1'), 'r')).toBe('r:10.0.0.1')
   })
 
   it('generous default (30/min) does not trip normal polling bursts', () => {

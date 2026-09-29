@@ -36,8 +36,13 @@ function sweep(now: number): void {
 }
 
 export function rateLimitClientKey(request: Request, route: string): string {
+  // Prefer the platform-set x-real-ip. For x-forwarded-for, use the LAST
+  // entry (nearest proxy, appended by infrastructure) — the leftmost entry
+  // is client-controlled and trivially spoofed, which let one client fill
+  // another client's bucket.
   const fwd = request.headers.get('x-forwarded-for')
-  const ip = (fwd?.split(',')[0] ?? '').trim() || request.headers.get('x-real-ip') || 'local'
+  const hops = (fwd ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+  const ip = request.headers.get('x-real-ip') || hops[hops.length - 1] || 'local'
   return `${route}:${ip}`
 }
 
