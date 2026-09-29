@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
 import { teams, sportConfig, sportPath } from '@/data/teams'
-import { useParams } from 'next/navigation'
+import { notFound, useParams } from 'next/navigation'
 import { getTeamSchedule, getTeamNews, getEspnAbbr } from '@/lib/sports-api'
 import StandingsBox from './StandingsBox'
 import NextGamePanel from '@/components/NextGamePanel'
@@ -511,16 +511,9 @@ function TeamDashboard({ sport, teamId }: { sport: string; teamId: string }) {
   }, [selectedGameId, team?.id])
 
   if (!team || !config) {
-    return (
-      <div className="min-h-screen fs-page">
-        <div className="flex items-center justify-center min-h-screen">
-          <div className="text-center">
-            <h1 className="fs-title text-2xl text-fs-muted mb-4">Team not found</h1>
-            <Link href={`/${sport}`} className="hover-lift fs-meta hover:text-fs-text" style={{ '--card-color': 'rgba(255,255,255,0.3)' } as React.CSSProperties}>&larr; Back to League</Link>
-          </div>
-        </div>
-      </div>
-    )
+    // Unknown team slug: real 404 status (was HTTP 200) with the same
+    // styled UI via the segment not-found boundary below.
+    notFound()
   }
 
   const logoUrl = getTeamLogoUrl(getEspnAbbr(team.id, team.abbreviation), team.sport)
