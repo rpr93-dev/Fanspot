@@ -101,13 +101,18 @@ src/
 | `/scores` | Multi-team scoreboard |
 | `/[sport]` | Team grid (nfl / nba / nhl / mlb) |
 | `/[sport]/[team]` | Team dashboard |
-| `/[sport]/[team]/[eventId]` | Game detail with play-by-play |
+| `/[sport]/game/[eventId]` | Game detail with play-by-play |
 | `/[sport]/player/[playerId]` | Player profile |
-| `/standings/[sport]` | League standings |
-| `/stat-leaders/[sport]` | Top performers |
 | `/search` | Player and team search |
 | `/news` | Global news feed |
 | `/favorites` | Saved teams |
+| `/fantasy` | Fantasy draft prep index |
+| `/fantasy/[sport]` | Fantasy steals / auction / mock draft (NFL live, others coming soon) |
+| `/graph` | Architecture visualization |
+
+Note: standings and stat leaders are API-only (`/api/standings`, `/api/standings-league`,
+`/api/stat-leaders`) and render inside the league hubs and team dashboards — there are
+no standalone `/standings/*` or `/stat-leaders/*` pages.
 
 ## Team Dashboard
 
@@ -177,7 +182,7 @@ Clicking a game opens a detail page with box score, sport-aware period labels (Q
 | Route | Description |
 |---|---|
 | `GET /api/schedule?sport=NFL&team=NE` | Upcoming & recent games |
-| `GET /api/schedule?sport=NBA_SUMMER&team=BOS&source=scoreboard&dates=20260701-20260731` | Summer League scoreboard |
+| `GET /api/schedule?sport=NBA_SUMMER&team=BOS&source=scoreboard&dates=20260715` | Summer League scoreboard (single date — ESPN rejects `dates=A-B` ranges) |
 | `GET /api/standings?sport=NFL` | Conference standings |
 | `GET /api/standings-league?sport=NFL` | Full league standings |
 | `GET /api/odds?sport=NFL&team=NE` | Moneyline win probability |
@@ -196,6 +201,9 @@ Clicking a game opens a detail page with box score, sport-aware period labels (Q
 | Variable | Default | Description |
 |---|---|---|
 | `STANDINGS_REVALIDATE` | `300` | ISR cache seconds for standings API |
+| `OLLAMA_BASE_URL` | `http://localhost:11434` | Ollama host for the concierge AI analyst |
+| `OLLAMA_ANALYST_MODEL` | `qwen3.5:9b` | Model used for AI analysis |
+| `SCRAPER_URL` | `http://localhost:8770` | Docker prop-line scraper (required for NFL Props tab; fails gracefully without it) |
 
 ## Data Sources
 
