@@ -1,5 +1,4 @@
 import type { CanonicalPlayer, PlayerVegas, IntegrationLog } from '../player-types'
-import { withBackoff } from '../../backoff'
 
 const logs: IntegrationLog[] = []
 
@@ -55,24 +54,35 @@ interface EspnScoreboardEvent {
 
 const teamVegasCache = new Map<string, { data: Map<string, TeamVegas>; expiresAt: number }>()
 
-/** The NFL season for year Y spans September of Y into February of Y+1. */
-function seasonDateRange(season: number): string {
-  return `${season}0901-${season + 1}0215`
-}
-
-async function fetchSeasonOdds(season: number): Promise<EspnScoreboardEvent[]> {
-  const url = `${ESPN_SCOREBOARD}?dates=${seasonDateRange(season)}&limit=1000`
-  const res = await withBackoff(async () => {
-    const r = await fetch(url, {
-      headers: { Accept: 'application/json' },
-      signal: AbortSignal.timeout(20000),
-    })
-    if (!r.ok) throw new Error(`ESPN scoreboard returned ${r.status}`)
-    return r
+async function fetchWeekOdds(season: number, week: number): Promise<EspnScoreboardEvent[]> {
+  // NOTE: ESPN rejects date *ranges* (dates=A-B → 400), so the season is
+  // swept week by week instead of with one seasonDateRange query.
+  const url = `${ESPN_SCOREBOARD}?seasontype=2&week=${week}&limit=100`
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(20000),
   })
+  if (!res.ok) throw new Error(`ESPN scoreboard week ${week} returned ${res.status}`)
   const data: unknown = await res.json()
   const events = (data as { events?: EspnScoreboardEvent[] })?.events
   return Array.isArray(events) ? events : []
+}
+
+async function fetchSeasonOdds(season: number): Promise<EspnScoreboardEvent[]> {
+  const weeks = Array.from({ length: 18 }, (_, i) => i + 1)
+  const batches = await Promise.all(
+    weeks.map((w) => fetchWeekOdds(season, w).catch(() => [] as EspnScoreboardEvent[])),
+  )
+  const seen = new Set<string>()
+  const out: EspnScoreboardEvent[] = []
+  for (const e of batches.flat()) {
+    const id = String((e as { id?: unknown })?.id ?? '')
+    if (id && seen.has(id)) continue
+    if (id) seen.add(id)
+    out.push(e)
+  }
+  if (out.length === 0) throw new Error('ESPN scoreboard returned no events')
+  return out
 }
 
 /**
