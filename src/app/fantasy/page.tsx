@@ -24,10 +24,15 @@ export default function FantasyPage() {
             return (
               <div
                 key={s.slug}
+                aria-disabled="true"
+                title={`${s.name} projections are not available yet`}
                 className="rounded-xl bg-gray-900/40 p-6 border border-white/5 opacity-50 cursor-not-allowed"
               >
                 <h2 className="text-2xl font-bold">{s.name}</h2>
-                <p className="text-sm text-gray-500 mt-1">Coming soon</p>
+                <p className="text-sm text-gray-500 mt-1">Coming soon — projections cover the NFL only for now.</p>
+                <Link href="/fantasy/nfl" className="text-sm text-gray-400 mt-2 inline-block hover:text-white">
+                  View NFL steals &rarr;
+                </Link>
               </div>
             )
           }
