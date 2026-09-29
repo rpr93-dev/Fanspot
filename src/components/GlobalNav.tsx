@@ -52,10 +52,14 @@ function DesktopSearch() {
         onFocus={() => setOpen(true)}
         placeholder="Search teams, players…  ( / )"
         aria-label="Search teams and players"
+        aria-expanded={showResults}
+        aria-controls="fanspot-header-search-results"
+        role="combobox"
+        aria-autocomplete="list"
         className="fs-input !py-1.5 text-xs"
       />
       {showResults && (
-        <div className="absolute right-0 top-full mt-2 w-80 fs-panel-2 !bg-[#10160f] shadow-2xl z-50 overflow-hidden">
+        <div id="fanspot-header-search-results" role="listbox" aria-label="Search results" className="absolute right-0 top-full mt-2 w-80 fs-panel-2 !bg-[#10160f] shadow-2xl z-50 overflow-hidden">
           <SearchResults
             teams={teams}
             players={players}
