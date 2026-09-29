@@ -19,12 +19,17 @@ export function sportForPathname(pathname: string | null): SportKey | null {
 
 /**
  * Whether the scoreboard strip renders on this route. Hidden on the
- * homepage (starts directly at "Today in Sports") and everywhere inside
- * the league sections — each hub carries its own scores content.
+ * homepage (starts directly at "Today in Sports"), on the search and
+ * favorites tools (the strip buries the actual tool below the fold), and
+ * everywhere inside the league sections — each hub carries its own
+ * scores content.
  */
+const SCOREBOARD_HIDDEN_ROOTS = new Set(['search', 'favorites'])
+
 export function shouldShowScoreboard(pathname: string | null): boolean {
   const segs = (pathname ?? '/').split('/').filter(Boolean).map((s) => s.toLowerCase())
   if (segs.length === 0) return false
+  if (SCOREBOARD_HIDDEN_ROOTS.has(segs[0])) return false
   return normalizeSportKey(segs[0]) == null
 }
 
