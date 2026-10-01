@@ -105,43 +105,69 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
           <h2 className="fs-title text-xl">{season} Calendar</h2>
           <p className="fs-meta">Tap a GP for results + sessions</p>
         </div>
-        <div className="fs-panel overflow-hidden">
-          <ul className="divide-y divide-fs-line">
-            {(schedule?.rounds ?? []).map((r) => {
+        {!schedule ? (
+          <div className="fs-panel px-4 py-3 text-sm text-fs-muted-2">Loading calendar…</div>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {(schedule.rounds ?? []).map((r) => {
               const past = Date.parse(r.startIso) < now - 3 * 3_600_000
               const isNext = next?.round === r.round && next?.name === r.name
+              const d = new Date(r.startIso)
+              const day = d.toLocaleDateString('en-US', { day: '2-digit' })
+              const mon = d.toLocaleDateString('en-US', { month: 'short' }).toUpperCase()
               return (
-                <li key={`${r.round}-${r.name}`} className={past && !isNext ? 'opacity-70' : ''}>
-                  <Link
-                    href={`/f1/round/${r.round}`}
-                    className="flex items-center gap-3 px-3 sm:px-4 py-2.5 text-sm hover:bg-white/[0.04] transition-colors group"
-                    prefetch={false}
-                  >
-                    <span className="fs-mono text-fs-muted-2 w-8 shrink-0 tabular-nums">R{r.round}</span>
-                    <span
-                      aria-hidden="true"
-                      className="w-1 self-stretch rounded-full shrink-0"
-                      style={{
-                        background: past ? '#5e6c63' : 'linear-gradient(180deg, #E10600, #4781D7)',
-                        boxShadow: isNext ? '0 0 8px #E10600' : undefined,
-                      }}
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="font-semibold group-hover:underline">{r.name}</span>{' '}
-                      <span className="text-fs-muted-2 text-xs">{r.locality ?? r.country ?? ''}</span>
-                      {isNext ? <span className="ml-2 text-[10px] font-bold text-fs-gold">NEXT</span> : null}
-                      {past ? <span className="ml-2 text-[10px] font-bold text-fs-muted-2">RESULTS →</span> : null}
+                <Link
+                  key={`${r.round}-${r.name}`}
+                  href={`/f1/round/${r.round}`}
+                  prefetch={false}
+                  className={`group relative overflow-hidden rounded-xl border p-4 transition-all duration-200 hover:-translate-y-1 ${past ? 'opacity-75 hover:opacity-100' : ''}`}
+                  style={
+                    isNext
+                      ? { borderColor: '#E1060066', background: 'linear-gradient(135deg, #E1060028 0%, #111712 55%)', boxShadow: '0 0 24px #E1060022' }
+                      : { borderColor: 'rgba(242,245,241,0.08)', background: 'linear-gradient(180deg, #151c16, #111712)' }
+                  }
+                >
+                  {/* top accent */}
+                  <span
+                    aria-hidden="true"
+                    className="absolute left-0 top-0 h-full w-1"
+                    style={{ background: isNext ? '#E10600' : past ? '#5e6c63' : 'linear-gradient(180deg, #E10600, #8a9990)', boxShadow: isNext ? '0 0 10px #E10600' : undefined }}
+                  />
+                  <div className="flex items-start justify-between gap-3 pl-2">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2 mb-1.5">
+                        <span
+                          className="fs-mono text-[10px] font-bold px-1.5 py-0.5 rounded tabular-nums"
+                          style={isNext ? { backgroundColor: '#E10600', color: '#fff' } : { backgroundColor: 'rgba(255,255,255,0.07)', color: '#8a9990' }}
+                        >
+                          R{r.round}
+                        </span>
+                        {isNext ? <span className="text-[10px] font-bold text-fs-gold">★ NEXT</span> : null}
+                        {past ? <span className="text-[10px] font-bold text-fs-muted-2">✓ DONE</span> : null}
+                      </div>
+                      <p className="font-bold text-[15px] leading-tight group-hover:underline underline-offset-2">{r.name}</p>
+                      <p className="text-xs text-fs-muted mt-1 truncate">
+                        {[r.circuit, r.locality ?? r.country].filter(Boolean).join(' · ')}
+                      </p>
+                    </div>
+                    <div className="text-center shrink-0 rounded-lg px-2 py-1" style={{ backgroundColor: 'rgba(255,255,255,0.04)' }}>
+                      <p className="fs-mono text-xl font-black leading-none tabular-nums">{day}</p>
+                      <p className="fs-mono text-[10px] text-fs-muted tabular-nums">{mon}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between mt-3 pl-2">
+                    <span className="fs-mono text-[11px] text-fs-muted tabular-nums">
+                      {d.toLocaleString('en-US', { weekday: 'short', hour: 'numeric', minute: '2-digit' })}
                     </span>
-                    <span className="fs-mono text-xs text-fs-muted shrink-0 tabular-nums">
-                      {new Date(r.startIso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    <span className={`text-[11px] font-bold ${past ? 'text-fs-muted-2' : 'text-fs-text'} group-hover:translate-x-0.5 transition-transform`}>
+                      {past ? 'Results →' : 'Weekend →'}
                     </span>
-                  </Link>
-                </li>
+                  </div>
+                </Link>
               )
             })}
-            {!schedule ? <li className="px-4 py-3 text-sm text-fs-muted-2">Loading calendar…</li> : null}
-          </ul>
-        </div>
+          </div>
+        )}
       </section>
 
       {/* Standings */}

@@ -148,7 +148,7 @@ export const teams: Team[] = [
   // logos are official team marks via Wikipedia, served locally)
   { id: 'f1-mcl', name: 'McLaren', abbreviation: 'MCL', sport: 'F1', colors: { primary: '#F47600', secondary: '#47C7FC' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/mcl.png' },
   { id: 'f1-fer', name: 'Ferrari', abbreviation: 'FER', sport: 'F1', colors: { primary: '#ED1131', secondary: '#000000' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/fer.png' },
-  { id: 'f1-rbr', name: 'Red Bull Racing', abbreviation: 'RBR', sport: 'F1', colors: { primary: '#4781D7', secondary: '#FAD300' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/rbr.png' },
+  { id: 'f1-rbr', name: 'Red Bull Racing', abbreviation: 'RBR', sport: 'F1', colors: { primary: '#0600EF', secondary: '#E30613' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/rbr.png' },
   { id: 'f1-mer', name: 'Mercedes', abbreviation: 'MER', sport: 'F1', colors: { primary: '#00D7B6', secondary: '#000000' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/mer.png', logoOnLight: true },
   { id: 'f1-amr', name: 'Aston Martin', abbreviation: 'AMR', sport: 'F1', colors: { primary: '#229971', secondary: '#000000' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/amr.png', logoOnLight: true },
   { id: 'f1-alp', name: 'Alpine', abbreviation: 'ALP', sport: 'F1', colors: { primary: '#00A1E8', secondary: '#FF87BC' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/alp.png' },
