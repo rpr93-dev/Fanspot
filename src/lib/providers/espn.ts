@@ -6,6 +6,7 @@ export const espnSportMap: Record<string, string> = {
   NBA: 'basketball/nba',
   NHL: 'hockey/nhl',
   MLB: 'baseball/mlb',
+  F1: 'racing/f1',
   NBA_SUMMER: 'basketball/nba-summer',
 }
 

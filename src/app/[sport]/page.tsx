@@ -11,6 +11,7 @@ import { NewsFeed } from '@/components/NewsFeed'
 import { SectionHeader } from '@/components/feedback'
 import { fetchCurrentNflWeek } from '@/lib/scheduleWeek'
 import { normalizeSportKey } from '@/lib/models'
+import { F1Hub } from '@/components/f1/F1Hub'
 
 export async function generateMetadata({ params }: { params: Promise<{ sport: string }> }): Promise<Metadata> {
   const { sport } = await params
@@ -34,6 +35,27 @@ export default async function SportPage({
   const sportKey = normalizeSportKey(sport)
   if (!sportKey) return notFound()
   const config = sportConfig[sportKey]
+
+  // F1 has no ESPN team-vs-team shapes (scoreboard/standings/leaders all
+  // assume home/away) — the dedicated hub owns every /f1* URL instead
+  // (the static /f1 page wins for lowercase; this covers /F1 and friends).
+  if (sportKey === 'F1') {
+    return (
+      <div className="min-h-screen fs-page" style={{ '--glow': `${config.color}22` } as React.CSSProperties}>
+        <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10">
+          <Link href="/" className="fs-meta hover:text-fs-text inline-block mb-8 transition-colors">&larr; All Leagues</Link>
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-2 mb-10">
+            <div>
+              <p className="fs-eyebrow mb-2" style={{ '--tint': config.color } as React.CSSProperties}>League Hub</p>
+              <h1 className="fs-title text-5xl sm:text-6xl mb-3">{config.name}</h1>
+            </div>
+            <p className="fs-meta shrink-0">11 constructors · 22 drivers</p>
+          </div>
+          <F1Hub teamColor={config.color} />
+        </div>
+      </div>
+    )
+  }
 
   // Strict week parsing: ?week=3junk or ?week=abc used to slip through
   // parseInt (prefix match / NaN) into the schedule board. Garbage falls

@@ -12,7 +12,7 @@ export const SEASON_RE = /^\d{4}$/
 export const DATE_RE = /^\d{8}$/
 export const EVENT_ID_RE = /^\d+$/
 
-export const SPORT_ALLOWLIST = ['nfl', 'nba', 'nhl', 'mlb'] as const
+export const SPORT_ALLOWLIST = ['nfl', 'nba', 'nhl', 'mlb', 'f1'] as const
 export type Sport = (typeof SPORT_ALLOWLIST)[number]
 
 /** Sport path segments ESPN knows beyond the four primary leagues. */

@@ -36,6 +36,8 @@ function extractPrimaryValue(sport: SportKey, stats: Record<string, string>, pos
       return MLB_PITCHER_POSITIONS.has(positionAbbr)
         ? { value: pv('innings'), label: 'IP' }
         : { value: pv('plateAppearances'), label: 'PA' }
+    case 'F1':
+      return { value: pv('points'), label: 'PTS' }
   }
 }
 

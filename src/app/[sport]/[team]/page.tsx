@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { notFound, redirect } from 'next/navigation'
 import { teams, sportConfig } from '@/data/teams'
 import { TeamDashboard } from './TeamDashboard'
+import { F1TeamPanel } from '@/components/f1/F1TeamPanel'
 
 interface TeamPageParams {
   sport: string
@@ -44,6 +45,19 @@ export default async function TeamPage({ params }: { params: Promise<TeamPagePar
       redirect(`/${sport.toLowerCase()}/${canonical.id}`)
     }
     notFound()
+  }
+  // F1 constructors have no ESPN roster/schedule feed — dedicated panel
+  // (the static /f1/[teamId] page wins for lowercase; this covers /F1/*).
+  const resolved = resolveTeam(sport, team)!
+  if (resolved.team.sport === 'F1') {
+    const config = sportConfig.F1
+    return (
+      <div className="min-h-screen fs-page" style={{ '--glow': `${config.color}22` } as React.CSSProperties}>
+        <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10 max-w-5xl">
+          <F1TeamPanel team={resolved.team} teamColor={config.color} />
+        </div>
+      </div>
+    )
   }
   return <TeamDashboard key={`${sport}/${team}`} sport={sport} teamId={team} />
 }

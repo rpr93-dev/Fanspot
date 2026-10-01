@@ -48,6 +48,13 @@ export const LEADER_CATEGORIES: Record<SportKey, LeaderCategory[]> = {
     { key: 'ERA', label: 'ERA', group: 'defense' },
     { key: 'strikeouts', label: 'SO', group: 'defense' },
   ],
+  // F1 leaders come from the F1 standings feed (driver/constructor points),
+  // not ESPN — keys here only satisfy the shared table shape.
+  F1: [
+    { key: 'points', label: 'PTS', group: 'offense' },
+    { key: 'wins', label: 'Wins', group: 'offense' },
+    { key: 'podiums', label: 'Podiums', group: 'offense' },
+  ],
 }
 
 /** Section headings per sport (MLB/NHL groups aren't offense/defense). */
@@ -56,6 +63,7 @@ export const LEADER_GROUP_LABELS: Record<SportKey, Record<LeaderGroup, string>> 
   NBA: { offense: 'Offense', defense: 'Defense' },
   NHL: { offense: 'Skaters', defense: 'Goalies' },
   MLB: { offense: 'Batting', defense: 'Pitching' },
+  F1: { offense: 'Drivers', defense: 'Constructors' },
 }
 
 /**
@@ -71,7 +79,8 @@ export function leadersSeasonYear(sport: SportKey, now: Date = new Date()): numb
     case 'NFL': return month >= 8 ? year : year - 1
     case 'NBA':
     case 'NHL': return month >= 10 ? year + 1 : year
-    case 'MLB': return year
+    case 'MLB':
+    case 'F1': return year
   }
 }
 

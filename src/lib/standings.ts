@@ -159,4 +159,10 @@ export const STANDINGS_COLUMNS: Record<SportKey, StandingColumn[]> = {
     { key: 'streak', label: 'STRK' },
     { key: 'Last Ten Games', label: 'L10' },
   ],
+  // F1 uses its own standings feed; keys here only satisfy the shared shape.
+  F1: [
+    { key: 'points', label: 'PTS' },
+    { key: 'wins', label: 'W' },
+    { key: 'record', label: 'W-P' },
+  ],
 }

@@ -11,6 +11,7 @@ const leagues = [
   { id: 'nba', name: 'NBA', fullName: 'National Basketball Association', color: '#C9082A' },
   { id: 'nhl', name: 'NHL', fullName: 'National Hockey League', color: '#003E7E' },
   { id: 'mlb', name: 'MLB', fullName: 'Major League Baseball', color: '#002D72' },
+  { id: 'f1', name: 'F1', fullName: 'Formula 1', color: '#E10600' },
 ]
 
 export default function HomePage() {

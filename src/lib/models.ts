@@ -13,15 +13,16 @@ import { getEspnAbbr } from '@/lib/providers/espn'
 /* Sport                                                               */
 /* ------------------------------------------------------------------ */
 
-export type SportKey = 'NFL' | 'NBA' | 'NHL' | 'MLB'
+export type SportKey = 'NFL' | 'NBA' | 'NHL' | 'MLB' | 'F1'
 
-export const SPORT_KEYS: SportKey[] = ['NFL', 'NBA', 'NHL', 'MLB']
+export const SPORT_KEYS: SportKey[] = ['NFL', 'NBA', 'NHL', 'MLB', 'F1']
 
 export const SPORT_SLUGS: Record<SportKey, string> = {
   NFL: 'nfl',
   NBA: 'nba',
   NHL: 'nhl',
   MLB: 'mlb',
+  F1: 'f1',
 }
 
 export function normalizeSportKey(input: unknown): SportKey | null {
@@ -91,6 +92,7 @@ const PERIOD_PREFIX: Record<SportKey, string> = {
   NBA: 'Q',
   NHL: 'P',
   MLB: '',
+  F1: 'L',
 }
 
 export function periodLabelFor(sport: SportKey, period: number | null, extra?: { inningHalf?: string | null }): string | null {
