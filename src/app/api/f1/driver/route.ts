@@ -29,12 +29,15 @@ export async function GET(request: Request) {
   if (cached && isFresh(cached.ts, TTL_MS)) return NextResponse.json(cached.data)
 
   try {
-    const [standingsJson, resultsJson] = await Promise.all([
-      fetchJolpica(`/${encodeURIComponent(seasonParam)}/driverStandings.json`),
-      fetchJolpica(`/${encodeURIComponent(seasonParam)}/drivers/${encodeURIComponent(rawCode)}/results.json`),
-    ])
+    // Jolpica driverIds are slugs (max_verstappen), not 3-letter codes —
+    // resolve via standings first, then fetch that driver's race results.
+    const standingsJson = await fetchJolpica(`/${encodeURIComponent(seasonParam)}/driverStandings.json`)
     const dRows = standingsJson?.MRData?.StandingsTable?.StandingsLists?.[0]?.DriverStandings ?? []
     const row = dRows.find((r: any) => (r.Driver?.code ?? '').toUpperCase() === rawCode) ?? null
+    const driverId = row?.Driver?.driverId ?? rawCode.toLowerCase()
+    const resultsJson = await fetchJolpica(
+      `/${encodeURIComponent(seasonParam)}/drivers/${encodeURIComponent(driverId)}/results.json`,
+    )
     const races = resultsJson?.MRData?.RaceTable?.Races ?? []
 
     const rounds = races.map((rc: any) => {

@@ -52,19 +52,26 @@ export interface F1LiveSnapshot {
   fetchedAt: string
 }
 
-/** OpenF1 team_name -> local constructor abbreviation (teams.ts). */
+/** OpenF1/Jolpica team_name -> local constructor abbreviation (teams.ts). */
 export const F1_TEAM_ABBR: Record<string, string> = {
   McLaren: 'MCL',
   Ferrari: 'FER',
   'Red Bull Racing': 'RBR',
+  'Red Bull': 'RBR',
   Mercedes: 'MER',
   'Aston Martin': 'AMR',
   Alpine: 'ALP',
+  'Alpine F1 Team': 'ALP',
   'Haas F1 Team': 'HAA',
+  Haas: 'HAA',
   'Racing Bulls': 'RBU',
+  /** Jolpica's name for the Racing Bulls outfit (Lawson, Tsunoda…). */
+  'RB F1 Team': 'RBU',
+  RB: 'RBU',
   Williams: 'WIL',
   Audi: 'AUD',
   Cadillac: 'CAD',
+  'Cadillac F1 Team': 'CAD',
 }
 
 /** "+1.234" / "+1 LAP" / "—" for tower gaps. OpenF1 gaps are seconds or lap strings. */

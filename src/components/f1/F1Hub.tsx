@@ -152,7 +152,7 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
             <p className="fs-meta">Tap for profile</p>
           </div>
           <ol className="divide-y divide-fs-line">
-            {(standings?.drivers ?? []).slice(0, 10).map((d: any) => {
+            {(standings?.drivers ?? []).map((d: any) => {
               const team = abbrToTeam.get(d.teamAbbr)
               const c = team?.colors.primary ?? '#666'
               return (

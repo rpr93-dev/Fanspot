@@ -8,6 +8,8 @@ export interface Team {
   division: string
   /** Local constructor logo image (F1 has no ESPN logo CDN). */
   logo?: string
+  /** Dark-on-transparent mark: render on a white plate so it reads on dark theme. */
+  logoOnLight?: boolean
 }
 
 export const teams: Team[] = [
@@ -147,14 +149,14 @@ export const teams: Team[] = [
   { id: 'f1-mcl', name: 'McLaren', abbreviation: 'MCL', sport: 'F1', colors: { primary: '#F47600', secondary: '#47C7FC' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/mcl.png' },
   { id: 'f1-fer', name: 'Ferrari', abbreviation: 'FER', sport: 'F1', colors: { primary: '#ED1131', secondary: '#000000' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/fer.png' },
   { id: 'f1-rbr', name: 'Red Bull Racing', abbreviation: 'RBR', sport: 'F1', colors: { primary: '#4781D7', secondary: '#FAD300' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/rbr.png' },
-  { id: 'f1-mer', name: 'Mercedes', abbreviation: 'MER', sport: 'F1', colors: { primary: '#00D7B6', secondary: '#000000' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/mer.png' },
-  { id: 'f1-amr', name: 'Aston Martin', abbreviation: 'AMR', sport: 'F1', colors: { primary: '#229971', secondary: '#000000' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/amr.png' },
+  { id: 'f1-mer', name: 'Mercedes', abbreviation: 'MER', sport: 'F1', colors: { primary: '#00D7B6', secondary: '#000000' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/mer.png', logoOnLight: true },
+  { id: 'f1-amr', name: 'Aston Martin', abbreviation: 'AMR', sport: 'F1', colors: { primary: '#229971', secondary: '#000000' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/amr.png', logoOnLight: true },
   { id: 'f1-alp', name: 'Alpine', abbreviation: 'ALP', sport: 'F1', colors: { primary: '#00A1E8', secondary: '#FF87BC' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/alp.png' },
   { id: 'f1-haa', name: 'Haas F1 Team', abbreviation: 'HAA', sport: 'F1', colors: { primary: '#9C9FA2', secondary: '#E10600' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/haa.png' },
   { id: 'f1-rbu', name: 'Racing Bulls', abbreviation: 'RBU', sport: 'F1', colors: { primary: '#6C98FF', secondary: '#E10600' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/rbu.png' },
   { id: 'f1-wil', name: 'Williams', abbreviation: 'WIL', sport: 'F1', colors: { primary: '#1868DB', secondary: '#FFFFFF' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/wil.png' },
   { id: 'f1-aud', name: 'Audi', abbreviation: 'AUD', sport: 'F1', colors: { primary: '#F50537', secondary: '#000000' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/aud.png' },
-  { id: 'f1-cad', name: 'Cadillac', abbreviation: 'CAD', sport: 'F1', colors: { primary: '#909090', secondary: '#E10600' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/cad.png' },
+  { id: 'f1-cad', name: 'Cadillac', abbreviation: 'CAD', sport: 'F1', colors: { primary: '#909090', secondary: '#E10600' }, conference: 'Constructors', division: 'Championship', logo: '/logos/f1/cad.png', logoOnLight: true },
 ]
 
 export const sportPath: Record<string, string> = { NFL: 'nfl', NBA: 'nba', NHL: 'nhl', MLB: 'mlb', F1: 'f1' }

@@ -93,4 +93,9 @@ describe('F1_TEAM_ABBR', () => {
       expect(F1_TEAM_ABBR[t]).toBeTruthy()
     }
   })
+  it('aliases Jolpica naming variants (Lawson team, Verstappen team)', () => {
+    expect(F1_TEAM_ABBR['RB F1 Team']).toBe('RBU')
+    expect(F1_TEAM_ABBR['Red Bull']).toBe('RBR')
+    expect(F1_TEAM_ABBR['Cadillac F1 Team']).toBe('CAD')
+  })
 })

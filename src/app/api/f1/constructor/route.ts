@@ -36,23 +36,15 @@ export async function GET(request: Request) {
   if (cached && isFresh(cached.ts, TTL_MS)) return NextResponse.json(cached.data)
 
   try {
-    // Resolve the Jolpica constructor id (e.g. "mclaren") via the standings feed.
-    const [standingsJson, resultsJson] = await Promise.all([
-      fetchJolpica(`/${encodeURIComponent(seasonParam)}/constructorStandings.json`),
-      (async () => {
-        const c = await fetchJolpica(`/${encodeURIComponent(seasonParam)}/constructorStandings.json`).catch(() => null)
-        const rows = c?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings ?? []
-        const match = rows.find((r: any) => {
-          const name = r?.Constructor?.name ?? ''
-          return (F1_TEAM_ABBR as Record<string, string>)[name] === abbr
-        })
-        const cid = match?.Constructor?.constructorId
-        if (!cid) return null
-        return fetchJolpica(`/${encodeURIComponent(seasonParam)}/constructors/${encodeURIComponent(cid)}/results.json`)
-      })(),
-    ])
+    // Resolve the Jolpica constructor id (e.g. "mclaren") via the standings
+    // feed (one fetch — driverIds/constructorIds are slugs, not abbrs/codes).
+    const standingsJson = await fetchJolpica(`/${encodeURIComponent(seasonParam)}/constructorStandings.json`)
     const cRows = standingsJson?.MRData?.StandingsTable?.StandingsLists?.[0]?.ConstructorStandings ?? []
     const row = cRows.find((r: any) => (F1_TEAM_ABBR as Record<string, string>)[r?.Constructor?.name ?? ''] === abbr) ?? null
+    const cid = row?.Constructor?.constructorId ?? null
+    const resultsJson = cid
+      ? await fetchJolpica(`/${encodeURIComponent(seasonParam)}/constructors/${encodeURIComponent(cid)}/results.json`).catch(() => null)
+      : null
     const races = resultsJson?.MRData?.RaceTable?.Races ?? []
 
     const rounds = races.map((rc: any) => {

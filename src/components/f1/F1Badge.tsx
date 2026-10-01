@@ -11,8 +11,11 @@ export function constructorByAbbr(abbr: string | null | undefined): Team | undef
 }
 
 /**
- * Constructor logo badge: the constructor colourway renders as the logo
- * (F1 teams have no ESPN logo CDN). Diagonal livery stripe + abbr.
+ * Constructor logo: the real team lockup served locally (F1 teams have no
+ * ESPN logo CDN). Lockups are wide, so they render height-matched with auto
+ * width — never squeezed into a square. Marks drawn dark-on-transparent
+ * (Aston, Cadillac, Mercedes) get a white plate; everything else sits bare
+ * on the dark card with a soft drop shadow.
  */
 export function F1Badge({
   abbr,
@@ -28,6 +31,45 @@ export function F1Badge({
   const record = constructorByAbbr(abbr ?? undefined)
   const p = primary ?? record?.colors.primary ?? '#E10600'
   const s = secondary ?? record?.colors.secondary ?? '#000000'
+  if (record?.logo) {
+    const dims =
+      size === 'sm'
+        ? 'h-6 max-w-[96px]'
+        : size === 'lg'
+          ? 'h-11 max-w-[180px]'
+          : size === 'xl'
+            ? 'h-14 max-w-[236px]'
+            : 'h-8 max-w-[128px]'
+    if (record.logoOnLight) {
+      return (
+        <span
+          className={`shrink-0 inline-flex items-center justify-center bg-white rounded-lg px-2 py-1 ${dims}`}
+          style={{ boxShadow: `0 0 14px ${p}55` }}
+          title={record.name}
+        >
+          <img
+            src={record.logo}
+            alt={`${record.name} logo`}
+            loading="lazy"
+            draggable={false}
+            className="h-full w-auto max-w-full object-contain select-none"
+          />
+        </span>
+      )
+    }
+    return (
+      <span className="shrink-0 inline-flex items-center" title={record.name}>
+        <img
+          src={record.logo}
+          alt={`${record.name} logo`}
+          loading="lazy"
+          draggable={false}
+          className={`${dims} w-auto object-contain select-none`}
+          style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.65))' }}
+        />
+      </span>
+    )
+  }
   const dims =
     size === 'sm'
       ? 'w-8 h-8 text-[10px] rounded-lg'
@@ -36,20 +78,6 @@ export function F1Badge({
         : size === 'xl'
           ? 'w-16 h-16 text-base rounded-2xl'
           : 'w-10 h-10 text-xs rounded-xl'
-  // Real constructor logo when we have one locally; the colourway tile is
-  // the fallback (F1 teams have no ESPN logo CDN).
-  if (record?.logo) {
-    return (
-      <img
-        src={record.logo}
-        alt={`${record.name} logo`}
-        title={record.name}
-        loading="lazy"
-        className={`${dims} shrink-0 object-contain bg-white p-1 border border-white/15`}
-        style={{ boxShadow: `0 0 12px ${p}55` }}
-      />
-    )
-  }
   return (
     <span
       aria-hidden="true"
