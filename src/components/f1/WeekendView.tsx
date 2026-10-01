@@ -146,33 +146,42 @@ export function WeekendView({ round, season }: { round: string; season?: string 
   }
 
   const title = data.race?.name ?? data.meeting?.name ?? `Round ${round}`
+  const nLive = ordered.filter((s) => s.state === 'live').length
+  const nFinal = ordered.filter((s) => s.state === 'final').length
   return (
     <div className="space-y-6">
       <Link href="/f1" className="fs-meta hover:text-fs-text inline-block">← All of F1</Link>
 
-      {/* Weekend hero with constructor-colour wash */}
+      {/* Weekend hero */}
       <div
-        className="fs-panel p-5 sm:p-7 relative overflow-hidden"
-        style={{ borderColor: '#E1060044' }}
+        className="rounded-2xl border p-5 sm:p-7 relative overflow-hidden"
+        style={{ borderColor: '#E1060044', background: 'linear-gradient(135deg, #E1060024 0%, #111712 55%)' }}
       >
         <div
           aria-hidden="true"
           className="absolute inset-0 pointer-events-none"
-          style={{ background: 'linear-gradient(120deg, #E1060026 0%, transparent 40%, transparent 60%, #4781D755 100%)' }}
+          style={{ background: 'radial-gradient(600px 200px at 85% 0%, #E1060018, transparent 70%)' }}
         />
         <div className="relative">
-          <p className="fs-eyebrow mb-1" style={{ '--tint': '#E10600' } as React.CSSProperties}>
-            {data.round != null ? `Round ${data.round}` : ''}{data.season ? ` · ${data.season} season` : ''}
-          </p>
+          <div className="flex flex-wrap items-center gap-2 mb-2">
+            <span className="fs-mono text-[11px] font-bold px-2 py-0.5 rounded tabular-nums" style={{ backgroundColor: '#E10600', color: '#fff' }}>
+              {data.round != null ? `ROUND ${data.round}` : 'GRAND PRIX'}
+            </span>
+            <span className="fs-meta">{data.season} season</span>
+            {nLive > 0 ? (
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded text-white bg-fs-red animate-pulse">● LIVE NOW</span>
+            ) : nFinal === ordered.length && ordered.length > 0 ? (
+              <span className="text-[11px] font-bold px-2 py-0.5 rounded text-fs-muted bg-white/10">WEEKEND COMPLETE</span>
+            ) : null}
+          </div>
           <h1 className="fs-title text-3xl sm:text-5xl">{title}</h1>
           <p className="text-sm text-fs-muted mt-2">
             {[data.race?.circuit ?? data.meeting?.circuit, data.race?.locality ?? data.meeting?.location, data.race?.country ?? data.meeting?.country].filter(Boolean).join(' · ')}
           </p>
-          {data.race ? (
-            <p className="fs-mono text-xs text-fs-muted mt-1 tabular-nums">
-              {data.race.date}{data.race.time ? ` · ${data.race.time}` : ''}
-            </p>
-          ) : null}
+          <p className="fs-mono text-xs text-fs-muted mt-1 tabular-nums">
+            {data.race ? `${data.race.date}${data.race.time ? ` · ${data.race.time}` : ''} · ` : ''}
+            {ordered.length > 0 ? `${ordered.length} sessions${nFinal > 0 ? ` · ${nFinal} final` : ''}` : 'Date TBC'}
+          </p>
         </div>
       </div>
 
@@ -185,7 +194,7 @@ export function WeekendView({ round, season }: { round: string; season?: string 
       ) : (
         <>
           {/* Session tabs */}
-          <div className="flex flex-wrap gap-2" role="tablist" aria-label="Weekend sessions">
+          <div className="inline-flex flex-wrap gap-1 rounded-full border border-fs-line bg-white/[0.03] p-1" role="tablist" aria-label="Weekend sessions">
             {ordered.map((s) => {
               const isActive = s.key === active?.key
               return (
@@ -194,10 +203,18 @@ export function WeekendView({ round, season }: { round: string; season?: string 
                   role="tab"
                   aria-selected={isActive}
                   onClick={() => setActiveKey(s.key)}
-                  className={`fs-tab border ${isActive ? 'fs-tab-active' : 'border-fs-line bg-white/[0.03]'}`}
+                  className={`fs-tab !px-4 ${isActive ? 'fs-tab-active' : ''}`}
                 >
+                  <span
+                    aria-hidden="true"
+                    className="inline-block w-1.5 h-1.5 rounded-full mr-1.5 align-middle"
+                    style={{
+                      backgroundColor: s.state === 'live' ? '#E10600' : s.state === 'final' ? '#8bc53f' : 'transparent',
+                      border: s.state === 'upcoming' ? '1px solid #5e6c63' : undefined,
+                      boxShadow: s.state === 'live' ? '0 0 6px #E10600' : undefined,
+                    }}
+                  />
                   {s.name}
-                  {s.state === 'live' ? ' ●' : ''}
                 </button>
               )
             })}
@@ -236,53 +253,74 @@ function SessionPanel({
       </div>
 
       {rows.length > 0 ? (
-        <ol className="divide-y divide-fs-line">
-          {rows.map((r) => {
-            const d = driverByNumber.get(r.driverNumber)
-            const status = r.dsq ? 'DSQ' : r.dns ? 'DNS' : r.dnf ? 'DNF' : null
-            return (
-              <li key={r.driverNumber} className="flex items-center gap-2.5 px-4 sm:px-5 py-1.5 text-sm hover:bg-white/[0.02]">
-                <span className="fs-mono font-bold w-7 text-fs-muted tabular-nums">{r.position ?? '–'}</span>
-                <F1Badge abbr={d?.teamAbbr} primary={d?.colour} size="sm" />
-                <span className="min-w-0 flex-1">
-                  {d ? (
-                    <Link href={`/f1/driver/${encodeURIComponent(d.acronym)}`} className="font-semibold fs-mono text-[13px] hover:underline" prefetch={false}>
-                      {d.acronym}
-                    </Link>
-                  ) : (
-                    <span className="font-semibold fs-mono text-[13px]">#{r.driverNumber}</span>
-                  )}{' '}
-                  <span className="text-fs-muted-2 text-xs truncate">
-                    {d ? `${d.firstName} ${d.lastName}` : 'Classification pending'}
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="fs-meta !text-[10px] text-left border-y border-fs-line">
+              <th className="font-medium pl-4 sm:pl-5 pr-2 py-2 w-14">POS</th>
+              <th className="font-medium py-2 pr-2">DRIVER</th>
+              <th className="font-medium py-2 pr-2 hidden md:table-cell">TEAM</th>
+              <th className="font-medium py-2 pr-2 text-right">GAP</th>
+              <th className="font-medium py-2 pl-2 pr-4 sm:pr-5 text-right">PTS</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-fs-line">
+            {rows.map((r) => {
+              const d = driverByNumber.get(r.driverNumber)
+              const status = r.dsq ? 'DSQ' : r.dns ? 'DNS' : r.dnf ? 'DNF' : null
+              const pos = Number(r.position)
+              const posColor = pos === 1 ? 'text-fs-gold' : pos === 2 ? 'text-fs-text' : pos === 3 ? 'text-[#cd7f32]' : 'text-fs-muted'
+              const tid = teams.find((t) => t.sport === 'F1' && t.abbreviation === d?.teamAbbr)?.id
+              return (
+                <tr key={r.driverNumber} className="hover:bg-white/[0.025] transition-colors">
+                  <td className="pl-4 sm:pl-5 pr-2 py-2 relative">
+                    <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-[3px]" style={{ backgroundColor: d?.colour ?? '#333' }} />
+                    <span className={`fs-mono font-black text-base tabular-nums ${posColor}`}>{r.position ?? '–'}</span>
+                  </td>
+                  <td className="py-2 pr-2">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <span className="w-24 shrink-0 hidden sm:inline-flex">
+                        <F1Badge abbr={d?.teamAbbr} primary={d?.colour} size="sm" />
+                      </span>
+                      <span className="min-w-0">
+                        {d ? (
+                          <Link href={`/f1/driver/${encodeURIComponent(d.acronym)}`} className="font-bold fs-mono text-[13px] hover:underline" prefetch={false}>
+                            {d.acronym}
+                          </Link>
+                        ) : (
+                          <span className="font-bold fs-mono text-[13px]">#{r.driverNumber}</span>
+                        )}{' '}
+                        {status ? <span className="text-[10px] font-bold text-fs-red">{status}</span> : null}
+                        <span className="block text-fs-muted-2 text-xs truncate">
+                          {d ? `${d.firstName} ${d.lastName}` : 'Classification pending'}
+                          <span className="md:hidden">{d?.teamAbbr ? ` · ${d.teamAbbr}` : ''}</span>
+                        </span>
+                      </span>
+                    </div>
+                  </td>
+                  <td className="py-2 pr-2 hidden md:table-cell">
                     {d?.team ? (
-                      <>
-                        {' · '}
-                        {(() => {
-                          const tid = teams.find((t) => t.sport === 'F1' && t.abbreviation === d.teamAbbr)?.id
-                          return tid ? (
-                            <Link href={`/f1/${tid}`} className="hover:underline" prefetch={false}>{d.team}</Link>
-                          ) : (
-                            <span>{d.team}</span>
-                          )
-                        })()}
-                      </>
-                    ) : null}
-                  </span>
-                  {status ? <span className="ml-1.5 text-[10px] font-bold text-fs-red">{status}</span> : null}
-                </span>
-                <span className="fs-mono text-xs text-fs-muted tabular-nums hidden sm:inline">
-                  {r.laps != null ? `${r.laps} laps` : ''}
-                </span>
-                {r.points != null && Number(r.points) > 0 ? (
-                  <span className="fs-mono text-xs font-bold text-fs-gold tabular-nums w-14 text-right">{r.points} PTS</span>
-                ) : null}
-                <span className="fs-mono text-xs text-fs-muted tabular-nums w-20 text-right">
-                  {typeof r.gapToLeader === 'number' ? (r.gapToLeader === 0 ? 'LEADER' : `+${r.gapToLeader.toFixed(3)}`) : (r.gapToLeader ?? '')}
-                </span>
-              </li>
-            )
-          })}
-        </ol>
+                      tid ? (
+                        <Link href={`/f1/${tid}`} className="text-fs-muted text-[13px] hover:text-fs-text hover:underline truncate block max-w-40" prefetch={false}>
+                          {d.team}
+                        </Link>
+                      ) : (
+                        <span className="text-fs-muted text-[13px] truncate block max-w-40">{d.team}</span>
+                      )
+                    ) : (
+                      <span className="text-fs-muted-2 text-xs">–</span>
+                    )}
+                  </td>
+                  <td className="py-2 pr-2 text-right fs-mono text-xs text-fs-muted tabular-nums whitespace-nowrap">
+                    {typeof r.gapToLeader === 'number' ? (r.gapToLeader === 0 ? 'LEADER' : `+${r.gapToLeader.toFixed(3)}`) : (r.gapToLeader ?? '–')}
+                  </td>
+                  <td className="py-2 pl-2 pr-4 sm:pr-5 text-right fs-mono text-xs font-bold tabular-nums">
+                    {r.points != null && Number(r.points) > 0 ? <span className="text-fs-gold">{r.points}</span> : <span className="text-fs-muted-2 font-normal">–</span>}
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
       ) : (
         <p className="px-4 sm:px-5 pb-5 text-sm text-fs-muted-2">
           {session.state === 'upcoming' ? 'No classification yet — lights out ' + fmtDate(session.dateStart) + '.' : 'Timing data pending for this session.'}

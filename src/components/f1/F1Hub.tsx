@@ -182,12 +182,17 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
               const team = abbrToTeam.get(d.teamAbbr)
               const c = team?.colors.primary ?? '#666'
               return (
-                <li key={d.code ?? d.name}>
-                  <Link href={d.code ? `/f1/driver/${encodeURIComponent(d.code)}` : '/f1'} className="flex items-center gap-2.5 px-4 py-1.5 text-sm hover:bg-white/[0.03]" prefetch={false}>
+                <li key={d.code ?? d.name} className="relative">
+                  <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-[3px] z-10" style={{ backgroundColor: c }} />
+                  <Link href={d.code ? `/f1/driver/${encodeURIComponent(d.code)}` : '/f1'} className="flex items-center gap-3 pl-4 pr-4 py-1.5 text-sm hover:bg-white/[0.03]" prefetch={false}>
                     <span className="fs-mono font-bold w-6 text-fs-muted tabular-nums">{d.position}</span>
-                    <span aria-hidden="true" className="w-1 self-stretch rounded-full shrink-0" style={{ backgroundColor: c, boxShadow: `0 0 6px ${c}88` }} />
-                    <span className="font-semibold flex-1 truncate hover:underline">{d.name}</span>
-                    <span className="text-xs font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: `${c}22`, color: c }}>{d.teamAbbr ?? ''}</span>
+                    <span className="w-24 shrink-0 hidden sm:inline-flex">
+                      <F1Badge abbr={d.teamAbbr} size="sm" />
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="font-semibold block truncate hover:underline leading-tight">{d.name}</span>
+                      <span className="fs-meta !text-[10px]">{d.code ?? ''}{d.wins ? ` · ${d.wins} WIN${d.wins === 1 ? '' : 'S'}` : ''}</span>
+                    </span>
                     <span className="fs-mono font-bold tabular-nums w-12 text-right">{d.points}</span>
                   </Link>
                 </li>
@@ -209,16 +214,19 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
               const max = Math.max(...(standings?.constructors ?? []).map((x: any) => Number(x.points) || 0), 1)
               const pct = Math.max(4, ((Number(c.points) || 0) / max) * 100)
               return (
-                <li key={c.name}>
-                  <Link href={href} className="flex items-center gap-2.5 px-4 py-1.5 text-sm hover:bg-white/[0.03]" prefetch={false}>
+                <li key={c.name} className="relative">
+                  <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-[3px] z-10" style={{ backgroundColor: color }} />
+                  <Link href={href} className="flex items-center gap-3 pl-4 pr-4 py-1.5 text-sm hover:bg-white/[0.03]" prefetch={false}>
                     <span className="fs-mono font-bold w-6 text-fs-muted tabular-nums">{c.position}</span>
+                    <span className="w-24 shrink-0 hidden sm:inline-flex">
+                      <F1Badge abbr={c.teamAbbr} size="sm" />
+                    </span>
                     <span className="flex-1 min-w-0">
-                      <span className="font-semibold block truncate hover:underline">{c.name}</span>
+                      <span className="font-semibold block truncate hover:underline leading-tight">{c.name}</span>
                       <span className="block h-1 rounded-full mt-1 overflow-hidden bg-white/5">
                         <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${color}, ${color}88)` }} />
                       </span>
                     </span>
-                    <F1Badge abbr={c.teamAbbr} size="sm" />
                     <span className="fs-mono font-bold tabular-nums w-12 text-right">{c.points}</span>
                   </Link>
                 </li>
@@ -244,7 +252,9 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
                 prefetch={false}
               >
                 <div className="flex items-center gap-3">
-                  <F1Badge abbr={t.abbreviation} size="md" />
+                  <span className="w-32 shrink-0 inline-flex">
+                    <F1Badge abbr={t.abbreviation} size="md" />
+                  </span>
                   <span className="min-w-0 flex-1">
                     <span className="fs-title text-base block truncate">{t.name}</span>
                     <span className="fs-meta">{t.abbreviation}{row ? ` · P${row.position} · ${row.points} PTS` : ''}</span>
