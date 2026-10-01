@@ -11,6 +11,7 @@ const LEAGUE_LINKS = [
   { href: '/nba', label: 'NBA' },
   { href: '/nhl', label: 'NHL' },
   { href: '/mlb', label: 'MLB' },
+  { href: '/f1', label: 'F1' },
 ]
 
 function DesktopSearch() {

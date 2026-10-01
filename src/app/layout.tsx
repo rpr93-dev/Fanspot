@@ -44,6 +44,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/nba" className="hover:text-fs-text" prefetch={false}>NBA</Link>
               <Link href="/nhl" className="hover:text-fs-text" prefetch={false}>NHL</Link>
               <Link href="/mlb" className="hover:text-fs-text" prefetch={false}>MLB</Link>
+              <Link href="/f1" className="hover:text-fs-text" prefetch={false}>F1</Link>
               <Link href="/fantasy/nfl" className="hover:text-fs-text" prefetch={false}>Fantasy</Link>
               <Link href="/news" className="hover:text-fs-text" prefetch={false}>News</Link>
             </nav>

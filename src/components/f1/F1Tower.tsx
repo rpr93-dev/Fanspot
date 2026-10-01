@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import type { F1CarState, F1Driver } from '@/lib/f1'
 import { formatGap, formatLapTime } from '@/lib/f1'
 
@@ -33,9 +34,13 @@ export function F1Tower({
               style={{ backgroundColor: d?.colour ?? '#666' }}
             />
             <span className="min-w-0 flex-1">
-              <span className="font-semibold fs-mono text-[13px]">
-                {d?.acronym ?? `#${car.number}`}
-              </span>{' '}
+              {d?.acronym ? (
+                <Link href={`/f1/driver/${encodeURIComponent(d.acronym)}`} className="font-semibold fs-mono text-[13px] hover:underline" prefetch={false}>
+                  {d.acronym}
+                </Link>
+              ) : (
+                <span className="font-semibold fs-mono text-[13px]">#{car.number}</span>
+              )}{' '}
               <span className="text-fs-muted-2 text-xs truncate">
                 {d ? `${d.firstName[0]}. ${d.lastName}` : ''}
               </span>

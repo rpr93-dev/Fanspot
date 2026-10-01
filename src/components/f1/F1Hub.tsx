@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { teams } from '@/data/teams'
+import { F1Badge } from './F1Badge'
 
 interface Round {
   round: number
@@ -16,14 +17,16 @@ interface Round {
 }
 
 /**
- * F1 league hub: next race with countdown, live-session entry, full
- * calendar, and both championships. All data from /api/f1/* (Jolpica +
- * OpenF1) — nothing here touches ESPN team-vs-team shapes.
+ * F1 league hub: next race with countdown, live-session entry, clickable
+ * full calendar (every round links to its weekend hub with race/qualy/
+ * practice classifications), and both championships with constructor
+ * colours throughout.
  */
 export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
-  const [schedule, setSchedule] = useState<{ rounds: Round[]; next: Round | null } | null>(null)
+  const [schedule, setSchedule] = useState<{ rounds: Round[]; next: Round | null; season?: string } | null>(null)
   const [standings, setStandings] = useState<any | null>(null)
   const [liveKey, setLiveKey] = useState<number | null>(null)
+  const [liveName, setLiveName] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
 
   useEffect(() => {
@@ -36,10 +39,14 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (!cancelled && j) setStandings(j) })
       .catch(() => {})
-    // Live now? The latest session endpoint answers in one call.
     fetch('/api/f1/live')
       .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (!cancelled && j?.state === 'live') setLiveKey(j.sessionKey) })
+      .then((j) => {
+        if (!cancelled && j?.state === 'live') {
+          setLiveKey(j.sessionKey)
+          setLiveName(j.sessionName ?? null)
+        }
+      })
       .catch(() => {})
     const t = setInterval(() => setNow(Date.now()), 30_000)
     return () => { cancelled = true; clearInterval(t) }
@@ -48,22 +55,37 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
   const next = schedule?.next ?? null
   const msToNext = next ? Date.parse(next.startIso) - now : NaN
   const constructors = (teams ?? []).filter((t) => t.sport === 'F1')
+  const abbrToTeam = new Map(constructors.map((t) => [t.abbreviation, t]))
+  const season = schedule?.season ?? String(new Date().getFullYear())
 
   return (
     <div className="space-y-12">
-      {/* Next race */}
+      {/* Next race hero */}
       <section aria-label="Next race">
         {liveKey ? (
-          <Link href={`/f1/race/${liveKey}`} className="fs-panel block p-5 sm:p-6 transition hover:brightness-125" style={{ borderColor: '#E1060055' }}>
-            <p className="fs-eyebrow mb-1" style={{ '--tint': teamColor } as React.CSSProperties}>Happening now</p>
-            <p className="fs-title text-2xl sm:text-3xl">🔴 Live timing is on — open the Race Center →</p>
+          <Link
+            href={`/f1/race/${liveKey}`}
+            className="block p-5 sm:p-7 rounded-2xl border relative overflow-hidden transition hover:brightness-125"
+            style={{ borderColor: '#E1060066', background: 'linear-gradient(120deg, #E1060033 0%, #111712 45%, #111712 100%)' }}
+          >
+            <div
+              aria-hidden="true"
+              className="absolute inset-0 pointer-events-none"
+              style={{ background: 'linear-gradient(100deg, #E1060044 0%, transparent 50%)' }}
+            />
+            <p className="fs-eyebrow mb-1 relative" style={{ '--tint': teamColor } as React.CSSProperties}>Happening now{liveName ? ` · ${liveName}` : ''}</p>
+            <p className="fs-title text-2xl sm:text-4xl relative">🔴 Live timing is on — open the Race Center →</p>
           </Link>
         ) : next ? (
-          <div className="fs-panel p-5 sm:p-6">
+          <Link
+            href={`/f1/round/${next.round}`}
+            className="block p-5 sm:p-7 rounded-2xl border relative overflow-hidden transition hover:brightness-125"
+            style={{ borderColor: '#E1060044', background: 'linear-gradient(120deg, #E1060022 0%, #111712 45%, #111712 100%)' }}
+          >
             <p className="fs-eyebrow mb-1" style={{ '--tint': teamColor } as React.CSSProperties}>
-              Round {next.round} · Next race
+              Round {next.round} · Next race · tap for weekend hub
             </p>
-            <h2 className="fs-title text-2xl sm:text-3xl">{next.name}</h2>
+            <h2 className="fs-title text-3xl sm:text-4xl">{next.name}</h2>
             <p className="text-sm text-fs-muted mt-1">
               {next.circuit ?? ''}{next.locality ? ` · ${next.locality}` : ''}{next.country ? `, ${next.country}` : ''}
             </p>
@@ -71,31 +93,49 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
               {Number.isFinite(msToNext) && msToNext > 0 ? countdown(msToNext) : 'Date TBC'} ·{' '}
               {new Date(next.startIso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             </p>
-          </div>
+          </Link>
         ) : (
           <div className="fs-panel p-5 sm:p-6"><p className="text-sm text-fs-muted">Calendar loading…</p></div>
         )}
       </section>
 
-      {/* Schedule */}
+      {/* Schedule — every round clickable */}
       <section aria-label="Calendar">
-        <h2 className="fs-title text-xl mb-4">2026 Calendar</h2>
+        <div className="flex items-baseline justify-between mb-4">
+          <h2 className="fs-title text-xl">{season} Calendar</h2>
+          <p className="fs-meta">Tap a GP for results + sessions</p>
+        </div>
         <div className="fs-panel overflow-hidden">
           <ul className="divide-y divide-fs-line">
             {(schedule?.rounds ?? []).map((r) => {
               const past = Date.parse(r.startIso) < now - 3 * 3_600_000
               const isNext = next?.round === r.round && next?.name === r.name
               return (
-                <li key={`${r.round}-${r.name}`} className={`flex items-baseline gap-3 px-3 sm:px-4 py-2 text-sm ${past && !isNext ? 'opacity-55' : ''}`}>
-                  <span className="fs-mono text-fs-muted-2 w-7 shrink-0 tabular-nums">R{r.round}</span>
-                  <span className="min-w-0 flex-1">
-                    <span className="font-semibold">{r.name}</span>{' '}
-                    <span className="text-fs-muted-2 text-xs">{r.locality ?? r.country ?? ''}</span>
-                    {isNext ? <span className="ml-2 text-[10px] font-bold text-fs-gold">NEXT</span> : null}
-                  </span>
-                  <span className="fs-mono text-xs text-fs-muted shrink-0 tabular-nums">
-                    {new Date(r.startIso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                  </span>
+                <li key={`${r.round}-${r.name}`} className={past && !isNext ? 'opacity-70' : ''}>
+                  <Link
+                    href={`/f1/round/${r.round}`}
+                    className="flex items-center gap-3 px-3 sm:px-4 py-2.5 text-sm hover:bg-white/[0.04] transition-colors group"
+                    prefetch={false}
+                  >
+                    <span className="fs-mono text-fs-muted-2 w-8 shrink-0 tabular-nums">R{r.round}</span>
+                    <span
+                      aria-hidden="true"
+                      className="w-1 self-stretch rounded-full shrink-0"
+                      style={{
+                        background: past ? '#5e6c63' : 'linear-gradient(180deg, #E10600, #4781D7)',
+                        boxShadow: isNext ? '0 0 8px #E10600' : undefined,
+                      }}
+                    />
+                    <span className="min-w-0 flex-1">
+                      <span className="font-semibold group-hover:underline">{r.name}</span>{' '}
+                      <span className="text-fs-muted-2 text-xs">{r.locality ?? r.country ?? ''}</span>
+                      {isNext ? <span className="ml-2 text-[10px] font-bold text-fs-gold">NEXT</span> : null}
+                      {past ? <span className="ml-2 text-[10px] font-bold text-fs-muted-2">RESULTS →</span> : null}
+                    </span>
+                    <span className="fs-mono text-xs text-fs-muted shrink-0 tabular-nums">
+                      {new Date(r.startIso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                    </span>
+                  </Link>
                 </li>
               )
             })}
@@ -107,49 +147,88 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
       {/* Standings */}
       <section aria-label="Championships" className="grid gap-6 md:grid-cols-2 items-start">
         <div className="fs-panel overflow-hidden">
-          <h2 className="fs-title text-xl px-4 pt-4 pb-1">Drivers</h2>
+          <div className="flex items-baseline justify-between px-4 pt-4 pb-1">
+            <h2 className="fs-title text-xl">Drivers</h2>
+            <p className="fs-meta">Tap for profile</p>
+          </div>
           <ol className="divide-y divide-fs-line">
-            {(standings?.drivers ?? []).slice(0, 10).map((d: any) => (
-              <li key={d.code ?? d.name} className="flex items-baseline gap-2.5 px-4 py-1.5 text-sm">
-                <span className="fs-mono font-bold w-6 text-fs-muted tabular-nums">{d.position}</span>
-                <span className="font-semibold flex-1 truncate">{d.name}</span>
-                <span className="text-fs-muted-2 text-xs">{d.teamAbbr ?? ''}</span>
-                <span className="fs-mono font-bold tabular-nums">{d.points}</span>
-              </li>
-            ))}
+            {(standings?.drivers ?? []).slice(0, 10).map((d: any) => {
+              const team = abbrToTeam.get(d.teamAbbr)
+              const c = team?.colors.primary ?? '#666'
+              return (
+                <li key={d.code ?? d.name}>
+                  <Link href={d.code ? `/f1/driver/${encodeURIComponent(d.code)}` : '/f1'} className="flex items-center gap-2.5 px-4 py-1.5 text-sm hover:bg-white/[0.03]" prefetch={false}>
+                    <span className="fs-mono font-bold w-6 text-fs-muted tabular-nums">{d.position}</span>
+                    <span aria-hidden="true" className="w-1 self-stretch rounded-full shrink-0" style={{ backgroundColor: c, boxShadow: `0 0 6px ${c}88` }} />
+                    <span className="font-semibold flex-1 truncate hover:underline">{d.name}</span>
+                    <span className="text-xs font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: `${c}22`, color: c }}>{d.teamAbbr ?? ''}</span>
+                    <span className="fs-mono font-bold tabular-nums w-12 text-right">{d.points}</span>
+                  </Link>
+                </li>
+              )
+            })}
             {!standings ? <li className="px-4 py-3 text-sm text-fs-muted-2">Loading…</li> : null}
           </ol>
         </div>
         <div className="fs-panel overflow-hidden">
-          <h2 className="fs-title text-xl px-4 pt-4 pb-1">Constructors</h2>
+          <div className="flex items-baseline justify-between px-4 pt-4 pb-1">
+            <h2 className="fs-title text-xl">Constructors</h2>
+            <p className="fs-meta">Tap for team hub</p>
+          </div>
           <ol className="divide-y divide-fs-line">
-            {(standings?.constructors ?? []).map((c: any) => (
-              <li key={c.name} className="flex items-baseline gap-2.5 px-4 py-1.5 text-sm">
-                <span className="fs-mono font-bold w-6 text-fs-muted tabular-nums">{c.position}</span>
-                <span className="font-semibold flex-1 truncate">{c.name}</span>
-                <span className="fs-mono font-bold tabular-nums">{c.points}</span>
-              </li>
-            ))}
+            {(standings?.constructors ?? []).map((c: any) => {
+              const team = abbrToTeam.get(c.teamAbbr)
+              const color = team?.colors.primary ?? '#666'
+              const href = team ? `/f1/${team.id}` : '/f1'
+              const max = Math.max(...(standings?.constructors ?? []).map((x: any) => Number(x.points) || 0), 1)
+              const pct = Math.max(4, ((Number(c.points) || 0) / max) * 100)
+              return (
+                <li key={c.name}>
+                  <Link href={href} className="flex items-center gap-2.5 px-4 py-1.5 text-sm hover:bg-white/[0.03]" prefetch={false}>
+                    <span className="fs-mono font-bold w-6 text-fs-muted tabular-nums">{c.position}</span>
+                    <span className="flex-1 min-w-0">
+                      <span className="font-semibold block truncate hover:underline">{c.name}</span>
+                      <span className="block h-1 rounded-full mt-1 overflow-hidden bg-white/5">
+                        <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: `linear-gradient(90deg, ${color}, ${color}88)` }} />
+                      </span>
+                    </span>
+                    <F1Badge abbr={c.teamAbbr} size="sm" />
+                    <span className="fs-mono font-bold tabular-nums w-12 text-right">{c.points}</span>
+                  </Link>
+                </li>
+              )
+            })}
             {!standings ? <li className="px-4 py-3 text-sm text-fs-muted-2">Loading…</li> : null}
           </ol>
         </div>
       </section>
 
-      {/* Constructors */}
+      {/* Constructors grid with logos */}
       <section aria-label="Constructors">
         <h2 className="fs-title text-xl mb-4">Constructors</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {constructors.map((t) => (
-            <Link key={t.id} href={`/f1/${t.id}`} className="fs-panel block p-4 transition hover:brightness-125">
-              <div className="flex items-center gap-3">
-                <span aria-hidden="true" className="w-9 h-9 rounded-lg shrink-0" style={{ backgroundColor: t.colors.primary }} />
-                <span>
-                  <span className="fs-title text-base block">{t.name}</span>
-                  <span className="fs-meta">{t.abbreviation}</span>
-                </span>
-              </div>
-            </Link>
-          ))}
+          {constructors.map((t) => {
+            const row = (standings?.constructors ?? []).find((c: any) => c.teamAbbr === t.abbreviation)
+            return (
+              <Link
+                key={t.id}
+                href={`/f1/${t.id}`}
+                className="block p-4 rounded-xl border transition hover:-translate-y-0.5 hover:brightness-125 relative overflow-hidden"
+                style={{ borderColor: `${t.colors.primary}44`, background: `linear-gradient(135deg, ${t.colors.primary}1f 0%, #111712 55%)` }}
+                prefetch={false}
+              >
+                <div className="flex items-center gap-3">
+                  <F1Badge abbr={t.abbreviation} size="md" />
+                  <span className="min-w-0 flex-1">
+                    <span className="fs-title text-base block truncate">{t.name}</span>
+                    <span className="fs-meta">{t.abbreviation}{row ? ` · P${row.position} · ${row.points} PTS` : ''}</span>
+                  </span>
+                  <span aria-hidden="true" className="text-fs-muted-2">→</span>
+                </div>
+                <span aria-hidden="true" className="absolute left-0 top-0 bottom-0 w-1" style={{ background: `linear-gradient(180deg, ${t.colors.primary}, ${t.colors.secondary})` }} />
+              </Link>
+            )
+          })}
         </div>
       </section>
     </div>

@@ -22,6 +22,16 @@ export function fetchSession(sessionKey?: string) {
   return of1(`/sessions?session_key=${encodeURIComponent(key)}`, 10_000)
 }
 
+/** All meetings (Grands Prix + tests) for a year. */
+export function fetchMeetings(year: string | number) {
+  return of1(`/meetings?year=${encodeURIComponent(String(year))}`, 15_000)
+}
+
+/** Every session in a meeting (Practice 1-3, Qualifying, Sprint, Race…). */
+export function fetchSessionsByMeeting(meetingKey: number | string) {
+  return of1(`/sessions?meeting_key=${encodeURIComponent(String(meetingKey))}`, 15_000)
+}
+
 /** Drivers (numbers, acronyms, team colours) for a session. */
 export function fetchDrivers(sessionKey: number | string) {
   return of1(`/drivers?session_key=${encodeURIComponent(String(sessionKey))}`, 10_000)
