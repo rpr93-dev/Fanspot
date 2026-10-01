@@ -8,7 +8,7 @@ import { checkRateLimit } from '@/lib/rate-limit'
  *
  *   Body: { team: "NE", opponent: "SEA", gameDate: "20260913" }
  *
- *   Returns the scraped player prop lines from all sportsbooks.
+ *   Returns the DraftKings player prop lines for the game.
  */
 
 const SCRAPER_URL = process.env.SCRAPER_URL || 'http://localhost:8770'
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
 
-  const { team, opponent, gameDate, sport } = body
+  const { team, opponent, gameDate, sport, gameTime } = body
   if (!team || !opponent || !gameDate) {
     return NextResponse.json(
       { error: 'Missing required fields: team, opponent, gameDate' },
@@ -54,6 +54,8 @@ export async function POST(request: Request) {
         opponent,
         game_date: gameDate,
         sport: sport || 'NFL',
+        // Disambiguates same-teams doubleheaders (MLB) on the board.
+        ...(typeof gameTime === 'string' && gameTime ? { game_time: gameTime } : {}),
       }),
       signal: AbortSignal.timeout(120_000), // 2 min timeout for scraping
     })
@@ -110,12 +112,19 @@ export async function POST(request: Request) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const date = searchParams.get('date')
+  const game = searchParams.get('game')
   if (date && !DATE_RE.test(date)) {
     return invalidParam('date must be YYYYMMDD')
   }
+  if (game && !/^([A-Z]{2,4}_)?[A-Z]{1,4}_[A-Z]{1,4}_\d{8}$/i.test(game)) {
+    return invalidParam('game must be [SPORT_]TEAM_OPP_YYYYMMDD')
+  }
 
   try {
-    const url = `${SCRAPER_URL}/results${date ? `?date=${encodeURIComponent(date)}` : ''}`
+    const qs = game
+      ? `?game=${encodeURIComponent(game.toUpperCase())}`
+      : date ? `?date=${encodeURIComponent(date)}` : ''
+    const url = `${SCRAPER_URL}/results${qs}`
     const res = await fetch(url, { signal: AbortSignal.timeout(10_000) })
 
     if (!res.ok) {

@@ -1,10 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { eventDateToAsOf, extractLiveStats, quartersPlayed, isGameComplete, namesMatch } from '@/lib/propLedger'
+import { eventDateToAsOf, extractLiveStats, quartersPlayed, isGameComplete, namesMatch, periodLabel } from '@/lib/propLedger'
+import { closingLineMap, scorePicks } from '@/lib/propGrades'
 import { isOutTier, parseRosterInjuries, teamQbs } from '@/lib/injury'
 import { computeOverUnderEdge, EDGE_STYLES, formatPrice, normalizePlayerName, pickConfidencePct } from '@/lib/propEdge'
 import { PlayerProjections, type BookPlayer, type ProjectionRow } from '@/components/PlayerProjections'
+import { PropTableLegend } from '@/components/PropTableLegend'
 
 interface PropLine {
   market: string
@@ -217,12 +219,21 @@ export default function NextGamePanel({
       params.set('total', String(total))
       params.set('spread', String(spread))
     }
-    fetch(`/api/props?${params.toString()}`, { signal: AbortSignal.timeout(15000) })
-      .then((r) => r.json().catch(() => ({ available: false })))
-      .then((json) => { if (!cancelled) setProps(json) })
-      .catch(() => { if (!cancelled) setProps({ available: false, reason: 'error' }) })
-    return () => { cancelled = true }
-  }, [sport, teamAbbr, opponentAbbr, eventId, eventDate, isPreseason, total, spread])
+    const load = () => {
+      fetch(`/api/props?${params.toString()}`, { signal: AbortSignal.timeout(15000) })
+        .then((r) => r.json().catch(() => ({ available: false })))
+        .then((json) => { if (!cancelled) setProps(json) })
+        .catch(() => { if (!cancelled) setProps({ available: false, reason: 'error' }) })
+    }
+    load()
+    // Pre-game lines move — re-pull hourly while the game hasn't kicked off
+    // so an open preview tab tracks the board (the server cron snapshots the
+    // same cadence into the ledger for the closing-line grade).
+    const hourly = phase === 'pre'
+      ? setInterval(load, 60 * 60 * 1000)
+      : null
+    return () => { cancelled = true; if (hourly) clearInterval(hourly) }
+  }, [sport, teamAbbr, opponentAbbr, eventId, eventDate, isPreseason, total, spread, phase])
 
   // Fantasy updates for both teams' star players (starters at each position).
   // Starters load in every phase: pre-game they drive the model run, and in
@@ -428,14 +439,19 @@ export default function NextGamePanel({
   const autoRanRef = useRef(false)
 
   // Canonical game key: sorted team pair so both teams' pages share one record.
+  // NFL uses fantasy abbreviations; every other sport uses the ESPN codes both
+  // the team page and the game page already pass as teamAbbr/opponentAbbr.
   const ledgerPair = (): [string, string] => {
-    const codes = modelTeamCodes()
-    return [codes.our, codes.opp].sort() as [string, string]
+    if (isNfl) {
+      const codes = modelTeamCodes()
+      return [codes.our, codes.opp].sort() as [string, string]
+    }
+    return [(teamAbbr || '').toUpperCase(), (opponentAbbr || '').toUpperCase()].sort() as [string, string]
   }
 
   // Load any existing snapshot for this game.
   useEffect(() => {
-    if (sport.toUpperCase() !== 'NFL' || !eventDate) { setLedgerChecked(true); return }
+    if (!eventDate) { setLedgerChecked(true); return }
     let cancelled = false
     const [t1, t2] = ledgerPair()
     fetch(`/api/prop-ledger?team=${t1}&opponent=${t2}&eventDate=${eventDate}`, { signal: AbortSignal.timeout(10000) })
@@ -443,7 +459,7 @@ export default function NextGamePanel({
       .then((j) => { if (!cancelled) { setLedger(j?.game ?? null); setLedgerChecked(true) } })
       .catch(() => { if (!cancelled) setLedgerChecked(true) })
     return () => { cancelled = true }
-  }, [sport, eventDate, teamFantasyAbbr, opponentFantasyAbbr])
+  }, [sport, eventDate, teamFantasyAbbr, opponentFantasyAbbr, teamAbbr, opponentAbbr])
 
   // Roster injury feed (ESPN): live mid-game statuses (Questionable/Out with
   // today's date) for exit detection. ~350KB per team — only fetch when it can
@@ -540,6 +556,120 @@ export default function NextGamePanel({
     } catch {}
   }
 
+  // DraftKings line for a keyless (non-NFL) projection row: prefers the
+  // hourly-refreshed scraper board, falls back to Odds API lines. Median of
+  // the O/U-filtered candidates (alternates already carry '+' markets and
+  // never reach the board this reads from).
+  const dkLineForAny = (name: string, stat: string): { line: number; book: string; over: number | null; under: number | null; books: number } | null => {
+    const want = normalizePlayerName(name)
+    const cands: { line: number; book: string; over: number | null; under: number | null }[] = []
+    const results = (scraperData as any)?.results
+    if (results && typeof results === 'object') {
+      for (const [bookKey, b] of Object.entries(results) as [string, any][]) {
+        for (const p of (b as any)?.props ?? []) {
+          if (p?.stat !== stat || typeof p?.line !== 'number' || !(p.line > 0)) continue
+          if (p?.over == null || p?.under == null) continue
+          if (normalizePlayerName(p?.player ?? '') !== want) continue
+          const market = String(p?.market ?? '').toLowerCase()
+          if (market.includes('+') || market.includes('most')) continue
+          cands.push({ line: p.line, book: p.sportsbook ?? bookKey, over: p.over ?? null, under: p.under ?? null })
+        }
+      }
+    }
+    if (!cands.length) {
+      const player = props?.players?.find((pl) => normalizePlayerName(pl.name) === want)
+      const hit = player?.props.find((x) => x.stat === stat && x.over != null && x.under != null)
+      if (hit) {
+        return { line: hit.line, book: props?.bookmaker ?? 'sportsbook', over: hit.over, under: hit.under, books: 1 }
+      }
+      return null
+    }
+    const lines = cands.map((c) => c.line).sort((a, b) => a - b)
+    const median = lines[Math.floor(lines.length / 2)]
+    const best = cands.find((c) => c.line === median) ?? cands[0]
+    return { ...best, books: cands.length }
+  }
+
+  // Save the pre-game projection snapshot for non-NFL games: one row per
+  // (player, modeled stat) from the keyless season-average projections,
+  // joined to the DraftKings line. Write-once per game, like the NFL path.
+  const preRecordedRef = useRef(false)
+  const recordPreSnapshotAny = () => {
+    if (isNfl || !eventDate || preRecordedRef.current || ledger?.pre) return
+    const projections = props?.projections
+    if (!projections?.length) return
+    try {
+      const [t1, t2] = ledgerPair()
+      const rows: any[] = []
+      for (const p of projections) {
+        for (const l of p.lines ?? []) {
+          if (!l.stat || typeof l.value !== 'number') continue
+          const dk = dkLineForAny(p.name, l.stat)
+          const edge = dk ? computeOverUnderEdge(l.value, l.sd ?? null, dk.line) : null
+          rows.push({
+            player: p.name,
+            stat: l.stat,
+            stat_label: l.label,
+            position: p.position,
+            team: p.team,
+            projection: l.value,
+            pred_sd: l.sd ?? null,
+            line: dk?.line ?? null,
+            book: dk?.book ?? null,
+            over: dk?.over ?? null,
+            under: dk?.under ?? null,
+            books: dk?.books ?? 0,
+            pick: edge?.pick ?? null,
+            prob: edge?.prob ?? null,
+            edge: edge?.edge ?? null,
+          })
+        }
+      }
+      if (!rows.length) return
+      preRecordedRef.current = true
+      const meta = {
+        asOf: eventDateToAsOf(eventDate),
+        source: (props as any)?.projectionSource ?? 'espn-season-avg',
+        teams: { a: t1, b: t2 },
+      }
+      fetch('/api/prop-ledger', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'pre', team: t1, opponent: t2, eventDate, record: { ...meta, rows } }),
+        signal: AbortSignal.timeout(30000),
+      })
+        .then((res) => res.json().catch(() => null))
+        .then((j) => {
+          if (j?.ok) {
+            setLedger((g: any) => ({
+              eventDate, team: t1, opponent: t2,
+              live: g?.live ?? [],
+              lines: g?.lines ?? [],
+              finalLines: g?.finalLines ?? null,
+              pre: { recordedAt: j.recordedAt, rows, meta },
+            }))
+          } else if (j?.error === 'SNAPSHOT_EXISTS') {
+            // Another view won the race — reload so this panel grades too.
+            fetch(`/api/prop-ledger?team=${t1}&opponent=${t2}&eventDate=${eventDate}`)
+              .then((r) => (r.ok ? r.json() : null))
+              .then((gg) => { if (gg?.game) setLedger(gg.game) })
+              .catch(() => {})
+          }
+        })
+        .catch(() => {})
+    } catch {}
+  }
+
+  // Non-NFL snapshot trigger: once the projections are in and the scraper has
+  // answered (lines joined when present; the hourly snapshots still bank the
+  // closing lines when it hasn't). Pre-phase only — after the final only a
+  // locked snapshot counts.
+  useEffect(() => {
+    if (isNfl || phase !== 'pre' || !ledgerChecked || !props?.projections?.length) return
+    if (ledger?.pre || scraperLoading) return
+    recordPreSnapshotAny()
+  }, [isNfl, phase, ledgerChecked, props, ledger, scraperLoading, eventDate])
+
   // Auto-run once per game: hydrate from the saved snapshot when present,
   // otherwise run the model once now (it only ever reads pre-game data).
   useEffect(() => {
@@ -564,22 +694,27 @@ export default function NextGamePanel({
     void runModel()
   }, [sport, phase, ledgerChecked, ledger, modelResults, modelLoading, ourProjected, oppProjected, ourStarters, oppStarters])
 
-  // ---- Live comparison: model snapshot vs ESPN box score ----
+  // ---- Live comparison: frozen snapshot vs ESPN box score (every sport) ----
   const liveStats = useMemo(() => {
-    const allRows = [...(modelResults ?? []), ...(backupProjections ?? [])]
-    if (!comparing || !liveBoxScore || !allRows.length) return null
-    const names = Array.from(new Set(allRows.map((r) => r.player))).map((name) => ({ name }))
+    if (!comparing || !liveBoxScore) return null
+    const names = isNfl
+      ? Array.from(new Set([...(modelResults ?? []), ...(backupProjections ?? [])].map((r) => r.player))).map((name) => ({ name }))
+      : Array.from(new Set(
+        ((ledger?.pre?.rows ?? []) as any[]).map((r) => r?.player).filter(Boolean),
+      )).map((name) => ({ name }))
+    if (!names.length) return null
     try {
-      return extractLiveStats(liveBoxScore, names)
+      return extractLiveStats(liveBoxScore, names, sport)
     } catch { return null }
-  }, [comparing, liveBoxScore, modelResults, backupProjections])
+  }, [comparing, liveBoxScore, modelResults, backupProjections, ledger, sport, isNfl])
   const liveQuarters = liveBoxScore ? quartersPlayed(liveBoxScore) : 0
   const gameFinal = liveBoxScore ? isGameComplete(liveBoxScore) : false
   const liveStatusLabel = liveBoxScore?.status?.shortDetail ?? liveBoxScore?.status?.description ?? null
   const showLive = liveStats != null
 
-  // Record one live point per quarter (plus the final) — cheap, durable, and
-  // exactly the per-game progression the optimizer needs.
+  // Record one live point per period (plus the final) — cheap, durable, and
+  // exactly the per-game progression the optimizer needs. Server-side dedup
+  // makes concurrent views (team page + game page) idempotent.
   useEffect(() => {
     if (!comparing || !liveBoxScore || !liveStats || !ledgerChecked || !ledger?.pre) return
     if (!eventDate || liveQuarters <= 0) return
@@ -620,7 +755,83 @@ export default function NextGamePanel({
         }
       })
       .catch(() => {})
-  }, [comparing, liveBoxScore, liveStats, ledgerChecked, ledger, liveQuarters, gameFinal, eventDate, exitedQbs, backupProjections, teamAbbr])
+  }, [comparing, liveBoxScore, liveStats, ledgerChecked, ledger, liveQuarters, gameFinal, eventDate, exitedQbs, backupProjections, teamAbbr, sport])
+
+  // Hourly book-line snapshots while pre-game: flatten the scraped board to
+  // O/U rows and bank them in the ledger. The most recent pre-final snapshot
+  // freezes as the closing lines the running grade is scored on. At most one
+  // snapshot per hour per game view (the server cron covers games nobody has
+  // open; this covers the game on screen).
+  const lastLinesSnapRef = useRef<number>(0)
+  useEffect(() => {
+    if (phase !== 'pre' || !ledgerChecked || !eventDate) return
+    const results = (scraperData as any)?.results
+    if (!results || typeof results !== 'object') return
+    if (Date.now() - lastLinesSnapRef.current < 55 * 60 * 1000) return
+    const existing = Array.isArray((ledger as any)?.lines) ? (ledger as any).lines : []
+    const lastAt = existing.length ? new Date(existing[existing.length - 1]?.recordedAt ?? 0).getTime() : 0
+    if (Number.isFinite(lastAt) && Date.now() - lastAt < 55 * 60 * 1000) {
+      lastLinesSnapRef.current = Date.now()
+      return
+    }
+    const rows: { player: string; stat: string; line: number; book: string; over: number | null; under: number | null }[] = []
+    for (const [bookKey, b] of Object.entries(results) as [string, any][]) {
+      for (const p of (b as any)?.props ?? []) {
+        if (typeof p?.line !== 'number' || !(p.line > 0)) continue
+        if (p?.over == null || p?.under == null) continue
+        if (!p?.player || !p?.stat) continue
+        const market = String(p?.market ?? '').toLowerCase()
+        if (market.includes('+') || market.includes('most')) continue
+        rows.push({
+          player: p.player,
+          stat: String(p.stat).toLowerCase(),
+          line: p.line,
+          book: p.sportsbook ?? bookKey,
+          over: p.over ?? null,
+          under: p.under ?? null,
+        })
+      }
+    }
+    if (!rows.length) return
+    lastLinesSnapRef.current = Date.now()
+    const [t1, t2] = ledgerPair()
+    fetch('/api/prop-ledger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'lines', team: t1, opponent: t2, eventDate, record: { lines: rows, source: 'panel-hourly' } }),
+      signal: AbortSignal.timeout(30000),
+    })
+      .then((res) => res.json().catch(() => null))
+      .then((j) => {
+        if (j?.ok) {
+          setLedger((g: any) => (g
+            ? { ...g, lines: [...(g.lines ?? []), { recordedAt: j.recordedAt, source: 'panel-hourly', lines: rows }], finalLines: g?.finalLines?.frozen ? g.finalLines : { recordedAt: j.recordedAt, source: 'panel-hourly', lines: rows } }
+            : { eventDate, team: t1, opponent: t2, pre: null, live: [], lines: [{ recordedAt: j.recordedAt, source: 'panel-hourly', lines: rows }], finalLines: { recordedAt: j.recordedAt, source: 'panel-hourly', lines: rows } }))
+        }
+      })
+      .catch(() => {})
+  }, [sport, phase, ledgerChecked, ledger, scraperData, eventDate])
+
+  // Freeze the closing lines once the final is in (idempotent server-side).
+  useEffect(() => {
+    if (!gameFinal || !ledgerChecked || !eventDate) return
+    if ((ledger as any)?.finalLines?.frozen) return
+    if (!(ledger as any)?.pre) return
+    const [t1, t2] = ledgerPair()
+    fetch('/api/prop-ledger', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'finalize', team: t1, opponent: t2, eventDate }),
+      signal: AbortSignal.timeout(30000),
+    })
+      .then((res) => res.json().catch(() => null))
+      .then((j) => {
+        if (j?.ok && j?.finalLines) {
+          setLedger((g: any) => (g ? { ...g, finalLines: j.finalLines } : g))
+        }
+      })
+      .catch(() => {})
+  }, [sport, gameFinal, ledgerChecked, ledger, eventDate])
 
   // Project a mid-game backup QB through the same pipeline (single-target
   // run; no ESPN prior for backups, so the model leans on position history —
@@ -733,17 +944,17 @@ export default function NextGamePanel({
     return hit ? { line: hit.line, book: props?.bookmaker ?? 'sportsbook', over: hit.over, under: hit.under, books: 1 } : null
   }
 
-  // Scraped prop line for a model row: matches Action Network/Odds API props by
-  // normalized player name + exact stat. Only real over/under lines qualify —
-  // alternates ("25+ Rushing Yards"), milestones ("2+ Passing Touchdowns"),
-  // combo markets ("Pass + Rush Yds") and odds-only markets ("Anytime TD
-  // Scorer", "First Touchdown Scorer") carry no O/U odds and are excluded.
+  // DraftKings prop line for a model row: matches the DK-only scraper payload
+  // by normalized player name + exact stat. Only real over/under lines
+  // qualify — alternates ("25+ Rushing Yards"), milestones ("2+ Passing
+  // Touchdowns"), combo markets ("Pass + Rush Yds") and odds-only markets
+  // ("Anytime TD Scorer", "First Touchdown Scorer") carry no O/U odds and
+  // are excluded.
   //
-  // Aggregator feeds (Consensus, DK NJ, …) mix the full-game line with
-  // derivatives (1st-half, alternates) under the same market label, so several
-  // distinct O/U numbers can qualify for one player+stat. Resolve by clustering
-  // on line value: the cluster backed by the most distinct books is the real
-  // full-game line. Within it the DraftKings entry wins, else the median.
+  // The DK slate can still list several distinct O/U numbers for one
+  // player+stat (full-game line plus derivatives sharing a market label), so
+  // candidates are clustered on line value and the biggest cluster wins; the
+  // DraftKings entry wins within it, else the median.
   const DK_RE = /draftkings|(^|\s)dk(\s|$)/i
   const displayBook = (book: string): string => (DK_RE.test(book) ? 'DraftKings' : book)
   const scrapedLineFor = (name: string, stat: string): { line: number; book: string; over: number | null; under: number | null; books: number } | null => {
@@ -982,11 +1193,24 @@ export default function NextGamePanel({
     return { picks, hits, pushes, graded: errors.length }
   })()
 
-  const heading = phase === 'final' ? 'Model vs Final' : phase === 'live' ? 'Model vs Live' : 'Game Preview'
-  const noSnapshot = phase === 'final' && isNfl && ledgerChecked && !ledger?.pre?.rows?.length
-  if (hideWhenEmpty && (noSnapshot || (phase === 'final' && !isNfl))) return null
+  // Non-NFL scorecard (live + final): frozen pre-game picks scored against
+  // current actuals at the closing lines. The NFL table computes its own
+  // inline below; this one feeds the PlayerProjections strip.
+  const anyScorecard = (() => {
+    if (isNfl || !comparing || !liveStats) return null
+    const preRows = ((ledger?.pre?.rows ?? []) as any[])
+    if (!preRows.length) return null
+    try {
+      return scorePicks(preRows, liveStats as Record<string, Record<string, number | null>>, closingLineMap(ledger))
+    } catch { return null }
+  })()
 
-  // Non-NFL projection table: both teams on the team page, one per panel on the game page.
+  const heading = phase === 'final' ? 'Model vs Final' : phase === 'live' ? 'Model vs Live' : 'Game Preview'
+  const noSnapshot = phase === 'final' && ledgerChecked && !ledger?.pre?.rows?.length
+  if (hideWhenEmpty && noSnapshot) return null
+
+  // Non-NFL projection table: both teams when projectionTeams="both" (game
+  // page single panel), one team when "ours".
   const projectionTeamList = projectionTeams === 'ours'
     ? [{ abbr: teamAbbr, name: teamName }]
     : [{ abbr: teamAbbr, name: teamName }, { abbr: opponentAbbr, name: opponentName }]
@@ -1104,6 +1328,17 @@ export default function NextGamePanel({
           teamColor={teamColor}
           loading={props == null}
           matchup={props?.matchup ?? null}
+          liveStats={liveStats as Record<string, Record<string, number | null>> | null}
+          gameFinal={gameFinal}
+          scorecard={anyScorecard}
+          closingAt={(() => {
+            const at = (ledger as any)?.finalLines?.recordedAt
+            if (!at) return null
+            try {
+              return new Date(at).toLocaleString('en-US', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+            } catch { return null }
+          })()}
+          closingFrozen={(ledger as any)?.finalLines?.frozen ?? false}
         />
       )}
 
@@ -1148,6 +1383,13 @@ export default function NextGamePanel({
             </div>
           </div>
           
+          <PropTableLegend
+            teamColor={teamColor}
+            extra={[
+              { term: 'Range', meaning: 'The likely range under the projection (25th–75th percentile). Narrow means the model is sure; wide means boom-or-bust.' },
+              { term: 'role ±x%', meaning: 'How much the projection was adjusted for a recent role change (more targets, new starter). Shown when the last few games look different.' },
+            ]}
+          />
           <p className="text-xs text-fs-muted-2 mb-2">
             {phase === 'pre'
               ? 'Our projection per player (recent form × opponent defense × Vegas game script) against the sportsbook line. Lines default to DraftKings — type any line to override.'
@@ -1158,7 +1400,7 @@ export default function NextGamePanel({
             {phase === 'live' ? (
               <>
                 {' '}·{' '}
-                <span className="font-bold text-fs-red">● LIVE{liveQuarters > 0 ? ` Q${liveQuarters}` : ''}</span>
+                <span className="font-bold text-fs-red">● LIVE{liveQuarters > 0 ? ` ${periodLabel(sport, liveQuarters)}` : ''}</span>
                 {liveStatusLabel ? <span> · {liveStatusLabel}</span> : null}
                 {!ledger?.pre ? <span> · locking pre-game snapshot…</span> : null}
                 {backupLoading ? <span> · projecting backup…</span> : null}
@@ -1189,7 +1431,18 @@ export default function NextGamePanel({
               </span>
               {scorecard.pushes > 0 ? <span className="text-fs-muted">{scorecard.pushes} push{scorecard.pushes === 1 ? '' : 'es'}</span> : null}
               <span className="text-fs-muted">{scorecard.graded} projections graded</span>
+              {(ledger as any)?.finalLines ? (
+                <span className="text-fs-muted-2" title="Picks are graded against the frozen closing lines — the most recent book-line snapshot before the game ended. Lines refresh hourly pre-game.">
+                  · closing lines {(() => { try { return new Date((ledger as any).finalLines.recordedAt).toLocaleString('en-US', { month: 'numeric', day: 'numeric', hour: 'numeric', minute: '2-digit' }) } catch { return '' } })()}
+                  {(ledger as any).finalLines.frozen ? ' (frozen)' : ''}
+                </span>
+              ) : null}
             </div>
+          ) : null}
+          {!scorecard && phase === 'pre' && Array.isArray((ledger as any)?.lines) && (ledger as any).lines.length > 0 ? (
+            <p className="text-[11px] text-fs-muted-2 mb-2">
+              Lines refresh hourly before kickoff · {(ledger as any).lines.length} snapshot{(ledger as any).lines.length === 1 ? '' : 's'} banked — the latest pre-game snapshot freezes as the closing lines for grading.
+            </p>
           ) : null}
 
           {showLive && !gameFinal ? (

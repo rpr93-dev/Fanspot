@@ -6,7 +6,7 @@ import { sportConfig } from '@/data/teams'
 import { FavoriteButton } from '@/components/FavoriteButton'
 import { EmptyState, ErrorState } from '@/components/feedback'
 import { normalizeSportKey, type SportKey } from '@/lib/models'
-import { playerStatLabels } from '@/lib/roster-stats'
+import { playerStatLabels, statMeaning } from '@/lib/roster-stats'
 
 interface StatItem {
   key: string
@@ -48,6 +48,40 @@ interface PlayerPayload {
 
 function statLabel(key: string, fallback: string): string {
   return playerStatLabels[key] ?? fallback ?? key
+}
+
+/** Every abbreviation on screen gets a hover explanation; the full list hides
+ *  behind one toggle so the page stays clean for regulars. */
+function StatGuide({ items }: { items: { key: string; label: string }[] }) {
+  const [open, setOpen] = useState(false)
+  const seen = new Map<string, string>()
+  for (const s of items) {
+    const label = statLabel(s.key, s.label)
+    if (!seen.has(label)) seen.set(label, statMeaning(s.key, s.label))
+  }
+  if (seen.size === 0) return null
+  return (
+    <div className="mt-3">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="text-xs text-fs-muted-2 underline underline-offset-2 hover:text-fs-text"
+      >
+        {open ? 'Hide stat guide' : 'What do these abbreviations mean?'}
+      </button>
+      {open ? (
+        <dl className="mt-2 rounded-lg px-3 py-2 text-xs space-y-1.5 fs-panel">
+          {Array.from(seen.entries()).map(([label, meaning]) => (
+            <div key={label} className="flex gap-2">
+              <dt className="font-bold text-fs-text shrink-0 min-w-14">{label}</dt>
+              <dd className="text-fs-muted">{meaning}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
+    </div>
+  )
 }
 
 /** Goalie-flavored categories — never the default for skaters. */
@@ -277,12 +311,13 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
                 </h2>
                 <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
                   {keyCat.stats.slice(0, 12).map((s) => (
-                    <div key={s.key} className="fs-panel p-3 text-center">
+                    <div key={s.key} className="fs-panel p-3 text-center" title={statMeaning(s.key, s.label)}>
                       <p className="fs-mono text-lg font-bold tabular-nums">{s.value}</p>
                       <p className="fs-meta mt-1 truncate" title={s.label}>{statLabel(s.key, s.label)}</p>
                     </div>
                   ))}
                 </div>
+                <StatGuide items={keyCat.stats.slice(0, 12)} />
               </section>
             ) : (
               <EmptyState title="Season stats unavailable for this player yet." hint="Past seasons live below." />
@@ -301,7 +336,7 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
                         <h3 className="fs-title text-base mb-3">{cat.label}</h3>
                         <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                           {cat.stats.map((s) => (
-                            <div key={s.key} className="flex items-baseline justify-between gap-2 border-b border-fs-line py-1">
+                            <div key={s.key} className="flex items-baseline justify-between gap-2 border-b border-fs-line py-1" title={statMeaning(s.key, s.label)}>
                               <dt className="fs-meta truncate">{statLabel(s.key, s.label)}</dt>
                               <dd className="fs-mono text-sm tabular-nums shrink-0">{s.value}</dd>
                             </div>
@@ -310,6 +345,7 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
                       </div>
                     ))}
                 </div>
+                {seasonCats ? <StatGuide items={seasonCats.flatMap((c) => c.stats)} /> : null}
               </section>
             )}
 
@@ -345,7 +381,7 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
                         <tr className="border-b border-fs-line">
                           <th scope="col" className="text-left fs-meta font-medium px-3 py-2">Season</th>
                           {data.headline.keys.slice(0, 6).map((s) => (
-                            <th key={s.key} scope="col" className="text-right fs-meta font-medium px-2 py-2 tabular-nums">
+                            <th key={s.key} scope="col" className="text-right fs-meta font-medium px-2 py-2 tabular-nums" title={statMeaning(s.key, s.label)}>
                               {statLabel(s.key, s.label)}
                             </th>
                           ))}

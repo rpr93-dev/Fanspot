@@ -9,6 +9,10 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - ODDS_API_KEY=${ODDS_API_KEY:-}
+      - SCRAPER_DATA_DIR=/app/data
+    volumes:
+      # Persist scraped lines + hourly refresh history across restarts.
+      - scraper-data:/app/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
@@ -19,3 +23,6 @@ services:
     # Increase memory for Playwright
     mem_limit: 2g
     shm_size: 2g
+
+volumes:
+  scraper-data:

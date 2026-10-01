@@ -297,12 +297,11 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
     setScraperError(null)
   }, [teamId, sport])
 
-  // Auto-scrape player lines via Docker the second a team page loads
-  // with an upcoming game. Results flow into NextGamePanel as props.
+  // Auto-scrape DraftKings lines via Docker the second a team page loads
+  // with an upcoming game (every league the scraper serves). Results flow
+  // into NextGamePanel as props.
   useEffect(() => {
-    // The Docker scraper only targets NFL sportsbook pages; other sports get
-    // book lines from The Odds API through /api/props instead.
-    if (!team || team.sport !== 'NFL') return
+    if (!team) return
     if (!data?.upcoming?.eventId || !data.upcoming.opponentAbbr || hasAutoScraped) return
     let cancelled = false
     setScraperLoading(true)
@@ -805,8 +804,8 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
               onBack={() => { setSelectedGameId(null); setBoxScoreData(null) }}
             />
             {/* Model vs Live: the frozen pre-game prop snapshot against the live
-                box score (one live point saved per quarter for engine tuning). */}
-            {team.sport.toUpperCase() === 'NFL' && isLiveGame
+                box score (one live point saved per period for engine tuning). */}
+            {isLiveGame
               && selectedGameId === liveGameIdRef.current
               && data?.upcoming?.eventId === selectedGameId ? (
               <NextGamePanel
@@ -833,9 +832,9 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
                 compact
               />
             ) : (() => {
-              // Finished NFL game: grade the locked pre-game snapshot against the
+              // Finished game: grade the locked pre-game snapshot against the
               // final box score (renders nothing when no snapshot was saved).
-              const past = team.sport === 'NFL' ? data?.lastFive.find((g) => g.eventId === selectedGameId) : null
+              const past = data?.lastFive.find((g) => g.eventId === selectedGameId)
               if (!past || !boxScoreData || !isGameComplete(boxScoreData)) return null
               return (
                 <NextGamePanel

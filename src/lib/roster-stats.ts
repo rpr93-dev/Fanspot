@@ -102,6 +102,58 @@ const MLB_PITCHER_COLUMNS = [
 export const MLB_PITCHER_POSITIONS = new Set(['P', 'SP', 'RP'])
 
 /**
+ * Plain-English stat glossary for the player page (key -> one-line meaning).
+ * Keys cover both season-stat names (passingYards, avgPoints, …) and the
+ * short box-score labels (YDS, PTS, WHIP, …) via the same lookup after
+ * playerStatLabels resolution — PlayerView tries this map first.
+ */
+export const STAT_GLOSSARY: Record<string, string> = {
+  // Football
+  passingYards: 'Passing yards gained', passingTouchdowns: 'Touchdown passes thrown',
+  completions: 'Completed passes', passingAttempts: 'Pass attempts', interceptions: 'Passes intercepted by the defense',
+  QBRating: 'QB rating — overall passing efficiency, 158.3 is perfect',
+  rushingYards: 'Rushing yards gained', rushingAttempts: 'Rushing attempts (carries)', rushingTouchdowns: 'Rushing touchdowns',
+  receptions: 'Passes caught', receivingYards: 'Receiving yards gained', receivingTargets: 'Times targeted by the QB', receivingTouchdowns: 'Receiving touchdowns',
+  YDS: 'Yards gained', TD: 'Touchdowns', REC: 'Receptions caught', CAR: 'Rushing attempts', 'C/ATT': 'Completions / attempts',
+  AVG: 'Average per attempt', TGTS: 'Times targeted', INT: 'Interceptions thrown', QBR: 'QB rating (158.3 max)', RTG: 'Passer rating',
+  // Basketball
+  avgPoints: 'Points per game', avgRebounds: 'Rebounds per game', avgAssists: 'Assists per game',
+  avgSteals: 'Steals per game', avgBlocks: 'Blocks per game', avgMinutes: 'Minutes per game',
+  fieldGoalPct: 'Field-goal % (2s and 3s)', threePointPct: 'Three-point %', freeThrowPct: 'Free-throw %',
+  PTS: 'Points scored', REB: 'Rebounds (miss secured)', AST: 'Assists (pass leading to a score)',
+  STL: 'Steals', BLK: 'Shots blocked', MIN: 'Minutes played', FG: 'Field goals made-attempted',
+  '3PT': 'Three-pointers made-attempted', FT: 'Free throws made-attempted',
+  TO: 'Turnovers (possession lost)', OREB: 'Offensive rebounds', DREB: 'Defensive rebounds',
+  PF: 'Personal fouls', '+/-': 'Point differential while on the floor',
+  // Hockey
+  goals: 'Goals scored', assists: 'Assists (pass leading to a goal)', points: 'Goals + assists',
+  plusMinus: 'Goal differential while on the ice', shotsTotal: 'Shots on goal',
+  timeOnIcePerGame: 'Ice time per game', penaltyMinutes: 'Penalty minutes served',
+  wins: 'Wins credited', losses: 'Losses credited', avgGoalsAgainst: 'Goals allowed per 60 minutes',
+  savePct: 'Share of shots stopped', saves: 'Shots stopped', shutouts: 'Games with zero goals allowed',
+  G: 'Goals', A: 'Assists', P: 'Points (goals + assists)',
+  SOG: 'Shots on goal', S: 'Shots', TOI: 'Time on ice', BS: 'Shots blocked',
+  HT: 'Body checks (hits)', TK: 'Takeaways (pucks stolen)', GV: 'Giveaways (pucks lost)',
+  FW: 'Faceoffs won', FL: 'Faceoffs lost', PIM: 'Penalty minutes', GA: 'Goals allowed (goalie)',
+  SA: 'Shots faced (goalie)', SV: 'Saves', SHFT: 'Shifts skated',
+  // Baseball
+  avg: 'Batting average (hits / at-bats)', homeRuns: 'Home runs hit', RBIs: 'Runs driven in',
+  runs: 'Runs scored', onBasePct: 'How often they reach base safely', OPS: 'On-base + slugging: total offense in one number (.800+ is good)',
+  stolenBases: 'Bases stolen', ERA: 'Earned runs allowed per 9 innings (lower is better)',
+  WHIP: 'Walks + hits allowed per inning (lower is better)', innings: 'Innings pitched',
+  strikeouts: 'Batters struck out',
+  H: 'Hits', AB: 'At-bats', R: 'Runs scored', RBI: 'Runs batted in', HR: 'Home runs',
+  BB: 'Walks drawn', K: 'Strikeouts', 'H-AB': 'Hits / at-bats', '#P': 'Pitches seen',
+  OBP: 'On-base %', SLG: 'Slugging % (bases per at-bat)', SB: 'Stolen bases',
+  IP: 'Innings pitched', ER: 'Earned runs allowed', 'PC-ST': 'Pitches-strikes thrown', PC: 'Pitch count',
+  W: 'Wins', L: 'Losses', SO: 'Shutouts',
+}
+
+export function statMeaning(key: string, label: string): string {
+  return STAT_GLOSSARY[key] ?? STAT_GLOSSARY[label] ?? label
+}
+
+/**
  * Season-stat columns for a roster row. Every sport goes through this one
  * schema so rows are column-aligned (missing values render as a dash) and
  * position groups get the stats that matter for them — hitters vs pitchers,

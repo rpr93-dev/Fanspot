@@ -255,10 +255,11 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
         console.error(`[odds] Failed for ${teamAbbr}:`, err)
         setOddsStatus((prev) => ({ ...prev, [teamAbbr]: 'error' }))
       }
-      if (sport === 'NFL') {
-        // One Docker scrape covers the whole game — skip the second
-        // per-team POST (halves scrape cost/rate-limit spend; the merge
-        // already handles a single-sided payload).
+      // DraftKings board: one Docker scrape covers the whole game for every
+      // league the scraper serves (NFL/NBA/NHL/MLB) — skip the second
+      // per-team POST (halves scrape cost/rate-limit spend; the merge
+      // already handles a single-sided payload).
+      if ((['NFL', 'NBA', 'NHL', 'MLB'] as string[]).includes(sport)) {
         if (scraperFiredRef.current === eventId) return
         scraperFiredRef.current = eventId
         setScraperLoading((prev) => ({ ...prev, [teamAbbr]: true }))
@@ -309,9 +310,9 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
     ...(hasPlayerStats || boxScore ? ['box' as TabId] : []),
     ...(playsChecked && hasPlays ? ['plays' as TabId] : []),
     ...(hasTeamStats ? ['teams' as TabId] : []),
-    // NFL keeps the tab after the game (model graded vs final); other sports'
-    // projections are pre-game only, so the tab retires once the game is final.
-    ...(sport === 'NFL' || !isFinal ? ['model' as TabId] : []),
+    // The Props tab stays after the game: the frozen snapshot is graded
+    // against the final box score for every sport.
+    'model' as TabId,
   ]
   const activeTab = availableTabs.includes(tab) ? tab : 'summary'
   const eventDate = game?.date?.slice(0, 10).replace(/-/g, '')
@@ -457,83 +458,34 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
 
             {activeTab === 'model' && teamsInfo.away && teamsInfo.home && (
               <div className="space-y-6" role="tabpanel">
-                {sport === 'NFL' ? (
-                  // One panel models both teams (targets, snapshot and table all
-                  // cover the full game) — a second panel only duplicated the
-                  // Model-vs-Final / Prop Model sections.
-                  <NextGamePanel
-                    sport={sportParam}
-                    teamAbbr={teamsInfo.away.abbr}
-                    opponentAbbr={teamsInfo.home.abbr}
-                    teamFantasyAbbr={opponentFantasyAbbr(teamsInfo.away.abbr)}
-                    opponentFantasyAbbr={opponentFantasyAbbr(teamsInfo.home.abbr)}
-                    eventId={eventId}
-                    eventDate={eventDate}
-                    teamColor={config.color}
-                    teamName={teamsInfo.away.name}
-                    opponentName={teamsInfo.home.name}
-                    odds={odds[teamsInfo.away.abbr]}
-                    oddsStatus={oddsStatus[teamsInfo.away.abbr] ?? 'loading'}
-                    isPreseason={isPreseason}
-                    scraperLoading={mergedScraperLoading}
-                    scraperData={mergedScraperData}
-                    isLive={isLive}
-                    phase={isFinal ? 'final' : isLive ? 'live' : 'pre'}
-                    liveBoxScore={boxScore}
-                    compact={isLive || isFinal}
-                    projectionTeams="ours"
-                    onBack={() => {}}
-                  />
-                ) : (
-                  <>
-                    <NextGamePanel
-                      sport={sportParam}
-                      teamAbbr={teamsInfo.away.abbr}
-                      opponentAbbr={teamsInfo.home.abbr}
-                      teamFantasyAbbr={opponentFantasyAbbr(teamsInfo.away.abbr)}
-                      opponentFantasyAbbr={opponentFantasyAbbr(teamsInfo.home.abbr)}
-                      eventId={eventId}
-                      eventDate={eventDate}
-                      teamColor={config.color}
-                      teamName={teamsInfo.away.name}
-                      opponentName={teamsInfo.home.name}
-                      odds={odds[teamsInfo.away.abbr]}
-                      oddsStatus={oddsStatus[teamsInfo.away.abbr] ?? 'loading'}
-                      isPreseason={isPreseason}
-                      scraperLoading={scraperLoading[teamsInfo.away.abbr] ?? false}
-                      scraperData={scraperData[teamsInfo.away.abbr]}
-                      isLive={isLive}
-                      phase={isFinal ? 'final' : isLive ? 'live' : 'pre'}
-                      liveBoxScore={boxScore}
-                      compact={isLive || isFinal}
-                      projectionTeams="ours"
-                      onBack={() => {}}
-                    />
-                    <NextGamePanel
-                      sport={sportParam}
-                      teamAbbr={teamsInfo.home.abbr}
-                      opponentAbbr={teamsInfo.away.abbr}
-                      teamFantasyAbbr={opponentFantasyAbbr(teamsInfo.home.abbr)}
-                      opponentFantasyAbbr={opponentFantasyAbbr(teamsInfo.away.abbr)}
-                      eventId={eventId}
-                      eventDate={eventDate}
-                      teamColor={config.color}
-                      teamName={teamsInfo.home.name}
-                      opponentName={teamsInfo.away.name}
-                      odds={odds[teamsInfo.home.abbr]}
-                      oddsStatus={oddsStatus[teamsInfo.home.abbr] ?? 'loading'}
-                      isPreseason={isPreseason}
-                      scraperLoading={scraperLoading[teamsInfo.home.abbr] ?? false}
-                      scraperData={scraperData[teamsInfo.home.abbr]}
-                      isLive={isLive}
-                      phase={isFinal ? 'final' : isLive ? 'live' : 'pre'}
-                      liveBoxScore={boxScore}
-                      compact={isLive || isFinal}
-                      projectionTeams="ours"
-                      onBack={() => {}}
-                    />
-                  </>
-                )}
+                {/* One panel models both teams (targets, snapshot and table all
+                    cover the full game) — a second panel only duplicated the
+                    Model-vs-Final / Prop Model sections. The ledger record is
+                    keyed on the sorted team pair, so a single writer also
+                    keeps hourly snapshots and live points free of duplicates. */}
+                <NextGamePanel
+                  sport={sportParam}
+                  teamAbbr={teamsInfo.away.abbr}
+                  opponentAbbr={teamsInfo.home.abbr}
+                  teamFantasyAbbr={opponentFantasyAbbr(teamsInfo.away.abbr)}
+                  opponentFantasyAbbr={opponentFantasyAbbr(teamsInfo.home.abbr)}
+                  eventId={eventId}
+                  eventDate={eventDate}
+                  teamColor={config.color}
+                  teamName={teamsInfo.away.name}
+                  opponentName={teamsInfo.home.name}
+                  odds={odds[teamsInfo.away.abbr]}
+                  oddsStatus={oddsStatus[teamsInfo.away.abbr] ?? 'loading'}
+                  isPreseason={isPreseason}
+                  scraperLoading={mergedScraperLoading}
+                  scraperData={mergedScraperData}
+                  isLive={isLive}
+                  phase={isFinal ? 'final' : isLive ? 'live' : 'pre'}
+                  liveBoxScore={boxScore}
+                  compact={isLive || isFinal}
+                  projectionTeams={sport === 'NFL' ? 'ours' : 'both'}
+                  onBack={() => {}}
+                />
               </div>
             )}
           </div>

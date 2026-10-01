@@ -126,3 +126,105 @@ def test_status_completed(path):
     game = ledger.load_game("NE", "NYJ", "20260909", path)
     assert ledger.status_completed(game) is True
     assert ledger.list_games(path)[0]["hasFinal"] is True
+
+
+def _lines_record(*lines):
+    return {"source": "hourly-refresh",
+            "lines": [{"player": p, "stat": s, "line": ln, "book": "DraftKings"}
+                      for p, s, ln in lines]}
+
+
+def test_record_lines_appends_and_tracks_closing(path):
+    ledger.record_pre("NE", "NYJ", "20260909", _pre_record(), path)
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _lines_record(("Drake Maye", "passing_yards", 230.5)), path)
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _lines_record(("Drake Maye", "passing_yards", 235.5)), path)
+    game = ledger.load_game("NE", "NYJ", "20260909", path)
+    assert len(game["lines"]) == 2
+    # Pre-final: the latest snapshot is the closing-line candidate.
+    assert game["finalLines"]["lines"][0]["line"] == 235.5
+    assert not game["finalLines"].get("frozen")
+    assert ledger.list_games(path)[0]["linesCount"] == 2
+
+
+def test_record_lines_rejects_bad_rows(path):
+    with pytest.raises(ValueError):
+        ledger.record_lines("NE", "NYJ", "20260909", {"lines": "nope"}, path)
+    with pytest.raises(ValueError):
+        ledger.record_lines("NE", "NYJ", "20260909",
+                           {"lines": [{"player": "", "stat": "tds"}]}, path)
+    assert ledger.load_game("NE", "NYJ", "20260909", path) is None
+
+
+def test_freeze_final_lines_locks_latest(path):
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _lines_record(("Drake Maye", "passing_yards", 230.5)), path)
+    frozen = ledger.freeze_final_lines("NE", "NYJ", "20260909", path)
+    assert frozen["frozen"] is True
+    assert frozen["lines"][0]["line"] == 230.5
+    # Later snapshots are stored but must not move the frozen close.
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _lines_record(("Drake Maye", "passing_yards", 250.5)), path)
+    game = ledger.load_game("NE", "NYJ", "20260909", path)
+    assert game["finalLines"]["lines"][0]["line"] == 230.5
+    assert len(game["lines"]) == 2
+    # Idempotent.
+    assert ledger.freeze_final_lines("NE", "NYJ", "20260909", path)["lines"][0]["line"] == 230.5
+
+
+def test_final_live_point_auto_freezes_closing(path):
+    ledger.record_pre("NE", "NYJ", "20260909", _pre_record(), path)
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _lines_record(("Drake Maye", "passing_yards", 235.5)), path)
+    ledger.record_live("NE", "NYJ", "20260909",
+                       {**_live_point(4, 250), "final": True, "state": "post"}, path)
+    game = ledger.load_game("NE", "NYJ", "20260909", path)
+    assert game["finalLines"]["frozen"] is True
+    assert game["finalLines"]["lines"][0]["line"] == 235.5
+
+
+def test_grade_game_against_closing_lines(path):
+    ledger.record_pre("NE", "NYJ", "20260909", _pre_record(), path)
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _lines_record(("Drake Maye", "passing_yards", 235.5)), path)
+    ledger.record_live("NE", "NYJ", "20260909",
+                       {**_live_point(4, 250), "final": True, "state": "post"}, path)
+    game = ledger.load_game("NE", "NYJ", "20260909", path)
+    grade = ledger.grade_game(game)
+    # passing_yards: proj 231.5 vs actual 250 (err 18.5), pre pick under 235.5 -> miss.
+    # tds: proj 1.4 vs actual 2 (err 0.6), no line -> graded, unpicked.
+    assert grade["n"] == 2
+    assert grade["mae"] == pytest.approx((18.5 + 0.6) / 2)
+    assert (grade["hits"], grade["picks"], grade["pushes"]) == (0, 1, 0)
+    assert grade["hitRate"] == 0.0
+
+
+def test_grade_ledger_running_totals(path):
+    ledger.record_pre("NE", "NYJ", "20260909", _pre_record(), path)
+    ledger.record_live("NE", "NYJ", "20260909",
+                       {**_live_point(4, 250), "final": True, "state": "post"}, path)
+    # Ungraded game (no final) must not pollute the running totals.
+    ledger.record_pre("KC", "BUF", "20260910", _pre_record(), path)
+    summary = ledger.grade_ledger(path)
+    assert summary["games"] == 1 and summary["props"] == 2
+    assert summary["hitRate"] is not None
+    assert summary["byGame"][0]["key"] == "20260909|NE|NYJ"
+
+
+def test_record_live_replay_is_idempotent(path):
+    # Two views record the same period seconds apart (different clocks) —
+    # the second write must not duplicate the point.
+    pt = {"quarters": 2, "state": "in", "clock": "3RD 4:12",
+          "rows": {"Drake Maye": {"passing_yards": 120}}}
+    ledger.record_live("NE", "NYJ", "20260909", pt, path)
+    dup = ledger.record_live("NE", "NYJ", "20260909",
+                             {**pt, "clock": "3RD 4:05"}, path)
+    game = ledger.load_game("NE", "NYJ", "20260909", path)
+    assert len(game["live"]) == 1
+    assert dup["recordedAt"] == game["live"][0]["recordedAt"]
+    # Genuine corrections (changed rows) still append.
+    ledger.record_live("NE", "NYJ", "20260909",
+                       {"quarters": 2, "state": "in",
+                        "rows": {"Drake Maye": {"passing_yards": 135}}}, path)
+    assert len(ledger.load_game("NE", "NYJ", "20260909", path)["live"]) == 2

@@ -1,6 +1,6 @@
 # Player Prop Scraper Docker Service
 
-Scrapes real betting lines from sportsbooks (BetMGM, DraftKings, FanDuel, etc.) and exposes them via a REST API.
+Serves DraftKings player prop lines (via Action Network's free web API, with The Odds API as an optional second source) and exposes them via a REST API. Results persist to disk and keep a per-game hourly refresh history.
 
 ## Quick Start
 
@@ -36,11 +36,10 @@ The Next.js app will automatically call the scraper when you click "Scrape Lines
 
 ## Sportsbooks
 
-Supported sportsbooks:
-- BetMGM
-- DraftKings
-- FanDuel
-- Caesars
+DraftKings only (`DK NJ` via Action Network, `draftkings` via The Odds API).
+Every other book is dropped at the source so the hourly refresh and the model
+grade track one consistent board. (Per-book page rendering via Playwright was
+removed — the books bot-block datacenter IPs, so it never returned lines.)
 
 ## Environment Variables
 
