@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
+import { teams } from '@/data/teams'
 import { F1Badge } from './F1Badge'
 
 interface WeekendSession {
@@ -59,6 +60,9 @@ export function WeekendView({ round, season }: { round: string; season?: string 
   const [data, setData] = useState<WeekendData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeKey, setActiveKey] = useState<number | null>(null)
+  // Per-session fallback: if the weekend payload missed a finished session's
+  // classification, backfill it from the single-session endpoint on demand.
+  const [backfill, setBackfill] = useState<Record<number, { result: WeekendSession['result']; drivers: WeekendData['drivers'] }>>({})
 
   useEffect(() => {
     let cancelled = false
@@ -78,12 +82,51 @@ export function WeekendView({ round, season }: { round: string; season?: string 
     return () => { cancelled = true }
   }, [round, season])
 
-  const driverByNumber = useMemo(() => new Map((data?.drivers ?? []).map((d) => [d.number, d])), [data])
   const ordered = useMemo(
     () => [...(data?.sessions ?? [])].sort((a, b) => sessionRank(a.name) - sessionRank(b.name)),
     [data],
   )
-  const active = ordered.find((s) => s.key === activeKey) ?? null
+  const activeRaw = ordered.find((s) => s.key === activeKey) ?? null
+  // Merge any backfilled classification into the active session.
+  const active = useMemo(() => {
+    if (!activeRaw) return null
+    const bf = backfill[activeRaw.key]
+    return bf ? { ...activeRaw, result: bf.result } : activeRaw
+  }, [activeRaw, backfill])
+  const driverByNumber = useMemo(() => {
+    const map = new Map((data?.drivers ?? []).map((d) => [d.number, d]))
+    for (const bf of Object.values(backfill)) {
+      for (const d of bf.drivers) if (!map.has(d.number)) map.set(d.number, d)
+    }
+    return map
+  }, [data, backfill])
+
+  // Backfill a finished session whose classification came back empty.
+  useEffect(() => {
+    if (!activeRaw || activeRaw.state !== 'final' || activeRaw.result.length > 0) return
+    if (backfill[activeRaw.key]) return
+    let cancelled = false
+    fetch(`/api/f1/session?session_key=${encodeURIComponent(String(activeRaw.key))}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => {
+        if (cancelled || !j) return
+        const result = (Array.isArray(j.result) ? j.result : []).map((row: any) => ({
+          position: row.position,
+          driverNumber: row.driverNumber,
+          laps: row.laps ?? null,
+          points: row.points ?? null,
+          gapToLeader: Array.isArray(row.gapToLeader) ? row.gapToLeader[row.gapToLeader.length - 1] : (row.gapToLeader ?? null),
+          dnf: row.dnf === true,
+          dns: row.dns === true,
+          dsq: row.dsq === true,
+        }))
+        if (result.length > 0) {
+          setBackfill((prev) => ({ ...prev, [activeRaw.key]: { result, drivers: j.drivers ?? [] } }))
+        }
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [activeRaw, backfill])
 
   if (error) {
     return (
@@ -210,7 +253,20 @@ function SessionPanel({
                     <span className="font-semibold fs-mono text-[13px]">#{r.driverNumber}</span>
                   )}{' '}
                   <span className="text-fs-muted-2 text-xs truncate">
-                    {d ? `${d.firstName[0]}. ${d.lastName}` : ''}{d?.teamAbbr ? ` · ${d.teamAbbr}` : ''}
+                    {d ? `${d.firstName} ${d.lastName}` : 'Classification pending'}
+                    {d?.team ? (
+                      <>
+                        {' · '}
+                        {(() => {
+                          const tid = teams.find((t) => t.sport === 'F1' && t.abbreviation === d.teamAbbr)?.id
+                          return tid ? (
+                            <Link href={`/f1/${tid}`} className="hover:underline" prefetch={false}>{d.team}</Link>
+                          ) : (
+                            <span>{d.team}</span>
+                          )
+                        })()}
+                      </>
+                    ) : null}
                   </span>
                   {status ? <span className="ml-1.5 text-[10px] font-bold text-fs-red">{status}</span> : null}
                 </span>

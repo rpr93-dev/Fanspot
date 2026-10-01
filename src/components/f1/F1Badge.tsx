@@ -36,6 +36,20 @@ export function F1Badge({
         : size === 'xl'
           ? 'w-16 h-16 text-base rounded-2xl'
           : 'w-10 h-10 text-xs rounded-xl'
+  // Real constructor logo when we have one locally; the colourway tile is
+  // the fallback (F1 teams have no ESPN logo CDN).
+  if (record?.logo) {
+    return (
+      <img
+        src={record.logo}
+        alt={`${record.name} logo`}
+        title={record.name}
+        loading="lazy"
+        className={`${dims} shrink-0 object-contain bg-white p-1 border border-white/15`}
+        style={{ boxShadow: `0 0 12px ${p}55` }}
+      />
+    )
+  }
   return (
     <span
       aria-hidden="true"
