@@ -1,10 +1,16 @@
 import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
 import { normalizeSportKey } from '@/lib/models'
 import { PlayerView } from './PlayerView'
 
 interface PlayerPageParams {
   sport: string
   playerId: string
+}
+
+export async function generateMetadata({ params }: { params: Promise<PlayerPageParams> }): Promise<Metadata> {
+  const { sport } = await params
+  return { title: `Player · ${sport.toUpperCase()} - Fanspot` }
 }
 
 /**

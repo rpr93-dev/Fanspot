@@ -17,12 +17,12 @@ describe('shouldShowScoreboard', () => {
 
   it('keeps the strip on cross-league browsing pages', () => {
     expect(shouldShowScoreboard('/scores')).toBe(true)
-    expect(shouldShowScoreboard('/news')).toBe(true)
     expect(shouldShowScoreboard('/fantasy/nfl')).toBe(true)
   })
 
-  it('hides the strip on the search and favorites tools', () => {
+  it('hides the strip on the search, favorites, and news tools', () => {
     expect(shouldShowScoreboard('/search')).toBe(false)
     expect(shouldShowScoreboard('/favorites')).toBe(false)
+    expect(shouldShowScoreboard('/news')).toBe(false)
   })
 })

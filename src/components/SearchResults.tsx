@@ -3,19 +3,23 @@
 import Link from 'next/link'
 import type { SearchData } from '@/hooks/useSearch'
 import { sportConfig } from '@/data/teams'
+import { teamLogoCrest } from '@/lib/teamLogo'
 
-function TeamRow({ team, onNavigate }: { team: SearchData['teams'][number]; onNavigate?: () => void }) {
+function TeamRow({ team, onNavigate, id, active }: { team: SearchData['teams'][number]; onNavigate?: () => void; id?: string; active?: boolean }) {
   const color = sportConfig[team.sport]?.color ?? '#8a9990'
   return (
     <Link
+      id={id}
       href={team.href}
       prefetch={false}
       onClick={onNavigate}
-      className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/5 transition-colors"
+      role="option"
+      aria-selected={active ?? false}
+      className={`flex items-center gap-3 p-2.5 rounded-lg transition-colors ${active ? 'bg-white/5' : 'hover:bg-white/5'}`}
     >
       <img
         aria-hidden="true"
-        src={`https://a.espncdn.com/i/teamlogos/${team.sport.toLowerCase()}/500/${team.abbr.toLowerCase()}.png`}
+        src={teamLogoCrest(team.sport, team.teamId, team.abbr)}
         alt=""
         className="w-9 h-9 object-contain shrink-0"
         loading="lazy"
@@ -36,13 +40,16 @@ function TeamRow({ team, onNavigate }: { team: SearchData['teams'][number]; onNa
   )
 }
 
-function PlayerRow({ player, onNavigate }: { player: SearchData['players'][number]; onNavigate?: () => void }) {
+function PlayerRow({ player, onNavigate, id, active }: { player: SearchData['players'][number]; onNavigate?: () => void; id?: string; active?: boolean }) {
   return (
     <Link
+      id={id}
       href={player.href}
       prefetch={false}
       onClick={onNavigate}
-      className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-white/5 transition-colors"
+      role="option"
+      aria-selected={active ?? false}
+      className={`flex items-center gap-3 p-2.5 rounded-lg transition-colors ${active ? 'bg-white/5' : 'hover:bg-white/5'}`}
     >
       <span className="w-9 h-9 rounded-full bg-fs-panel-2 border border-fs-line overflow-hidden shrink-0 flex items-center justify-center">
         {player.headshot ? (
@@ -70,8 +77,20 @@ export function SearchResults({
   teams,
   players,
   loading,
+  error,
+  activeIndex = -1,
+  idPrefix = 'search-opt',
+  wide = false,
   onNavigate,
-}: SearchData & { loading: boolean; onNavigate?: () => void }) {
+}: SearchData & {
+  loading: boolean
+  error?: string | null
+  activeIndex?: number
+  idPrefix?: string
+  /** Side-by-side Teams | Players columns on desktop (the standalone search page). */
+  wide?: boolean
+  onNavigate?: () => void
+}) {
   if (loading && teams.length === 0 && players.length === 0) {
     return (
       <div className="p-3 space-y-2" aria-hidden="true">
@@ -81,27 +100,46 @@ export function SearchResults({
       </div>
     )
   }
+  if (error && teams.length === 0 && players.length === 0) {
+    return <p role="alert" className="p-4 text-sm text-fs-red text-center">{error}</p>
+  }
   if (teams.length === 0 && players.length === 0) {
     return <p className="p-4 text-sm text-fs-muted text-center">No teams or players found.</p>
   }
+  const base = teams.length
+  const twoCol = wide && teams.length > 0 && players.length > 0
   return (
-    <div className="p-1.5 max-h-[60vh] overflow-y-auto">
+    <div className={`p-1.5 ${wide ? 'max-h-[70vh]' : 'max-h-[60vh]'} overflow-y-auto`}>
+      <div className={twoCol ? 'grid gap-4 md:grid-cols-2 items-start' : undefined}>
       {teams.length > 0 && (
-        <div className="mb-1">
+        <div className={twoCol ? '' : 'mb-1'}>
           <p className="fs-meta px-2.5 pt-2 pb-1">Teams</p>
-          {teams.map((t) => (
-            <TeamRow key={`${t.sport}:${t.teamId}`} team={t} onNavigate={onNavigate} />
+          {teams.map((t, i) => (
+            <TeamRow
+              key={`${t.sport}:${t.teamId}`}
+              team={t}
+              id={`${idPrefix}-${i}`}
+              active={i === activeIndex}
+              onNavigate={onNavigate}
+            />
           ))}
         </div>
       )}
       {players.length > 0 && (
         <div>
           <p className="fs-meta px-2.5 pt-2 pb-1">Players</p>
-          {players.map((p) => (
-            <PlayerRow key={`${p.sport}:${p.playerId}`} player={p} onNavigate={onNavigate} />
+          {players.map((p, i) => (
+            <PlayerRow
+              key={`${p.sport}:${p.playerId}`}
+              player={p}
+              id={`${idPrefix}-${base + i}`}
+              active={base + i === activeIndex}
+              onNavigate={onNavigate}
+            />
           ))}
         </div>
       )}
+      </div>
     </div>
   )
 }

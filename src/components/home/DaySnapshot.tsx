@@ -11,7 +11,8 @@ import {
 import { useFavorites } from '@/hooks/useFavorites'
 import { useLivePoll } from '@/hooks/useLivePoll'
 import { ScoreCard } from '@/components/scoreboard/ScoreCard'
-import { SectionHeader, EmptyState } from '@/components/feedback'
+import { F1SessionCountdown } from '@/components/f1/F1SessionCountdown'
+import { SectionHeader, EmptyState, ErrorState } from '@/components/feedback'
 
 /**
  * "What's happening" snapshot: Live Now / Upcoming / Recent Finals from a
@@ -46,8 +47,10 @@ export function DaySnapshot() {
     [load, games != null],
   )
 
-  if (failed && !games) return null
   if (!games) {
+    if (failed) {
+      return <ErrorState message="Couldn't load today's games right now." onRetry={() => void load()} />
+    }
     return (
       <div className="grid gap-3 sm:grid-cols-3" aria-hidden="true">
         {[0, 1, 2].map((i) => (
@@ -59,7 +62,8 @@ export function DaySnapshot() {
 
   const live = relevanceSort(games.filter((g) => g.status.phase === 'live'), boost)
   const upcoming = relevanceSort(games.filter((g) => g.status.phase === 'pre'), boost).slice(0, 6)
-  const finals = relevanceSort(games.filter((g) => g.status.phase === 'final'), boost).slice(0, 6)
+  // F1 races are covered by the session countdown below, not the Finals rail.
+  const finals = relevanceSort(games.filter((g) => g.status.phase === 'final' && g.sport !== 'F1'), boost).slice(0, 6)
 
   const rail = (list: NormalizedGame[], empty: string, wrap = false) =>
     list.length === 0 ? (
@@ -102,7 +106,10 @@ export function DaySnapshot() {
             </Link>
           }
         />
-        {rail(upcoming, 'No more games today.')}
+        {rail(upcoming, 'No more games today.', true)}
+        <div className="mt-3">
+          <F1SessionCountdown />
+        </div>
       </section>
 
       <section aria-label="Recent finals">

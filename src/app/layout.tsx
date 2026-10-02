@@ -47,6 +47,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <Link href="/f1" className="hover:text-fs-text" prefetch={false}>F1</Link>
               <Link href="/fantasy/nfl" className="hover:text-fs-text" prefetch={false}>Fantasy</Link>
               <Link href="/news" className="hover:text-fs-text" prefetch={false}>News</Link>
+              <Link href="/favorites" className="hover:text-fs-text" prefetch={false}>Saved</Link>
             </nav>
             <p className="fs-meta">Data via ESPN · Unofficial fan project</p>
           </div>

@@ -97,7 +97,8 @@ function GameNews({ league, teams }: { league: string; teams: SummaryTeam[] }) {
       .then((json) => {
         if (!cancelled) setStories(Array.isArray(json?.stories) ? json.stories : [])
       })
-      .catch(() => {
+      .catch((err) => {
+        console.debug('[game-summary] stories fetch failed', err)
         if (!cancelled) setStories([])
       })
     return () => {
@@ -113,7 +114,7 @@ function GameNews({ league, teams }: { league: string; teams: SummaryTeam[] }) {
     <section aria-label="Game news" className="fs-panel p-4 sm:p-5">
       <h2 className="fs-title text-lg mb-1">Game News</h2>
       <p className="fs-meta mb-3">Latest on these teams</p>
-      <ul className="space-y-2.5">
+      <ul className="grid gap-2.5 md:grid-cols-2">
         {relevant.map((s) => (
           <li key={s.url}>
             <a href={s.url} target="_blank" rel="noopener noreferrer" className="block group">

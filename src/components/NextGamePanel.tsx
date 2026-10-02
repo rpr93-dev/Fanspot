@@ -1465,15 +1465,15 @@ export default function NextGamePanel({
               <table className="w-full text-xs">
                 <thead>
                   <tr className="text-fs-muted-2" style={{ backgroundColor: `${teamColor}08` }}>
-                    <th className="text-left px-2.5 py-1.5 font-medium">Player</th>
-                    <th className="text-left px-2 py-1.5 font-medium">Stat</th>
-                    <th className="text-right px-2 py-1.5 font-medium" title="Projection, with the likely range (25th–75th percentile) underneath">Proj</th>
-                    <th className="text-right px-2 py-1.5 font-medium" title="Editable — defaults to the DraftKings line; type any line to override">Line</th>
-                    <th className="text-right px-2 py-1.5 font-medium">Pick</th>
+                    <th scope="col" className="text-left px-2.5 py-1.5 font-medium">Player</th>
+                    <th scope="col" className="text-left px-2 py-1.5 font-medium">Stat</th>
+                    <th scope="col" className="text-right px-2 py-1.5 font-medium" title="Projection, with the likely range (25th–75th percentile) underneath">Proj</th>
+                    <th scope="col" className="text-right px-2 py-1.5 font-medium" title="Editable — defaults to the DraftKings line; type any line to override">Line</th>
+                    <th scope="col" className="text-right px-2 py-1.5 font-medium">Pick</th>
                     {showLive ? (
-                      <th className="text-right px-2 py-1.5 font-medium">{gameFinal ? 'Final' : 'Live'}</th>
+                      <th scope="col" className="text-right px-2 py-1.5 font-medium">{gameFinal ? 'Final' : 'Live'}</th>
                     ) : null}
-                    <th className="text-right px-2.5 py-1.5 font-medium">Conf</th>
+                    <th scope="col" className="text-right px-2.5 py-1.5 font-medium">Conf</th>
                   </tr>
                 </thead>
                 <tbody>

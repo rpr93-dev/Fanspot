@@ -85,8 +85,13 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
   const [selectedStyle, setSelectedStyle] = useState('Normal')
   const [customQuestion, setCustomQuestion] = useState('')
   const outputRef = useRef<HTMLDivElement>(null)
+  const fabRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const wasOpen = useRef(false)
 
   const areas = pageType === 'past-game' ? getPastGameAreas(sport) : pageType === 'next-game' ? NEXT_GAME_AREAS : TEAM_AREAS
+  const titleId = 'aiginalyst-title'
+  const questionId = 'aiginalyst-question'
 
   useEffect(() => {
     if (open) {
@@ -94,6 +99,45 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
       setOutput(null)
       setCustomQuestion('')
       setSelectedStyle('Normal')
+    }
+  }, [open])
+
+  // Modal a11y: Escape closes, Tab is trapped inside, focus enters on open and
+  // returns to the launcher on close.
+  useEffect(() => {
+    if (!open) {
+      if (wasOpen.current) fabRef.current?.focus()
+      wasOpen.current = false
+      return
+    }
+    wasOpen.current = true
+    const focusTimer = window.setTimeout(() => dialogRef.current?.focus(), 0)
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setOpen(false)
+        return
+      }
+      if (e.key !== 'Tab' || !dialogRef.current) return
+      const focusables = Array.from(
+        dialogRef.current.querySelectorAll<HTMLElement>('button, input, [href], [tabindex]:not([tabindex="-1"])'),
+      ).filter((el) => !el.hasAttribute('disabled'))
+      if (focusables.length === 0) return
+      const firstEl = focusables[0]
+      const lastEl = focusables[focusables.length - 1]
+      const active = document.activeElement
+      if (e.shiftKey && (active === firstEl || active === dialogRef.current)) {
+        e.preventDefault()
+        lastEl.focus()
+      } else if (!e.shiftKey && active === lastEl) {
+        e.preventDefault()
+        firstEl.focus()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      window.clearTimeout(focusTimer)
     }
   }, [open])
 
@@ -155,6 +199,8 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
   return (
     <>
       <button
+        ref={fabRef}
+        type="button"
         onClick={() => setOpen(v => !v)}
         className={`fixed z-50 gen-btn-glow shadow-2xl hover:scale-105 active:scale-95 transition-all duration-200 flex items-center justify-center ${
           // Bottom-right above the mobile tab bar; top-right on desktop.
@@ -177,14 +223,19 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-4 sm:p-6">
           <div className="fixed inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setOpen(false)} />
           <div
-            className="relative w-full max-w-lg rounded-2xl shadow-2xl animate-fade-in-up overflow-hidden"
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={titleId}
+            tabIndex={-1}
+            className="relative w-full max-w-lg rounded-2xl shadow-2xl animate-fade-in-up overflow-hidden outline-none"
             style={{ backgroundColor: 'var(--color-fs-panel-2)', border: `1px solid ${teamColor}25` }}
           >
             <div className="flex items-center justify-between p-4 sm:p-5 border-b" style={{ borderColor: `${teamColor}18` }}>
-              <h2 className="text-sm font-medium tracking-wider text-fs-text/85">
+              <h2 id={titleId} className="text-sm font-medium tracking-wider text-fs-text/85">
                 {pageType === 'team' ? 'Team Analysis' : pageType === 'next-game' ? 'Game Preview' : 'Game Recap'}
               </h2>
-              <button onClick={() => setOpen(false)} className="text-fs-muted hover:text-fs-text text-lg leading-none">&times;</button>
+              <button type="button" aria-label="Close" onClick={() => setOpen(false)} className="text-fs-muted hover:text-fs-text text-lg leading-none">&times;</button>
             </div>
 
             <div className="p-4 sm:p-5 space-y-4">
@@ -196,6 +247,8 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
                     return (
                       <button
                         key={style}
+                        type="button"
+                        aria-pressed={isActive}
                         onClick={() => setSelectedStyle(style)}
                         className="text-xs px-2.5 py-1 rounded-full transition-all duration-150"
                         style={{
@@ -215,6 +268,8 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
                 <div className="flex items-center justify-between mb-2">
                   <p className="fs-meta">Focus areas</p>
                   <button
+                    type="button"
+                    aria-pressed={allSelected}
                     onClick={toggleAll}
                     className="text-xs px-2 py-0.5 rounded-full transition-colors"
                     style={{
@@ -232,6 +287,8 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
                     return (
                       <button
                         key={area}
+                        type="button"
+                        aria-pressed={isSelected}
                         onClick={() => toggleChip(area)}
                         className="text-xs px-3 py-1.5 rounded-full transition-all duration-150"
                         style={{
@@ -248,8 +305,9 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
               </div>
 
               <div>
-                <p className="fs-meta mb-2">Or ask your own question</p>
+                <label htmlFor={questionId} className="fs-meta mb-2 block">Or ask your own question</label>
                 <input
+                  id={questionId}
                   type="text"
                   value={customQuestion}
                   onChange={e => setCustomQuestion(e.target.value)}
@@ -260,6 +318,7 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
               </div>
 
               <button
+                type="button"
                 onClick={handleGenerate}
                 disabled={!canGenerate || loading}
                 className={`w-full text-sm font-medium py-2.5 rounded-xl disabled:opacity-30 disabled:cursor-not-allowed ${canGenerate && !loading ? 'gen-btn-glow' : ''}`}

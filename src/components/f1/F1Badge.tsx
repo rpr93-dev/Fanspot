@@ -11,11 +11,12 @@ export function constructorByAbbr(abbr: string | null | undefined): Team | undef
 }
 
 /**
- * Constructor logo: the real team lockup served locally (F1 teams have no
- * ESPN logo CDN). Lockups are wide, so they render height-matched with auto
- * width — never squeezed into a square. Marks drawn dark-on-transparent
- * (Aston, Cadillac, Mercedes) get a white plate; everything else sits bare
- * on the dark card with a soft drop shadow.
+ * Constructor logo: the official 2026 white lockup served locally (F1 teams
+ * have no ESPN logo CDN). Marks are transparent, trimmed, and vary in shape,
+ * so they render height-matched with auto width — never squeezed into a
+ * square. Every current mark is drawn white-on-transparent and sits bare on
+ * the dark card with a soft drop shadow (the `logoOnLight` white-plate branch
+ * stays for any legacy dark-on-transparent asset).
  */
 export function F1Badge({
   abbr,

@@ -1,6 +1,6 @@
 import { teams } from '@/data/teams'
 
-export const STORY_LEAGUES = ['nfl', 'nba', 'nhl', 'mlb'] as const
+export const STORY_LEAGUES = ['nfl', 'nba', 'nhl', 'mlb', 'f1'] as const
 export type StoryLeague = (typeof STORY_LEAGUES)[number]
 
 export interface TopStory {
@@ -32,6 +32,10 @@ const EVENT_SIGNALS: { re: RegExp; weight: number; label: string }[] = [
   { re: /\breleased?\b|\bwaived?\b|\bcut\b|designated for assignment|\bdfa\b|buyout/i, weight: 16, label: 'roster move' },
   { re: /\bmvp\b|record[-\s]breaking|breaks? the .*record|no[-\s]hitter|triple[-\s]double|hat[-\s]trick/i, weight: 14, label: 'milestone' },
   { re: /\bdraft(ed|s)?\b|first overall|no\.? 1 pick/i, weight: 12, label: 'draft' },
+  // F1 / racing: results and incidents read like milestones elsewhere.
+  { re: /\bwins?\b|\bvictory\b|pole( position)?|podium|champion(ship)?|grand prix|\bgp\b|fastest lap/i, weight: 18, label: 'race result' },
+  { re: /\bcrash\b|collision|penalty|disqualif|\bdsq\b|\bdnf\b|red flag|safety car/i, weight: 16, label: 'incident' },
+  { re: /\bjoins?\b|\bleaves?\b|\bswitches?\b.{0,20}team|driver .*announc|seat (for|at)|line-?up/i, weight: 24, label: 'driver move' },
 ]
 
 /**
@@ -53,6 +57,7 @@ const SOURCE_PROMINENCE: { re: RegExp; weight: number }[] = [
   { re: /espn|the athletic|associated press|\bap\b|reuters/i, weight: 12 },
   { re: /nfl\.com|nba\.com|nhl\.com|mlb\.com|sports illustrated|yahoo sports|cbs sports|fox sports|nbc sports/i, weight: 9 },
   { re: /bleacher report|the score|sportsnet|tsn|usa today|washington post|new york times/i, weight: 6 },
+  { re: /formula1\.com|autosport|motorsport\.com|the-race|planet ?f1|crash\.net|racingnews365|gpblog/i, weight: 9 },
 ]
 
 /**
@@ -82,6 +87,12 @@ const STAR_PLAYERS: Record<StoryLeague, string[]> = {
     'Shohei Ohtani', 'Aaron Judge', 'Mookie Betts', 'Juan Soto', 'Ronald Acuna',
     'Mike Trout', 'Bryce Harper', 'Freddie Freeman', 'Gerrit Cole', 'Paul Skenes',
     'Bobby Witt', 'Corbin Carroll', 'Elly De La Cruz', 'Jose Ramirez', 'Yoshinobu Yamamoto',
+  ],
+  f1: [
+    'Max Verstappen', 'Lando Norris', 'Charles Leclerc', 'Lewis Hamilton', 'Oscar Piastri',
+    'George Russell', 'Fernando Alonso', 'Carlos Sainz', 'Yuki Tsunoda', 'Pierre Gasly',
+    'Esteban Ocon', 'Alex Albon', 'Nico Hulkenberg', 'Valtteri Bottas', 'Sergio Perez',
+    'Daniel Ricciardo', 'Lance Stroll', 'Kevin Magnussen', 'Kimi Antonelli', 'Oliver Bearman',
   ],
 }
 

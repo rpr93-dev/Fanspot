@@ -65,7 +65,7 @@ export function DetailPanel({
   const d = state.data
   const b = d.bio
   return (
-    <div className={styles.detail}>
+    <div className={styles.detail} aria-live="polite">
       {extra}
 
       <div className={styles.detailGrid}>

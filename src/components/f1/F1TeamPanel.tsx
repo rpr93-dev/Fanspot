@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import type { Team } from '@/data/teams'
 import { F1Badge } from './F1Badge'
+import { ErrorState } from '@/components/feedback'
 
 interface ConstructorData {
   season: string
@@ -37,28 +38,34 @@ export function F1TeamPanel({ team, teamColor }: { team: Team; teamColor: string
   const [next, setNext] = useState<any | null>(null)
   const [detail, setDetail] = useState<ConstructorData | null>(null)
   const [news, setNews] = useState<NewsArticle[] | null>(null)
+  const [standingsFailed, setStandingsFailed] = useState(false)
+  const [detailFailed, setDetailFailed] = useState(false)
+  const [newsFailed, setNewsFailed] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
   const primary = team.colors.primary
 
   useEffect(() => {
     let cancelled = false
     fetch('/api/f1/standings')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (!cancelled && j) setStandings(j) })
-      .catch(() => {})
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`standings ${r.status}`))))
+      .then((j) => { if (!cancelled) { setStandings(j); setStandingsFailed(false) } })
+      .catch(() => { if (!cancelled) setStandingsFailed(true) })
     fetch('/api/f1/schedule')
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (!cancelled && j?.next) setNext(j.next) })
       .catch(() => {})
     fetch(`/api/f1/constructor?team=${encodeURIComponent(team.abbreviation)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (!cancelled && j) setDetail(j) })
-      .catch(() => {})
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`constructor ${r.status}`))))
+      .then((j) => { if (!cancelled) { setDetail(j); setDetailFailed(false) } })
+      .catch(() => { if (!cancelled) setDetailFailed(true) })
     fetch(`/api/news-search?team=${encodeURIComponent(team.name)}&sport=f1`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (!cancelled && j) setNews(j.articles ?? []) })
-      .catch(() => {})
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`news ${r.status}`))))
+      .then((j) => { if (!cancelled) { setNews(j.articles ?? []); setNewsFailed(false) } })
+      .catch(() => { if (!cancelled) setNewsFailed(true) })
     return () => { cancelled = true }
-  }, [team.abbreviation, team.name])
+  }, [team.abbreviation, team.name, reloadKey])
+
+  const reload = () => setReloadKey((k) => k + 1)
 
   const row = (standings?.constructors ?? []).find((c: any) => c.teamAbbr === team.abbreviation)
   const drivers = (standings?.drivers ?? []).filter((d: any) => d.teamAbbr === team.abbreviation)
@@ -100,6 +107,10 @@ export function F1TeamPanel({ team, teamColor }: { team: Team; teamColor: string
         </div>
       </div>
 
+      {/* Body: drivers/results and news/next-race sit side-by-side on desktop. */}
+      <div className="grid gap-6 lg:grid-cols-12 items-start">
+        <div className="lg:col-span-7 min-w-0 space-y-8">
+
       {/* Drivers */}
       <section aria-label="Drivers">
         <div className="flex items-baseline justify-between mb-4">
@@ -126,7 +137,15 @@ export function F1TeamPanel({ team, teamColor }: { team: Team; teamColor: string
               </div>
             </Link>
           ))}
-          {!standings ? <p className="text-sm text-fs-muted-2">Loading drivers…</p> : null}
+          {standingsFailed ? (
+            <div className="sm:col-span-2">
+              <ErrorState message="Couldn't load driver standings." onRetry={reload} />
+            </div>
+          ) : !standings ? (
+            <p className="text-sm text-fs-muted-2">Loading drivers…</p>
+          ) : drivers.length === 0 ? (
+            <p className="text-sm text-fs-muted-2">No drivers listed for this team yet.</p>
+          ) : null}
         </div>
       </section>
 
@@ -150,20 +169,30 @@ export function F1TeamPanel({ team, teamColor }: { team: Team; teamColor: string
               </li>
             ))}
             {detail != null && rounds.length === 0 ? <li className="px-4 py-4 text-sm text-fs-muted-2">No race results this season yet.</li> : null}
-            {detail == null ? <li className="px-4 py-4 text-sm text-fs-muted-2">Loading season results…</li> : null}
+            {detailFailed ? (
+              <li className="px-4 py-4">
+                <ErrorState message="Couldn't load this season's race results." onRetry={reload} />
+              </li>
+            ) : detail == null ? (
+              <li className="px-4 py-4 text-sm text-fs-muted-2">Loading season results…</li>
+            ) : null}
           </ol>
         </div>
       </section>
+        </div>
+        <aside className="lg:col-span-5 min-w-0 space-y-8">
 
       {/* News */}
       <section aria-label="Team news">
         <h2 className="fs-title text-xl mb-4">Team news</h2>
-        {news == null ? (
+        {newsFailed ? (
+          <ErrorState message="Couldn't load team news." onRetry={reload} />
+        ) : news == null ? (
           <div className="fs-panel p-4"><p className="text-sm text-fs-muted-2">Loading news…</p></div>
         ) : news.length === 0 ? (
           <div className="fs-panel p-4"><p className="text-sm text-fs-muted-2">No fresh stories for {team.name} right now.</p></div>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3">
             {news.map((a) => (
               <a key={a.url} href={a.url} target="_blank" rel="noreferrer" className="fs-panel block p-4 hover:brightness-125 transition">
                 <p className="fs-meta mb-1">{a.source} · {a.date ? new Date(a.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</p>
@@ -184,6 +213,8 @@ export function F1TeamPanel({ team, teamColor }: { team: Team; teamColor: string
           <Link href={`/f1/round/${next.round}`} className="fs-btn inline-block mt-3" prefetch={false}>Weekend hub →</Link>
         </section>
       ) : null}
+        </aside>
+      </div>
     </div>
   )
 }

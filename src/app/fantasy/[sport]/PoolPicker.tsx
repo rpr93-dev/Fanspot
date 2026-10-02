@@ -47,7 +47,7 @@ export default function PoolPicker({
 }) {
   const [q, setQ] = useState('')
 
-  const results = useMemo(() => {
+  const matched = useMemo(() => {
     const query = q.trim().toLowerCase()
     const list = pool.filter(
       (p) =>
@@ -58,8 +58,9 @@ export default function PoolPicker({
           p.pos.toLowerCase().includes(query)),
     )
     list.sort((a, b) => b.projection - a.projection)
-    return list.slice(0, 24)
+    return list
   }, [pool, q, excludedIds])
+  const results = matched.slice(0, 24)
 
   return (
     <div className={styles.picker}>
@@ -67,9 +68,15 @@ export default function PoolPicker({
       <input
         className={styles.pickerSearch}
         placeholder={placeholder}
+        aria-label="Search the draft pool"
         value={q}
         onChange={(e) => setQ(e.target.value)}
       />
+      {matched.length > results.length && (
+        <p className={styles.pickerEmpty}>
+          Showing top {results.length} of {matched.length} matches — refine your search.
+        </p>
+      )}
       {results.length === 0 ? (
         <p className={styles.pickerEmpty}>{emptyNote}</p>
       ) : (
@@ -101,6 +108,7 @@ export default function PoolPicker({
                   {p.gap}
                 </span>
                 <button
+                  type="button"
                   className={styles.pickerPick}
                   disabled={disabled}
                   onClick={() => onPick(p)}

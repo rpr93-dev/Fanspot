@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   createDraft,
   simulate,
@@ -152,7 +152,7 @@ function Coach({
             >
               {p.gap > 0 ? '+' : ''}{p.gap}
             </span>
-            <button className={styles.coachPick} onClick={() => onPick(p)}>
+            <button type="button" className={styles.coachPick} onClick={() => onPick(p)}>
               Draft
             </button>
           </li>
@@ -227,24 +227,29 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
   const [generatedAt, setGeneratedAt] = useState<string | null>(null)
   const [format, setFormat] = useState<'snake' | 'auction'>('snake')
   const [roomPool, setRoomPool] = useState<DraftPoolPlayer[]>([])
+  const [restartKey, setRestartKey] = useState(0)
+  const [numText, setNumText] = useState<Record<string, string>>({})
+  const settingsRef = useRef(settings)
+  settingsRef.current = settings
 
   const loadRoom = useCallback(async () => {
+    const s = settingsRef.current
     setLoading(true)
     setError(null)
     try {
       const q = new URLSearchParams({
-        teams: String(settings.teams),
-        pick: String(settings.pick),
-        rosterSize: String(settings.rosterSize),
-        scoring: settings.scoringFormat,
-        adpPlatform: settings.adpPlatform,
-        QB: String(settings.starters.QB),
-        RB: String(settings.starters.RB),
-        WR: String(settings.starters.WR),
-        TE: String(settings.starters.TE),
-        K: String(settings.starters.K),
-        'D/ST': String(settings.starters['D/ST']),
-        FLEX: String(settings.starters.FLEX),
+        teams: String(s.teams),
+        pick: String(s.pick),
+        rosterSize: String(s.rosterSize),
+        scoring: s.scoringFormat,
+        adpPlatform: s.adpPlatform,
+        QB: String(s.starters.QB),
+        RB: String(s.starters.RB),
+        WR: String(s.starters.WR),
+        TE: String(s.starters.TE),
+        K: String(s.starters.K),
+        'D/ST': String(s.starters['D/ST']),
+        FLEX: String(s.starters.FLEX),
       })
       const res = await fetch(`/api/fantasy/mock-draft/${sport}?${q}`, {
         signal: AbortSignal.timeout(60000),
@@ -262,13 +267,34 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
     } finally {
       setLoading(false)
     }
-    // The room only depends on these settings, not on how the browser re-renders.
+    // Deliberately keyed on restartKey, not on settings: editing settings must
+    // never silently rebuild (and wipe) an in-progress draft.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sport, settings.teams, settings.pick, settings.rosterSize, settings.scoringFormat, settings.adpPlatform, settings.starters])
+  }, [sport, restartKey])
 
   useEffect(() => {
     void loadRoom()
   }, [loadRoom])
+
+  // Numeric fields keep their raw text while typing and commit on blur, so a
+  // value never snaps back mid-keystroke.
+  const numProps = (key: string, value: number, commit: (n: number) => void) => ({
+    type: 'number' as const,
+    value: numText[key] ?? String(value),
+    onChange: (e: React.ChangeEvent<HTMLInputElement>) =>
+      setNumText((p) => ({ ...p, [key]: e.target.value })),
+    onBlur: () => {
+      const raw = numText[key]
+      setNumText((p) => {
+        const next = { ...p }
+        delete next[key]
+        return next
+      })
+      if (raw == null || raw.trim() === '') return
+      const parsed = Number(raw)
+      if (Number.isFinite(parsed)) commit(parsed)
+    },
+  })
 
   const isMyTurn = state != null && !state.completed && state.teams[state.order[state.cursor]]?.isUser === true
   const myManager = state?.teams.findIndex((t) => t.isUser) ?? -1
@@ -344,6 +370,13 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
   }, [state])
 
   const grade = state?.completed ? projectDraftGrade(state) : null
+  const picksMade = state ? state.teams.reduce((n, t) => n + t.picks.length, 0) : 0
+  const settingsLocked = picksMade > 0 && !state?.completed
+  const settingsDirty =
+    state != null &&
+    (settings.teams !== state.settings.teams ||
+      settings.pick !== state.settings.pick ||
+      settings.rosterSize !== state.settings.rosterSize)
 
   if (loading && !state) {
     return (
@@ -360,7 +393,7 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
       <div className={styles.room}>
         <div className={styles.error}>
           {error}
-          <button onClick={() => void loadRoom()}>Retry</button>
+          <button type="button" onClick={() => setRestartKey((k) => k + 1)}>Retry</button>
         </div>
       </div>
     )
@@ -370,14 +403,18 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
 
   return (
     <div className={styles.room}>
-      <div className={styles.roomFormatTabs}>
+      <div className={styles.roomFormatTabs} role="group" aria-label="Draft format">
         <button
+          type="button"
+          aria-pressed={format === 'snake'}
           className={format === 'snake' ? styles.active : undefined}
           onClick={() => setFormat('snake')}
         >
           Snake draft
         </button>
         <button
+          type="button"
+          aria-pressed={format === 'auction'}
           className={format === 'auction' ? styles.active : undefined}
           onClick={() => setFormat('auction')}
         >
@@ -386,42 +423,24 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
       </div>
 
       <div className={styles.draftSettings}>
-        <fieldset>
+        <fieldset disabled={settingsLocked}>
           <legend>Room</legend>
           <label>
             Teams
-            <input
-              type="number"
-              min={2}
-              max={20}
-              value={state.settings.teams}
-              onChange={(e) => setSettings({ ...settings, teams: Number(e.target.value) || 12 })}
-            />
+            <input {...numProps('teams', settings.teams, (n) => setSettings({ ...settings, teams: Math.max(2, Math.min(20, n)) }))} min={2} max={20} />
           </label>
           <label>
             Your pick
-            <input
-              type="number"
-              min={1}
-              max={state.settings.teams}
-              value={state.settings.pick}
-              onChange={(e) => setSettings({ ...settings, pick: Number(e.target.value) || 1 })}
-            />
+            <input {...numProps('pick', settings.pick, (n) => setSettings({ ...settings, pick: Math.max(1, Math.min(settings.teams, n)) }))} min={1} max={settings.teams} />
           </label>
           <label>
             Roster size
-            <input
-              type="number"
-              min={12}
-              max={24}
-              value={state.settings.rosterSize}
-              onChange={(e) => setSettings({ ...settings, rosterSize: Number(e.target.value) || 16 })}
-            />
+            <input {...numProps('rosterSize', settings.rosterSize, (n) => setSettings({ ...settings, rosterSize: Math.max(12, Math.min(24, n)) }))} min={12} max={24} />
           </label>
           <label>
             Scoring
             <select
-              value={state.settings.scoringFormat}
+              value={settings.scoringFormat}
               onChange={(e) => setSettings({ ...settings, scoringFormat: e.target.value as never })}
             >
               {SCORING_OPTIONS.map((s) => (
@@ -430,19 +449,13 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
             </select>
           </label>
         </fieldset>
-        <fieldset className={styles.startersFieldset}>
+        <fieldset className={styles.startersFieldset} disabled={settingsLocked}>
           <legend>Starters</legend>
           <div className={styles.starterInputs}>
             {STARTER_LABELS.map(({ key, label, max }) => (
               <label key={key} className={styles.starterInput}>
                 <span>{label}</span>
-                <input
-                  type="number"
-                  min={0}
-                  max={max}
-                  value={settings.starters[key]}
-                  onChange={(e) => setStarter(key, Number(e.target.value))}
-                />
+                <input {...numProps(`starter-${key}`, settings.starters[key], (n) => setStarter(key, n))} min={0} max={max} />
               </label>
             ))}
           </div>
@@ -450,7 +463,18 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
             Required starters per lineup — everything after these is a free bench spot.
           </p>
         </fieldset>
-        <button className={styles.draftRestart} onClick={() => void loadRoom()}>
+        {settingsLocked && (
+          <p className={styles.startersHint} role="status">
+            Settings are locked while the draft is live. Press Restart to change them — this starts a new draft.
+          </p>
+        )}
+        {!settingsLocked && settingsDirty && (
+          <p className={styles.startersHint} role="status">
+            Press Restart to apply these settings and rebuild the room.
+          </p>
+        )}
+        {loading && state && <p className={styles.startersHint}>Updating room…</p>}
+        <button type="button" className={styles.draftRestart} onClick={() => setRestartKey((k) => k + 1)}>
           Restart
         </button>
       </div>
@@ -482,10 +506,10 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
 
       {!state.completed && (
         <div className={styles.draftActions}>
-          <button onClick={autoToMe} disabled={isMyTurn}>
+          <button type="button" onClick={autoToMe} disabled={isMyTurn}>
             Fast-forward bots to my next pick
           </button>
-          <button onClick={autoAll}>Auto-draft my whole team</button>
+          <button type="button" onClick={autoAll}>Auto-draft my whole team</button>
         </div>
       )}
 

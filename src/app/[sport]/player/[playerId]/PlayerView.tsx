@@ -146,7 +146,7 @@ function RelatedStories({ name }: { name: string }) {
           .slice(0, 5)
         setStories(hits)
       })
-      .catch(() => {})
+      .catch((err) => { console.debug('[related-stories] fetch failed', err) })
     return () => {
       cancelled = true
     }
@@ -218,7 +218,13 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
 
   return (
     <div className="min-h-screen fs-page" style={{ '--glow': `${config.color}1c` } as React.CSSProperties}>
-      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10 max-w-5xl">
+      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10">
+        <Link
+          href={data?.player.teamHref ?? `/${sportParam}`}
+          className="fs-meta hover:text-fs-text inline-block mb-4"
+        >
+          &larr; {data?.player.teamName ?? config.name}
+        </Link>
         {error ? (
           <ErrorState
             message={error}
@@ -240,9 +246,10 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
             <div className="fs-skeleton h-64 rounded-xl" />
           </div>
         ) : (
-          <div className="space-y-8">
-            {/* Header */}
+          <div className="space-y-6">
+            {/* Header: identity and bio sit side-by-side on desktop */}
             <div className="fs-panel p-5 sm:p-6">
+              <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
               <div className="flex items-start gap-4 sm:gap-5">
                 <span className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-fs-panel-2 border border-fs-line-strong overflow-hidden shrink-0 flex items-center justify-center">
                   {data.player.headshot ? (
@@ -283,7 +290,7 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
                 </div>
               </div>
               {(data.player.age || data.player.height || data.player.weight || data.player.birthplace || data.player.draft || data.player.experience != null) && (
-                <dl className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 mt-5 pt-4 border-t border-fs-line">
+                <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-3 mt-5 pt-4 border-t border-fs-line lg:mt-0 lg:pt-0 lg:border-t-0 lg:border-l lg:pl-6 lg:w-[34rem] lg:shrink-0">
                   {[
                     ['Age', data.player.age],
                     ['Height', data.player.height],
@@ -301,7 +308,12 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
                   )}
                 </dl>
               )}
+              </div>
             </div>
+
+            {/* Body: two columns on desktop so the long player page reads horizontally */}
+            <div className="grid gap-6 lg:grid-cols-12 items-start">
+              <div className="lg:col-span-7 min-w-0 space-y-6">
 
             {/* Key stats */}
             {keyCat && data.season ? (
@@ -349,28 +361,7 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
               </section>
             )}
 
-            {/* Career totals (separate section only when a season is also shown) */}
-            {data.season && data.careerSums.range && Object.keys(data.careerSums.sums).length > 0 && (
-              <section aria-label="Career totals">
-                <h2 className="fs-title text-xl mb-4">
-                  Career {data.careerSums.range[0] === data.careerSums.range[1] ? data.careerSums.range[0] : `${data.careerSums.range[0]}–${data.careerSums.range[1]}`}
-                </h2>
-                <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
-                  {(keyCat?.stats.slice(0, 12) ?? data.headline.keys.slice(0, 12)).map((s) => {
-                    const value = data.careerSums.sums[s.key]
-                    if (value == null) return null
-                    return (
-                      <div key={s.key} className="fs-panel-2 p-3 text-center">
-                        <p className="fs-mono text-lg font-bold tabular-nums">{value}</p>
-                        <p className="fs-meta mt-1 truncate" title={s.label}>{statLabel(s.key, s.label)}</p>
-                      </div>
-                    )
-                  })}
-                </div>
-              </section>
-            )}
-
-            {/* Past seasons */}
+            {/* Past seasons — lives in the wide column so the table isn't squeezed */}
             {data.pastSeasons.length > 0 && data.headline.keys.length > 0 && (
               <section aria-label="Past seasons">
                 <h2 className="fs-title text-xl mb-4">Past Seasons</h2>
@@ -415,8 +406,32 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
               </section>
             )}
 
+              </div>
+              <aside className="lg:col-span-5 min-w-0 space-y-6">
+
+            {/* Career totals (separate section only when a season is also shown) */}
+            {data.season && data.careerSums.range && Object.keys(data.careerSums.sums).length > 0 && (
+              <section aria-label="Career totals">
+                <h2 className="fs-title text-xl mb-4">
+                  Career {data.careerSums.range[0] === data.careerSums.range[1] ? data.careerSums.range[0] : `${data.careerSums.range[0]}–${data.careerSums.range[1]}`}
+                </h2>
+                <div className="grid grid-cols-3 gap-3">
+                  {(keyCat?.stats.slice(0, 12) ?? data.headline.keys.slice(0, 12)).map((s) => {
+                    const value = data.careerSums.sums[s.key]
+                    if (value == null) return null
+                    return (
+                      <div key={s.key} className="fs-panel-2 p-3 text-center">
+                        <p className="fs-mono text-lg font-bold tabular-nums">{value}</p>
+                        <p className="fs-meta mt-1 truncate" title={s.label}>{statLabel(s.key, s.label)}</p>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            )}
+
             {sport === 'NFL' && (
-              <div className="fs-panel p-4 flex items-center justify-between gap-3">
+              <div className="fs-panel p-4 flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <h2 className="fs-title text-base">Fantasy & Props</h2>
                   <p className="fs-meta mt-1">Projections, draft prep, and model edges</p>
@@ -426,6 +441,8 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
             )}
 
             <RelatedStories name={data.player.name} />
+              </aside>
+            </div>
           </div>
         )}
       </div>

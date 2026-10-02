@@ -133,6 +133,8 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [moreError, setMoreError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
   const [openPlayer, setOpenPlayer] = useState<number | null>(null)
   const [details, setDetails] = useState<Record<number, DetailState>>({})
 
@@ -163,6 +165,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
     let cancelled = false
     setLoading(true)
     setError(null)
+    setMoreError(null)
     fetch(buildUrl(0), { signal: AbortSignal.timeout(60000) })
       .then(async (r) => {
         const json = await r.json()
@@ -183,14 +186,18 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
     return () => {
       cancelled = true
     }
-  }, [buildUrl])
+  }, [buildUrl, reloadKey])
 
   async function loadMore() {
     setLoadingMore(true)
+    setMoreError(null)
     try {
       const r = await fetch(buildUrl(rows.length), { signal: AbortSignal.timeout(60000) })
-      const json = (await r.json()) as AuctionResponse
-      if (r.ok) setRows((prev) => [...prev, ...json.rows])
+      const json = (await r.json()) as AuctionResponse & { message?: string; error?: string }
+      if (!r.ok) throw new Error(json.message ?? json.error ?? 'Request failed')
+      setRows((prev) => [...prev, ...json.rows])
+    } catch (e) {
+      setMoreError(e instanceof Error ? e.message : 'Could not load more players.')
     } finally {
       setLoadingMore(false)
     }
@@ -231,7 +238,13 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
         <div className={styles.controls}>
           <div className={styles.postabs}>
             {POSITIONS.map((p) => (
-              <button key={p} className={pos === p ? styles.active : undefined} onClick={() => setPos(p)}>
+              <button
+                key={p}
+                type="button"
+                className={pos === p ? styles.active : undefined}
+                aria-pressed={pos === p}
+                onClick={() => setPos(p)}
+              >
                 {p}
               </button>
             ))}
@@ -239,11 +252,12 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
           <input
             className={styles.search}
             placeholder="Search player…"
+            aria-label="Search players"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <div className={styles.spacer} />
-          <select className={styles.select} value={scoring} onChange={(e) => setScoring(e.target.value)}>
+          <select className={styles.select} aria-label="Scoring format" value={scoring} onChange={(e) => setScoring(e.target.value)}>
             {SCORING_OPTIONS.map((s) => (
               <option key={s.value} value={s.value}>{s.label}</option>
             ))}
@@ -297,7 +311,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
       {error && (
         <div className={styles.error}>
           {error}
-          <button onClick={() => setBudget((b) => b)}>Retry</button>
+          <button type="button" onClick={() => setReloadKey((k) => k + 1)}>Retry</button>
         </div>
       )}
 
@@ -332,9 +346,17 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
       )}
 
       {!loading && !error && data && rows.length < data.total && (
-        <button className={styles.loadmore} onClick={loadMore} disabled={loadingMore}>
-          {loadingMore ? 'Loading…' : `Show ${Math.min(PAGE_SIZE, data.total - rows.length)} more`}
-        </button>
+        <>
+          <button type="button" className={styles.loadmore} onClick={loadMore} disabled={loadingMore}>
+            {loadingMore ? 'Loading…' : `Show ${Math.min(PAGE_SIZE, data.total - rows.length)} more`}
+          </button>
+          {moreError && (
+            <p className={styles.error}>
+              {moreError}{' '}
+              <button type="button" onClick={loadMore}>Retry</button>
+            </p>
+          )}
+        </>
       )}
 
       {!loading && data && data.injuryWatch.length > 0 && (

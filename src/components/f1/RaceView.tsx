@@ -5,6 +5,7 @@ import Link from 'next/link'
 import type { F1CarState, F1Driver, F1LiveSnapshot } from '@/lib/f1'
 import { F1TrackCanvas } from './F1TrackCanvas'
 import { F1Tower } from './F1Tower'
+import { ErrorState } from '@/components/feedback'
 
 interface SessionInfo {
   key: number
@@ -28,12 +29,17 @@ export function RaceView({ sessionKey, teamColor = '#E10600' }: { sessionKey?: s
   const [drivers, setDrivers] = useState<F1Driver[]>([])
   const [live, setLive] = useState<F1LiveSnapshot | null>(null)
   const [outline, setOutline] = useState<[number, number][] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [sessionError, setSessionError] = useState(false)
+  const [sessionReload, setSessionReload] = useState(0)
+  const [liveFailures, setLiveFailures] = useState(0)
+  const [liveReload, setLiveReload] = useState(0)
+  const [lastLiveAt, setLastLiveAt] = useState<number | null>(null)
   const keyRef = useRef<number | null>(null)
 
   // Session metadata + drivers (slow-moving).
   useEffect(() => {
     let cancelled = false
+    setSessionError(false)
     fetch(`/api/f1/session${sessionKey ? `?session_key=${encodeURIComponent(sessionKey)}` : ''}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Session ${r.status}`))))
       .then((j) => {
@@ -41,10 +47,11 @@ export function RaceView({ sessionKey, teamColor = '#E10600' }: { sessionKey?: s
         setSession(j.session)
         setDrivers(j.drivers ?? [])
         keyRef.current = j.session?.key ?? null
+        setSessionError(false)
       })
-      .catch((e) => { if (!cancelled) setError(e?.message ?? 'Session unavailable') })
+      .catch(() => { if (!cancelled) setSessionError(true) })
     return () => { cancelled = true }
-  }, [sessionKey])
+  }, [sessionKey, sessionReload])
 
   const loadLive = useCallback(async (signal: AbortSignal) => {
     const sk = keyRef.current ?? sessionKey
@@ -63,16 +70,21 @@ export function RaceView({ sessionKey, teamColor = '#E10600' }: { sessionKey?: s
         const j = await loadLive(AbortSignal.timeout(20000))
         if (!cancelled) {
           setLive(j)
+          setLiveFailures(0)
+          setLastLiveAt(Date.now())
           if (j.sessionKey && !keyRef.current) keyRef.current = j.sessionKey
         }
-      } catch { /* keep last frame; retry on cadence */ }
+      } catch {
+        /* keep last frame; retry on cadence */
+        if (!cancelled) setLiveFailures((n) => n + 1)
+      }
       if (!cancelled) {
         timer = setTimeout(tick, live?.state === 'live' ? 5_000 : 60_000)
       }
     }
     tick()
     return () => { cancelled = true; if (timer) clearTimeout(timer) }
-  }, [session, sessionKey, loadLive, live?.state])
+  }, [session, sessionKey, loadLive, live?.state, liveReload])
 
   // Circuit outline (cached server-side for hours; needs cars on track).
   useEffect(() => {
@@ -91,8 +103,22 @@ export function RaceView({ sessionKey, teamColor = '#E10600' }: { sessionKey?: s
   const state = live?.state ?? session?.state ?? 'upcoming'
   const isLive = state === 'live'
 
+  if (sessionError && !live) {
+    return (
+      <div className="space-y-6">
+        <Link href="/f1" className="fs-meta hover:text-fs-text inline-block">&larr; All of F1</Link>
+        <ErrorState
+          message="Couldn't load this session — timing may not be published yet."
+          onRetry={() => setSessionReload((k) => k + 1)}
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
+      <Link href="/f1" className="fs-meta hover:text-fs-text inline-block">&larr; All of F1</Link>
+
       {/* Session header */}
       <div className="fs-panel p-5 sm:p-6">
         <div className="flex flex-wrap items-center gap-3">
@@ -104,21 +130,35 @@ export function RaceView({ sessionKey, teamColor = '#E10600' }: { sessionKey?: s
               isLive ? 'text-white bg-fs-red animate-pulse' : state === 'final' ? 'text-fs-muted bg-white/10' : 'text-fs-gold bg-fs-gold/15'
             }`}
           >
-            {isLive ? '● LIVE' : state === 'final' ? 'FINAL' : session?.name?.toUpperCase() ?? 'UPCOMING'}
+            {isLive ? '● LIVE' : state === 'final' ? 'FINAL' : 'UPCOMING'}
           </span>
           {session?.name && state !== 'upcoming' ? <span className="fs-meta">{session.name}</span> : null}
         </div>
-        <h1 className="fs-title text-3xl sm:text-4xl mt-2">
-          {session ? `${session.location} ${session.name}` : 'Race Center'}
-        </h1>
+        <h1 className="fs-title text-3xl sm:text-4xl mt-2">Race Center</h1>
+        {session ? <p className="text-lg text-fs-text mt-1">{session.location} {session.name}</p> : null}
         <div className="flex flex-wrap gap-x-5 gap-y-1 mt-2 text-sm text-fs-muted">
           {live && live.lap > 0 ? <span>Lap {live.lap}</span> : null}
           {live?.airTemp != null ? <span>{live.airTemp.toFixed(1)}°C air</span> : null}
           {live?.trackTemp != null ? <span>{live.trackTemp.toFixed(1)}°C track</span> : null}
           {live?.trackStatus ? <span title="Current track status">{live.trackStatus}</span> : null}
         </div>
-        {error ? <p className="text-sm text-fs-red mt-2">{error}</p> : null}
       </div>
+
+      {liveFailures >= 3 ? (
+        <div role="status" className="fs-panel p-3 sm:p-4 flex flex-wrap items-center justify-between gap-3 text-sm text-fs-gold">
+          <span>
+            Live timing interrupted — showing the last update
+            {lastLiveAt ? ` from ~${Math.max(1, Math.round((Date.now() - lastLiveAt) / 60_000))}m ago` : ''}.
+          </span>
+          <button
+            type="button"
+            className="fs-btn"
+            onClick={() => { setLiveFailures(0); setLiveReload((k) => k + 1) }}
+          >
+            Retry
+          </button>
+        </div>
+      ) : null}
 
       <div className="grid gap-6 lg:grid-cols-5 items-start">
         {/* Live track */}

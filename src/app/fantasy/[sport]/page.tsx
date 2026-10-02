@@ -179,17 +179,17 @@ function Row({
             )}
           </div>
           <div className={styles.metaLine}>
-            <span className={styles.meta} data-tip="Model confidence in this projection">
+            <span className={styles.meta} data-tip="Model confidence in this projection" tabIndex={0}>
               Conf <b>{row.conf}</b>
             </span>
-            <span className={styles.meta} data-tip="% of ESPN leagues rostering this player">
+            <span className={styles.meta} data-tip="% of ESPN leagues rostering this player" tabIndex={0}>
               Roster&apos;d <b>{row.ownedPct}%</b>
             </span>
-            <span className={styles.meta} data-tip={`Projected ${row.projectedPoints} fantasy points this season`}>
+            <span className={styles.meta} data-tip={`Projected ${row.projectedPoints} fantasy points this season`} tabIndex={0}>
               Proj <b>{row.projectedPoints}</b>
             </span>
             {row.impliedTeamTotal != null && (
-              <span className={styles.meta} data-tip="Vegas implied points per game for this player's team">
+              <span className={styles.meta} data-tip="Vegas implied points per game for this player's team" tabIndex={0}>
                 Team total <b>{row.impliedTeamTotal.toFixed(1)}</b>
               </span>
             )}
@@ -448,20 +448,26 @@ export default function FantasySportPage() {
           </p>
         )}
 
-        <div className={styles.modeTabs}>
+        <div className={styles.modeTabs} role="group" aria-label="Draft mode">
           <button
+            type="button"
+            aria-pressed={mode === 'snake'}
             className={mode === 'snake' ? styles.active : undefined}
             onClick={() => setMode('snake')}
           >
             Snake
           </button>
           <button
+            type="button"
+            aria-pressed={mode === 'auction'}
             className={mode === 'auction' ? styles.active : undefined}
             onClick={() => setMode('auction')}
           >
             Auction
           </button>
           <button
+            type="button"
+            aria-pressed={mode === 'mock'}
             className={mode === 'mock' ? styles.active : undefined}
             onClick={() => setMode('mock')}
           >
@@ -478,10 +484,12 @@ export default function FantasySportPage() {
 
         <div className={styles.stickybar}>
           <div className={styles.controls}>
-            <div className={styles.postabs}>
+            <div className={styles.postabs} role="group" aria-label="Position filter">
               {POSITIONS.map((p) => (
                 <button
                   key={p}
+                  type="button"
+                  aria-pressed={pos === p}
                   className={pos === p ? styles.active : undefined}
                   onClick={() => setPos(p)}
                   title={counts[p] != null ? `${counts[p]} tracked` : undefined}
@@ -493,22 +501,23 @@ export default function FantasySportPage() {
             <input
               className={styles.search}
               placeholder="Search player…"
+              aria-label="Search players"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
             <div className={styles.spacer} />
-            <select className={styles.select} value={sort} onChange={(e) => setSort(e.target.value)}>
+            <select className={styles.select} aria-label="Sort order" value={sort} onChange={(e) => setSort(e.target.value)}>
               <option value="gap">Sort: Value gap</option>
               <option value="scheme">Sort: Scheme value</option>
               <option value="adp">Sort: ADP rank</option>
               <option value="proj">Sort: Proj. rank</option>
             </select>
-            <select className={styles.select} value={scoring} onChange={(e) => setScoring(e.target.value)}>
+            <select className={styles.select} aria-label="Scoring format" value={scoring} onChange={(e) => setScoring(e.target.value)}>
               {SCORING_OPTIONS.map((s) => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
-            <select className={styles.select} value={adpPlatform} onChange={(e) => setAdpPlatform(e.target.value)}>
+            <select className={styles.select} aria-label="ADP platform" value={adpPlatform} onChange={(e) => setAdpPlatform(e.target.value)}>
               <option value="espn">ADP: ESPN</option>
               <option value="sleeper">ADP: Sleeper</option>
             </select>
@@ -531,7 +540,7 @@ export default function FantasySportPage() {
         {error && (
           <div className={styles.error}>
             {error}
-            <button onClick={load}>Retry</button>
+            <button type="button" onClick={load}>Retry</button>
           </div>
         )}
 
@@ -567,7 +576,7 @@ export default function FantasySportPage() {
         ))}
 
         {!loading && !error && rows.length > 0 && (
-          <button className={styles.loadmore} onClick={loadMore} disabled={!hasMore || loadingMore}>
+          <button type="button" className={styles.loadmore} onClick={loadMore} disabled={!hasMore || loadingMore}>
             {loadingMore
               ? 'Loading…'
               : hasMore

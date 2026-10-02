@@ -1,10 +1,19 @@
 import Link from 'next/link'
+import type { Metadata } from 'next'
 import { NewsFeed } from '@/components/NewsFeed'
 import { DaySnapshot } from '@/components/home/DaySnapshot'
 import { ForYou } from '@/components/home/ForYou'
 import { SectionHeader } from '@/components/feedback'
+import { SportMotif } from '@/components/SportMotif'
+import { sportTheme } from '@/lib/sportTheme'
+import type { SportKey } from '@/lib/models'
 import { fontVariables } from './fonts'
 import { version } from '../../package.json'
+
+export const metadata: Metadata = {
+  title: 'Today in Sports - Fanspot',
+  description: 'Live scores, news, and fantasy edges across the NFL, NBA, NHL, MLB, and Formula 1.',
+}
 
 const leagues = [
   { id: 'nfl', name: 'NFL', fullName: 'National Football League', color: '#013369' },
@@ -35,30 +44,43 @@ export default function HomePage() {
             <section aria-label="League hubs" className="lg:col-span-2">
               <SectionHeader eyebrow="Go deeper" title="Leagues" />
               <div className="grid grid-cols-2 gap-3 sm:gap-4">
-                {leagues.map((league) => (
-                  <Link
-                    key={league.id}
-                    href={`/${league.id}`}
-                    className="league-card fs-panel group flex items-center gap-3 p-3 sm:p-4 text-left transition-all duration-300 hover:-translate-y-1"
-                    style={{
-                      '--tint': league.color,
-                      '--tint-border': `${league.color}38`,
-                      '--glow-color': `${league.color}60`,
-                    } as React.CSSProperties}
-                  >
-                    <img
-                      aria-hidden="true"
-                      src={`https://a.espncdn.com/i/teamlogos/leagues/500/${league.id}.png`}
-                      alt=""
-                      className="w-10 h-10 sm:w-12 sm:h-12 object-contain shrink-0"
-                      loading="lazy"
-                    />
-                    <span className="min-w-0">
-                      <span className="fs-title text-base block">{league.name}</span>
-                      <span className="fs-meta hidden sm:block truncate">{league.fullName}</span>
-                    </span>
-                  </Link>
-                ))}
+                {leagues.map((league) => {
+                  const theme = sportTheme(league.id as SportKey)
+                  return (
+                    <Link
+                      key={league.id}
+                      href={`/${league.id}`}
+                      className="league-card fs-panel group relative flex items-center gap-3 p-3 sm:p-4 text-left transition-all duration-300 hover:-translate-y-1 overflow-hidden"
+                      style={{
+                        '--tint': theme.accent,
+                        '--tint-border': `${theme.accent}38`,
+                        '--glow-color': `${theme.accent}60`,
+                      } as React.CSSProperties}
+                    >
+                      <SportMotif
+                        motif={theme.motif}
+                        color={theme.accent}
+                        className="pointer-events-none absolute -right-2 -top-2 h-[130%] w-2/3 opacity-[0.12]"
+                      />
+                      <span
+                        aria-hidden="true"
+                        className="absolute left-0 top-0 h-full w-1"
+                        style={{ background: `linear-gradient(180deg, ${theme.accent}, ${theme.accent2})` }}
+                      />
+                      <img
+                        aria-hidden="true"
+                        src={`https://a.espncdn.com/i/teamlogos/leagues/500/${league.id}.png`}
+                        alt=""
+                        className="relative w-10 h-10 sm:w-12 sm:h-12 object-contain shrink-0 pl-1"
+                        loading="lazy"
+                      />
+                      <span className="min-w-0 relative">
+                        <span className="fs-title text-base block">{league.name}</span>
+                        <span className="fs-meta hidden sm:block truncate">{league.fullName}</span>
+                      </span>
+                    </Link>
+                  )
+                })}
               </div>
             </section>
 

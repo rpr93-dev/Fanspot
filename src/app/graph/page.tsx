@@ -22,6 +22,7 @@ export default function GraphPage() {
   const [meta, setMeta] = useState<GraphMeta | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [frameKey, setFrameKey] = useState(0)
+  const [frameLoaded, setFrameLoaded] = useState(false)
   const [auto, setAuto] = useState(true)
   const [tick, setTick] = useState(0) // re-render the "ago" label
   const knownMtime = useRef<string | null>(null)
@@ -53,6 +54,10 @@ export default function GraphPage() {
     const id = setInterval(() => setTick((t) => t + 1), 10_000)
     return () => clearInterval(id)
   }, [])
+
+  useEffect(() => {
+    setFrameLoaded(false)
+  }, [frameKey])
 
   void tick
 
@@ -98,12 +103,18 @@ export default function GraphPage() {
         {error ? (
           <div className="fs-panel p-6 text-sm text-fs-red">{error}</div>
         ) : (
-          <div className="fs-panel overflow-hidden flex-1" style={{ minHeight: 'calc(100dvh - 160px)' }}>
+          <div className="fs-panel overflow-hidden flex-1 relative" style={{ minHeight: 'calc(100dvh - 160px)' }}>
+            {meta?.html && !frameLoaded && (
+              <div className="absolute inset-0 grid place-items-center fs-meta animate-pulse" aria-hidden="true">
+                Loading graph…
+              </div>
+            )}
             {meta?.html && (
               <iframe
                 key={frameKey}
                 src="/api/graph-html"
                 title="Graphify code graph"
+                onLoad={() => setFrameLoaded(true)}
                 className="w-full h-full block"
                 style={{ height: 'calc(100dvh - 162px)', border: 0 }}
               />

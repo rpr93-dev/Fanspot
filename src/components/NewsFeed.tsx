@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { teams, sportPath } from '@/data/teams'
 import { useFavorites } from '@/hooks/useFavorites'
 import { favoriteTeamIds } from '@/lib/favorites'
+import { ErrorState } from '@/components/feedback'
 
-type League = 'nfl' | 'nba' | 'nhl' | 'mlb'
+type League = 'nfl' | 'nba' | 'nhl' | 'mlb' | 'f1'
 
 export interface FeedStory {
   title: string
@@ -25,9 +26,18 @@ const LEAGUE_COLORS: Record<League, string> = {
   nba: '#C9082A',
   nhl: '#003E7E',
   mlb: '#002D72',
+  f1: '#E10600',
 }
 
-const FILTERS: ('foryou' | 'all' | League)[] = ['foryou', 'all', 'nfl', 'nba', 'nhl', 'mlb']
+const LEAGUE_LABELS: Record<League, string> = {
+  nfl: 'NFL',
+  nba: 'NBA',
+  nhl: 'NHL',
+  mlb: 'MLB',
+  f1: 'F1',
+}
+
+const FILTERS: ('foryou' | 'all' | League)[] = ['foryou', 'all', 'nfl', 'nba', 'nhl', 'mlb', 'f1']
 
 function relativeTime(iso: string | null, now: number | null): string {
   if (!iso || now == null) return ''
@@ -43,6 +53,47 @@ function teamHref(league: League, teamId: string): string | null {
   const t = teams.find((x) => x.id === teamId && x.sport === league.toUpperCase())
   if (!t) return null
   return `/${sportPath[t.sport]}/${t.id}`
+}
+
+function LeagueBadge({ league, solid = false }: { league: League; solid?: boolean }) {
+  const color = LEAGUE_COLORS[league]
+  if (solid) {
+    return (
+      <span
+        className="text-[10px] font-black tracking-[0.14em] px-2 py-0.5 rounded-md shrink-0 text-white"
+        style={{ backgroundColor: color }}
+      >
+        {LEAGUE_LABELS[league]}
+      </span>
+    )
+  }
+  return (
+    <span className="text-xs font-bold tracking-widest px-1.5 py-0.5 rounded shrink-0 mt-0.5 fs-mono text-fs-muted border border-fs-line">
+      {LEAGUE_LABELS[league]}
+    </span>
+  )
+}
+
+function TeamPills({ league, teamIds }: { league: League; teamIds: string[] }) {
+  if (teamIds.length === 0) return null
+  return (
+    <span className="inline-flex flex-wrap gap-1.5">
+      {teamIds.slice(0, 3).map((id) => {
+        const href = teamHref(league, id)
+        if (!href) return null
+        const t = teams.find((x) => x.id === id)
+        return (
+          <Link
+            key={id}
+            href={href}
+            className="fs-meta !text-[10px] px-2 py-0.5 rounded-full border border-fs-line-strong hover:text-fs-text hover:border-fs-muted"
+          >
+            {t?.abbreviation ?? id}
+          </Link>
+        )
+      })}
+    </span>
+  )
 }
 
 /**
@@ -63,42 +114,45 @@ export function NewsFeed({
   showScores?: boolean
   leagues?: League[]
   initialFilter?: 'foryou' | 'all' | League
-  /** 'grid' renders stories two-up on wider screens (homepage). */
+  /** 'grid' renders uniform tiles (homepage). 'list' renders a lead story + dense rows. */
   layout?: 'list' | 'grid'
 }) {
   const [stories, setStories] = useState<FeedStory[]>([])
   const [filter, setFilter] = useState<'foryou' | 'all' | League>(initialFilter)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [fetchedAt, setFetchedAt] = useState<string | null>(null)
+  const [emptyLeagues, setEmptyLeagues] = useState<string[]>([])
   const [now, setNow] = useState<number | null>(null)
-  const { favorites } = useFavorites()
+  const { favorites, hydrated } = useFavorites()
   const favIds = useMemo(() => favoriteTeamIds(favorites), [favorites])
   const hasFavs = favIds.size > 0
   const scope = leagues && leagues.length > 0 ? [...leagues].sort().join(',') : ''
 
-  useEffect(() => {
-    let cancelled = false
-    async function load() {
-      try {
-        const params = new URLSearchParams({ limit: String(limit), ranking })
-        if (scope) params.set('leagues', scope)
-        const res = await fetch(`/api/top-stories?${params.toString()}`, {
-          signal: AbortSignal.timeout(30000),
-        })
-        const body = await res.json().catch(() => ({}))
-        if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`)
-        if (!cancelled) setStories(body.stories ?? [])
-      } catch (err) {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load stories')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    load()
-    return () => {
-      cancelled = true
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const params = new URLSearchParams({ limit: String(limit), ranking })
+      if (scope) params.set('leagues', scope)
+      const res = await fetch(`/api/top-stories?${params.toString()}`, {
+        signal: AbortSignal.timeout(30000),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.message || body.error || `HTTP ${res.status}`)
+      setStories(body.stories ?? [])
+      setFetchedAt(body.fetchedAt ?? null)
+      setEmptyLeagues(body.emptyLeagues ?? [])
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load stories')
+    } finally {
+      setLoading(false)
     }
   }, [limit, ranking, scope])
+
+  useEffect(() => {
+    void load()
+  }, [load])
 
   useEffect(() => {
     setNow(Date.now())
@@ -121,108 +175,252 @@ export function NewsFeed({
     return stories.filter((s) => s.league === effectiveFilter)
   }, [stories, effectiveFilter, favIds])
 
+  const counts = useMemo(() => {
+    const c: Record<string, number> = { all: stories.length }
+    for (const s of stories) c[s.league] = (c[s.league] ?? 0) + 1
+    return c
+  }, [stories])
+
+  const [lead, ...rest] = layout === 'list' && effectiveFilter !== 'foryou' ? shown : []
+  const listStories = lead ? rest : shown
+
   return (
     <div>
-      <div className="flex flex-wrap gap-1.5 mb-6 justify-start" role="tablist" aria-label="Story filter">
-        {visibleFilters.map((f) => (
-          <button
-            key={f}
-            type="button"
-            role="tab"
-            aria-selected={(filter === 'foryou' && !hasFavs ? 'all' : filter) === f}
-            onClick={() => setFilter(f)}
-            className={`fs-chip ${(filter === 'foryou' && !hasFavs ? 'all' : filter) === f ? 'fs-chip-active' : ''}`}
-          >
-            {f === 'foryou' ? '★ For You' : f}
-          </button>
-        ))}
+      {hydrated ? (
+      <div className="flex flex-wrap gap-1.5 mb-5 justify-start" role="group" aria-label="Story filter">
+        {visibleFilters.map((f) => {
+          const active = (filter === 'foryou' && !hasFavs ? 'all' : filter) === f
+          const color = f === 'all' || f === 'foryou' ? null : LEAGUE_COLORS[f]
+          const n = counts[f] ?? 0
+          return (
+            <button
+              key={f}
+              type="button"
+              aria-pressed={active}
+              onClick={() => setFilter(f)}
+              className={`fs-chip inline-flex items-center gap-1.5 !border ${active ? '!text-white' : ''}`}
+              style={
+                active
+                  ? {
+                      backgroundColor: `${color ?? '#8a9990'}2e`,
+                      borderColor: `${color ?? '#8a9990'}88`,
+                    }
+                  : {
+                      borderColor: 'transparent',
+                    }
+              }
+            >
+              {color && (
+                <span
+                  aria-hidden="true"
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ backgroundColor: color }}
+                />
+              )}
+              {f === 'foryou' ? '★ For You' : f === 'all' ? 'All' : LEAGUE_LABELS[f]}
+              {!loading && <span className="opacity-60 tabular-nums">{n}</span>}
+            </button>
+          )
+        })}
       </div>
-
-      {loading && (
-        <div className={layout === 'grid' ? 'grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3' : 'space-y-2.5'} aria-hidden="true">
-          {[...Array(6)].map((_, i) => (
-            <div key={i} className="fs-skeleton h-20" />
-          ))}
-        </div>
+      ) : (
+        <div className="h-[34px] mb-5" aria-hidden="true" />
       )}
 
-      {error && <p className="text-sm text-fs-muted py-10 text-center">{error}</p>}
+      {loading && (
+        layout === 'grid' ? (
+          <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-stretch" aria-hidden="true">
+            {[...Array(6)].map((_, i) => (
+              <div key={i} className="fs-skeleton h-36" />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2.5" aria-hidden="true">
+            <div className="fs-skeleton h-44" />
+            {[...Array(5)].map((_, i) => (
+              <div key={i} className="fs-skeleton h-20" />
+            ))}
+          </div>
+        )
+      )}
+
+      {error && <div className="py-6"><ErrorState message={error} onRetry={() => void load()} /></div>}
 
       {!loading && !error && shown.length === 0 && (
         <p className="text-sm text-fs-muted py-10 text-center">
           {effectiveFilter === 'foryou'
-            ? 'No stories about your favorites right now — showing everything instead.'
+            ? 'No stories about your favorites right now.'
             : 'No stories for this league right now.'}
         </p>
       )}
 
-      <div className={layout === 'grid' ? 'grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 items-start' : 'space-y-2.5'}>
-        {shown.map((s) => (
-          <a
-            key={s.url}
-            href={s.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="fs-panel block p-4 transition hover:brightness-125"
-            style={{ '--tint': LEAGUE_COLORS[s.league], '--tint-border': `${LEAGUE_COLORS[s.league]}2a` } as React.CSSProperties}
-          >
-            <div className="flex items-start gap-3">
-              <span className="text-xs font-bold tracking-widest px-1.5 py-0.5 rounded shrink-0 mt-0.5 fs-mono text-fs-muted border border-fs-line">
-                {s.league.toUpperCase()}
-              </span>
-              <div className="min-w-0 flex-1">
-                <h3
-                  className="text-[17px] leading-snug text-white/90 font-semibold"
-                  style={{ fontFamily: 'var(--font-display), sans-serif' }}
-                >
-                  {s.title}
-                </h3>
-                {s.snippet && (
-                  <p className="text-xs text-fs-muted mt-1 line-clamp-2 leading-relaxed">{s.snippet}</p>
-                )}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-fs-muted-2 uppercase tracking-wider fs-mono">
-                  <span>{s.source}</span>
-                  {relativeTime(s.publishedAt, now) && <span>{relativeTime(s.publishedAt, now)}</span>}
-                  {showScores && s.drivers.length > 0 && (
-                    <span className="text-fs-muted-2/70">why: {s.drivers.slice(0, 2).join(' · ')}</span>
+      {layout === 'grid' ? (
+        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4 items-stretch">
+          {shown.map((s) => (
+            <div
+              key={s.url}
+              className="fs-panel relative block p-4 transition hover:brightness-125 h-full"
+              style={{ '--tint': LEAGUE_COLORS[s.league], '--tint-border': `${LEAGUE_COLORS[s.league]}2a` } as React.CSSProperties}
+            >
+              <div className="flex items-start gap-3">
+                <LeagueBadge league={s.league} />
+                <div className="min-w-0 flex-1 flex flex-col">
+                  <h3
+                    className="text-[17px] leading-snug text-white/90 font-semibold line-clamp-2 min-h-[2.75rem]"
+                    style={{ fontFamily: 'var(--font-display), sans-serif' }}
+                  >
+                    <a
+                      href={s.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="after:absolute after:inset-0 after:content-['']"
+                    >
+                      {s.title}
+                    </a>
+                  </h3>
+                  <p className="text-xs text-fs-muted mt-1 line-clamp-2 min-h-[2rem] leading-relaxed">
+                    {s.snippet || ' '}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2 text-xs text-fs-muted-2 uppercase tracking-wider fs-mono">
+                    <span>{s.source}</span>
+                    {relativeTime(s.publishedAt, now) && <span>{relativeTime(s.publishedAt, now)}</span>}
+                    {showScores && s.drivers.length > 0 && (
+                      <span className="text-fs-muted-2/70">why: {s.drivers.slice(0, 2).join(' · ')}</span>
+                    )}
+                  </div>
+                  {s.teamIds.length > 0 ? (
+                    <div className="flex flex-wrap gap-1.5 mt-2 min-h-[1.5rem] relative z-10">
+                      <TeamPills league={s.league} teamIds={s.teamIds} />
+                    </div>
+                  ) : (
+                    <div aria-hidden="true" className="min-h-[1.5rem] mt-2" />
                   )}
                 </div>
-                {s.teamIds.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mt-2" onClick={(e) => e.stopPropagation()}>
-                    {s.teamIds.slice(0, 3).map((id) => {
-                      const href = teamHref(s.league, id)
-                      if (!href) return null
-                      const t = teams.find((x) => x.id === id)
-                      return (
-                        <Link
-                          key={id}
-                          href={href}
-                          className="fs-meta !text-[10px] px-2 py-0.5 rounded-full border border-fs-line-strong hover:text-fs-text hover:border-fs-muted"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          {t?.abbreviation ?? id}
-                        </Link>
-                      )
-                    })}
-                  </div>
+                {showScores && (
+                  <span
+                    className="text-xs text-fs-muted-2 shrink-0 tabular-nums fs-mono"
+                    title="Significance score: event type, player recognition and source prominence. Recency is only a tiebreaker."
+                  >
+                    {s.significance}
+                  </span>
                 )}
               </div>
-              {showScores && (
-                <span
-                  className="text-xs text-fs-muted-2 shrink-0 tabular-nums fs-mono"
-                  title="Significance score: event type, player recognition and source prominence. Recency is only a tiebreaker."
-                >
-                  {s.significance}
-                </span>
-              )}
             </div>
-          </a>
-        ))}
-      </div>
+          ))}
+        </div>
+      ) : (
+        <div className="space-y-2.5">
+          {lead && (
+            <div
+              key={lead.url}
+              className="fs-panel relative block overflow-hidden p-5 sm:p-6 transition hover:brightness-125"
+              style={{ '--tint': LEAGUE_COLORS[lead.league], '--tint-border': `${LEAGUE_COLORS[lead.league]}55` } as React.CSSProperties}
+            >
+              <span
+                aria-hidden="true"
+                className="absolute left-0 top-0 bottom-0 w-1"
+                style={{ backgroundColor: LEAGUE_COLORS[lead.league] }}
+              />
+              <div className="flex items-center justify-between gap-3 mb-2.5">
+                <span className="inline-flex items-center gap-2">
+                  <LeagueBadge league={lead.league} solid />
+                  <span className="fs-meta">Top story</span>
+                </span>
+                {relativeTime(lead.publishedAt, now) && (
+                  <span className="fs-meta shrink-0">{relativeTime(lead.publishedAt, now)}</span>
+                )}
+              </div>
+              <h3
+                className="text-xl sm:text-2xl leading-tight text-white font-bold text-balance"
+                style={{ fontFamily: 'var(--font-display), sans-serif' }}
+              >
+                <a
+                  href={lead.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="after:absolute after:inset-0 after:content-['']"
+                >
+                  {lead.title}
+                </a>
+              </h3>
+              {lead.snippet && (
+                <p className="text-sm text-fs-muted mt-2 line-clamp-2 leading-relaxed">{lead.snippet}</p>
+              )}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2 mt-3">
+                <span className="fs-meta !text-fs-muted">{lead.source}</span>
+                <span className="ml-auto inline-flex items-center gap-2 relative z-10">
+                  <TeamPills league={lead.league} teamIds={lead.teamIds} />
+                  {showScores && (
+                    <span
+                      className="text-xs text-fs-muted-2 tabular-nums fs-mono"
+                      title="Significance score: event type, player recognition and source prominence. Recency is only a tiebreaker."
+                    >
+                      {lead.significance}
+                    </span>
+                  )}
+                </span>
+              </div>
+            </div>
+          )}
+          <div className="grid gap-2.5 md:grid-cols-2">
+          {listStories.map((s) => (
+            <div
+              key={s.url}
+              className="fs-panel relative block overflow-hidden py-3 px-4 transition hover:brightness-125"
+              style={{ '--tint-border': `${LEAGUE_COLORS[s.league]}44` } as React.CSSProperties}
+            >
+              <span
+                aria-hidden="true"
+                className="absolute left-0 top-0 bottom-0 w-[3px]"
+                style={{ backgroundColor: LEAGUE_COLORS[s.league] }}
+              />
+              <div className="flex items-center justify-between gap-3">
+                <LeagueBadge league={s.league} solid />
+                <span className="inline-flex items-center gap-2 shrink-0">
+                  {showScores && (
+                    <span
+                      className="text-xs text-fs-muted-2 tabular-nums fs-mono"
+                      title="Significance score: event type, player recognition and source prominence. Recency is only a tiebreaker."
+                    >
+                      {s.significance}
+                    </span>
+                  )}
+                  {relativeTime(s.publishedAt, now) && (
+                    <span className="fs-meta">{relativeTime(s.publishedAt, now)}</span>
+                  )}
+                </span>
+              </div>
+              <h3
+                className="text-[16px] leading-snug text-white/90 font-semibold mt-1.5"
+                style={{ fontFamily: 'var(--font-display), sans-serif' }}
+              >
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="after:absolute after:inset-0 after:content-['']"
+                >
+                  {s.title}
+                </a>
+              </h3>
+              {s.snippet && (
+                <p className="text-xs text-fs-muted mt-1 line-clamp-2 leading-relaxed">{s.snippet}</p>
+              )}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 mt-1.5 relative z-10">
+                <span className="fs-meta !text-fs-muted">{s.source}</span>
+                <TeamPills league={s.league} teamIds={s.teamIds} />
+              </div>
+            </div>
+          ))}
+          </div>
+        </div>
+      )}
 
       {!loading && !error && stories.length > 0 && (
         <p className="fs-meta mt-6 text-center">
           {ranking === 'balanced' ? 'Recency-weighted feed' : 'Ranked by significance, not recency'}
+          {fetchedAt && relativeTime(fetchedAt, now) && ` · updated ${relativeTime(fetchedAt, now)}`}
+          {emptyLeagues.length > 0 && ` · quiet right now: ${emptyLeagues.join(', ').toUpperCase()}`}
         </p>
       )}
     </div>

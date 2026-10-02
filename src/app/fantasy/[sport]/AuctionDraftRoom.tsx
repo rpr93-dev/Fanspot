@@ -67,6 +67,10 @@ export default function AuctionDraftRoom({
   settings: MockDraftSettings
 }) {
   const [budget, setBudget] = useState(200)
+  // The budget only takes effect on an explicit restart: editing the input must
+  // never silently wipe nominations, bids and team state mid-auction.
+  const [appliedBudget, setAppliedBudget] = useState(200)
+  const [restartKey, setRestartKey] = useState(0)
   const [auction, setAuction] = useState<AuctionDraftState | null>(null)
   const [customBid, setCustomBid] = useState('')
 
@@ -76,13 +80,13 @@ export default function AuctionDraftRoom({
     () => ({
       teams: settings.teams,
       rosterSize: settings.rosterSize,
-      budget: Math.max(10, Math.min(1000, budget || 200)),
+      budget: appliedBudget,
       scoringFormat: settings.scoringFormat,
       adpPlatform: settings.adpPlatform,
       starters: settings.starters,
       userTeam: userIdx,
     }),
-    [settings, budget, userIdx],
+    [settings, appliedBudget, userIdx],
   )
 
   useEffect(() => {
@@ -90,7 +94,12 @@ export default function AuctionDraftRoom({
     // The human nominates first, so the room opens on a decision they can make.
     setAuction(simulate(created, { untilUser: true }))
     setCustomBid('')
-  }, [pool, draftSettings])
+  }, [pool, draftSettings, restartKey])
+
+  const restart = () => {
+    setAppliedBudget(Math.max(10, Math.min(1000, budget || 200)))
+    setRestartKey((k) => k + 1)
+  }
 
   const act = (next: AuctionDraftState) => {
     setAuction(simulate(next, { untilUser: true }))
@@ -154,18 +163,17 @@ export default function AuctionDraftRoom({
           </label>
         </fieldset>
         <p className={styles.auctionRoomHint}>
-          {auction.settings.teams} teams × {MONEY(budget)} = {MONEY(auction.settings.teams * budget)} on the
-          table · ${auction.settings.teams * budget - auction.settings.teams * auction.settings.rosterSize} of it is
+          {auction.settings.teams} teams × {MONEY(auction.settings.budget)} = {MONEY(auction.settings.teams * auction.settings.budget)} on the
+          table · ${auction.settings.teams * auction.settings.budget - auction.settings.teams * auction.settings.rosterSize} of it is
           bid-with money (the rest is the $1-per-slot floor)
         </p>
-        <button
-          className={styles.draftRestart}
-          onClick={() => {
-            const created = createAuctionDraft(pool, draftSettings)
-            setAuction(simulate(created, { untilUser: true }))
-            setCustomBid('')
-          }}
-        >
+        {budget !== auction.settings.budget && (
+          <p className={styles.auctionRoomHint} role="status">
+            Press Restart to rebuild the auction with a {MONEY(Math.max(10, Math.min(1000, budget || 200)))} budget —
+            this clears every pick.
+          </p>
+        )}
+        <button type="button" className={styles.draftRestart} onClick={restart}>
           Restart
         </button>
       </div>
@@ -192,7 +200,7 @@ export default function AuctionDraftRoom({
 
       {!auction.completed && (
         <div className={styles.draftActions}>
-          <button onClick={() => setAuction(simulate(auction, { untilUser: false }))}>
+          <button type="button" onClick={() => setAuction(simulate(auction, { untilUser: false }))}>
             Auto-draft my whole team
           </button>
         </div>
@@ -230,7 +238,7 @@ export default function AuctionDraftRoom({
                       {p.pos} · {p.team} · {Math.round(p.projection)} proj
                     </em>
                   </span>
-                  <button className={styles.coachPick} onClick={() => act(nominate(auction, p))}>
+                  <button type="button" className={styles.coachPick} onClick={() => act(nominate(auction, p))}>
                     Nominate
                   </button>
                 </li>
@@ -267,18 +275,21 @@ export default function AuctionDraftRoom({
           </div>
           <div className={styles.bidControls}>
             <button
+              type="button"
               onClick={() => act(placeBid(auction, userIdx, bid.currentBid + 1))}
               disabled={bid.currentBid + 1 > maxAffordable}
             >
               Bid {MONEY(bid.currentBid + 1)}
             </button>
             <button
+              type="button"
               onClick={() => act(placeBid(auction, userIdx, bid.currentBid + 5))}
               disabled={bid.currentBid + 5 > maxAffordable}
             >
               Bid {MONEY(bid.currentBid + 5)}
             </button>
             <button
+              type="button"
               onClick={() => act(placeBid(auction, userIdx, Math.max(bid.currentBid + 1, bid.maxBid)))}
               disabled={bid.maxBid > maxAffordable || bid.maxBid <= bid.currentBid}
               title={`Jump to your honest max — the model's price for this player`}
@@ -292,16 +303,18 @@ export default function AuctionDraftRoom({
                 max={Math.max(maxAffordable, bid.currentBid + 1)}
                 value={customBid}
                 placeholder="custom"
+                aria-label="Custom bid amount"
                 onChange={(e) => setCustomBid(e.target.value)}
               />
               <button
+                type="button"
                 onClick={() => act(placeBid(auction, userIdx, Number(customBid)))}
                 disabled={!customBid || Number(customBid) <= bid.currentBid || Number(customBid) > maxAffordable}
               >
                 Bid
               </button>
             </span>
-            <button className={styles.bidPass} onClick={() => act(pass(auction, userIdx))}>
+            <button type="button" className={styles.bidPass} onClick={() => act(pass(auction, userIdx))}>
               Pass
             </button>
           </div>

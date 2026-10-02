@@ -14,11 +14,19 @@ const LEAGUE_LINKS = [
   { href: '/f1', label: 'F1' },
 ]
 
+const SEARCH_OPT_PREFIX = 'fanspot-header-search-opt'
+
 function DesktopSearch() {
   const [query, setQuery] = useState('')
   const [open, setOpen] = useState(false)
-  const { teams, players, loading } = useSearch(query)
+  const [activeIndex, setActiveIndex] = useState(-1)
+  const { teams, players, loading, error } = useSearch(query)
   const boxRef = useRef<HTMLDivElement>(null)
+  const count = teams.length + players.length
+
+  useEffect(() => {
+    setActiveIndex(-1)
+  }, [query])
 
   useEffect(() => {
     const onDown = (e: MouseEvent) => {
@@ -51,23 +59,50 @@ function DesktopSearch() {
           setOpen(true)
         }}
         onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (!showResults || count === 0) return
+          if (e.key === 'ArrowDown') {
+            e.preventDefault()
+            setActiveIndex((i) => Math.min(count - 1, i + 1))
+          } else if (e.key === 'ArrowUp') {
+            e.preventDefault()
+            setActiveIndex((i) => Math.max(0, i - 1))
+          } else if (e.key === 'Home') {
+            e.preventDefault()
+            setActiveIndex(0)
+          } else if (e.key === 'End') {
+            e.preventDefault()
+            setActiveIndex(count - 1)
+          } else if (e.key === 'Enter' && activeIndex >= 0) {
+            e.preventDefault()
+            document.getElementById(`${SEARCH_OPT_PREFIX}-${activeIndex}`)?.click()
+          }
+        }}
         placeholder="Search teams, players…  ( / )"
         aria-label="Search teams and players"
         aria-expanded={showResults}
         aria-controls="fanspot-header-search-results"
+        aria-activedescendant={showResults && activeIndex >= 0 ? `${SEARCH_OPT_PREFIX}-${activeIndex}` : undefined}
         role="combobox"
         aria-autocomplete="list"
         className="fs-input !py-1.5 text-xs"
       />
       {showResults && (
         <div id="fanspot-header-search-results" role="listbox" aria-label="Search results" className="absolute right-0 top-full mt-2 w-80 fs-panel-2 !bg-[#10160f] shadow-2xl z-50 overflow-hidden">
+          <p className="sr-only" aria-live="polite" role="status">
+            {loading ? 'Searching…' : count > 0 ? `${count} result${count === 1 ? '' : 's'} available` : ''}
+          </p>
           <SearchResults
             teams={teams}
             players={players}
             loading={loading}
+            error={error}
+            activeIndex={activeIndex}
+            idPrefix={SEARCH_OPT_PREFIX}
             onNavigate={() => {
               setOpen(false)
               setQuery('')
+              setActiveIndex(-1)
             }}
           />
         </div>
@@ -131,6 +166,7 @@ export function GlobalNav() {
               {LEAGUE_LINKS.map((l) => desktopLink(l.href, l.label))}
               {desktopLink('/fantasy/nfl', 'Fantasy')}
               {desktopLink('/news', 'News')}
+              {desktopLink('/favorites', 'Saved')}
             </nav>
             <div className="flex-1" />
             <div className="hidden md:block">

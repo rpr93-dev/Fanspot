@@ -1,10 +1,16 @@
 import { notFound } from 'next/navigation'
+import type { Metadata } from 'next'
 import { normalizeSportKey } from '@/lib/models'
 import { GameView } from './GameView'
 
 interface GamePageParams {
   sport: string
   eventId: string
+}
+
+export async function generateMetadata({ params }: { params: Promise<GamePageParams> }): Promise<Metadata> {
+  const { sport } = await params
+  return { title: `Game Center · ${sport.toUpperCase()} - Fanspot` }
 }
 
 /**

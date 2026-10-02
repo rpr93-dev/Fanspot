@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { teams } from '@/data/teams'
 import { F1Badge } from './F1Badge'
+import { EmptyState, ErrorState } from '@/components/feedback'
 
 interface DriverData {
   season: string
@@ -50,16 +51,18 @@ interface NewsArticle {
 export function DriverPanel({ code }: { code: string }) {
   const [data, setData] = useState<DriverData | null>(null)
   const [news, setNews] = useState<NewsArticle[] | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
+    setError(false)
     fetch(`/api/f1/driver?code=${encodeURIComponent(code)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Driver ${r.status}`))))
       .then((j) => { if (!cancelled) setData(j) })
-      .catch((e) => { if (!cancelled) setError(e?.message ?? 'Driver unavailable') })
+      .catch(() => { if (!cancelled) setError(true) })
     return () => { cancelled = true }
-  }, [code])
+  }, [code, reloadKey])
 
   useEffect(() => {
     if (!data?.driver?.name) return
@@ -75,7 +78,10 @@ export function DriverPanel({ code }: { code: string }) {
     return (
       <div className="space-y-6">
         <Link href="/f1" className="fs-meta hover:text-fs-text">← All of F1</Link>
-        <div className="fs-panel p-6"><p className="text-sm text-fs-red">{error}</p></div>
+        <ErrorState
+          message="Couldn't load this driver's profile — try again in a moment."
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
       </div>
     )
   }
@@ -84,6 +90,17 @@ export function DriverPanel({ code }: { code: string }) {
       <div className="space-y-6">
         <Link href="/f1" className="fs-meta hover:text-fs-text">← All of F1</Link>
         <div className="fs-panel p-6"><p className="text-sm text-fs-muted">Loading driver…</p></div>
+      </div>
+    )
+  }
+  if (!data.driver) {
+    return (
+      <div className="space-y-6">
+        <Link href="/f1" className="fs-meta hover:text-fs-text">← All of F1</Link>
+        <EmptyState
+          title={`No profile found for ${code.toUpperCase()}`}
+          hint="Check the driver code, or browse the F1 hub for the full grid."
+        />
       </div>
     )
   }
@@ -141,6 +158,11 @@ export function DriverPanel({ code }: { code: string }) {
         </div>
       </div>
 
+      {/* Body: race-by-race and news sit side-by-side on desktop so the
+          driver page reads horizontally instead of one long column. */}
+      <div className="grid gap-6 lg:grid-cols-12 items-start">
+        <div className="lg:col-span-7 min-w-0 space-y-8">
+
       {/* Per-race results */}
       <section aria-label="Race by race">
         <h2 className="fs-title text-xl mb-4">{data.season} race by race</h2>
@@ -182,6 +204,8 @@ export function DriverPanel({ code }: { code: string }) {
           </ol>
         </div>
       </section>
+        </div>
+        <aside className="lg:col-span-5 min-w-0 space-y-8">
 
       {/* News */}
       <section aria-label="Driver news">
@@ -191,7 +215,7 @@ export function DriverPanel({ code }: { code: string }) {
         ) : news.length === 0 ? (
           <div className="fs-panel p-4"><p className="text-sm text-fs-muted-2">No fresh stories for {name} right now.</p></div>
         ) : (
-          <div className="grid gap-3 md:grid-cols-2">
+          <div className="grid gap-3">
             {news.map((a) => (
               <a key={a.url} href={a.url} target="_blank" rel="noreferrer" className="fs-panel block p-4 hover:brightness-125 transition">
                 <p className="fs-meta mb-1">{a.source} · {a.date ? new Date(a.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : ''}</p>
@@ -202,6 +226,8 @@ export function DriverPanel({ code }: { code: string }) {
           </div>
         )}
       </section>
+        </aside>
+      </div>
     </div>
   )
 }

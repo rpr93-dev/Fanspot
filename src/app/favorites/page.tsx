@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useFavorites } from '@/hooks/useFavorites'
 import { SectionHeader, EmptyState } from '@/components/feedback'
 import { useSearch } from '@/hooks/useSearch'
+import { teamLogoCrest } from '@/lib/teamLogo'
 
 function AddFavorites({ query }: { query: string }) {
   const { teams, loading } = useSearch(query)
@@ -21,7 +22,7 @@ function AddFavorites({ query }: { query: string }) {
           <div key={`${t.sport}:${t.teamId}`} className="flex items-center gap-3 p-2">
             <img
               aria-hidden="true"
-              src={`https://a.espncdn.com/i/teamlogos/${t.sport.toLowerCase()}/500/${t.abbr.toLowerCase()}.png`}
+              src={teamLogoCrest(t.sport, t.teamId, t.abbr)}
               alt=""
               className="w-7 h-7 object-contain"
               loading="lazy"
@@ -52,8 +53,9 @@ export default function FavoritesPage() {
 
   return (
     <div className="min-h-screen fs-page">
-      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-8 max-w-4xl">
+      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-8">
         <SectionHeader
+          as="h1"
           eyebrow="No account needed"
           title="Favorites"
           action={<p className="fs-meta hidden sm:block">Saved on this device</p>}
@@ -85,13 +87,13 @@ export default function FavoritesPage() {
             {teamFavs.length > 0 && (
               <section>
                 <h2 className="fs-title text-lg mb-3">Teams ({teamFavs.length})</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {teamFavs.map((f) =>
                     f.kind === 'team' ? (
                       <div key={`team:${f.sport}:${f.teamId}`} className="fs-panel p-3 flex items-center gap-3">
                         <img
                           aria-hidden="true"
-                          src={`https://a.espncdn.com/i/teamlogos/${f.sport.toLowerCase()}/500/${f.abbr.toLowerCase()}.png`}
+                          src={teamLogoCrest(f.sport, f.teamId, f.abbr)}
                           alt=""
                           className="w-9 h-9 object-contain shrink-0"
                           loading="lazy"
@@ -115,7 +117,7 @@ export default function FavoritesPage() {
             {playerFavs.length > 0 && (
               <section>
                 <h2 className="fs-title text-lg mb-3">Players ({playerFavs.length})</h2>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {playerFavs.map((f) =>
                     f.kind === 'player' ? (
                       <div key={`player:${f.sport}:${f.playerId}`} className="fs-panel p-3 flex items-center gap-3">

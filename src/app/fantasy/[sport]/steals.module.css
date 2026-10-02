@@ -476,7 +476,8 @@
   color: var(--text);
   font-weight: 600;
 }
-.meta[data-tip]:hover::after {
+.meta[data-tip]:hover::after,
+.meta[data-tip]:focus-visible::after {
   content: attr(data-tip);
   position: absolute;
   bottom: 130%;

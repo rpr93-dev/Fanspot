@@ -2,13 +2,8 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
-import {
-  dispScore,
-  isFinalGame,
-  isLiveGame,
-  isPrimetime,
-  LIVE_STAT_ROWS,
-} from '@/lib/scheduleWeek'
+import { dispScore, isFinalGame, isLiveGame, isPrimetime } from '@/lib/scheduleWeek'
+import { GameCard, type GameCardPhase } from '@/components/scoreboard/GameCard'
 
 interface GameEvent {
   id: string
@@ -22,55 +17,6 @@ interface GameEvent {
 function gameDetail(e: any): string {
   const st = e?.competitions?.[0]?.status?.type
   return st?.shortDetail ?? null
-}
-
-/** Head-to-head live team stats for a game in progress. Polls on the same
- *  cadence as the schedule while the game runs; hides itself when empty. */
-function LiveStatsBlock({ eventId }: { eventId: string }) {
-  const [stats, setStats] = useState<{ away: Record<string, string>; home: Record<string, string> } | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    async function grab() {
-      try {
-        const res = await fetch(`/api/live-stats?eventId=${eventId}`, { cache: 'no-store' })
-        if (!res.ok) return
-        const json = await res.json()
-        if (!cancelled && json?.stats) setStats(json.stats)
-      } catch { /* keep last snapshot */ }
-    }
-    grab()
-    const id = setInterval(() => { if (!document.hidden) grab() }, 30_000)
-    return () => { cancelled = true; clearInterval(id) }
-  }, [eventId])
-
-  const rows = (stats
-    ? LIVE_STAT_ROWS
-        .map((r) => ({ label: r.label, away: stats.away[r.key] ?? '', home: stats.home[r.key] ?? '' }))
-        .filter((r) => r.away.trim() !== '' || r.home.trim() !== '')
-    : [])
-
-  if (rows.length === 0) {
-    return <p className="text-xs text-fs-muted-2 animate-pulse py-1">Loading live stats…</p>
-  }
-
-  return (
-    <div className="space-y-0.5 py-1 tabular-nums">
-      {rows.map((r) => (
-        <div key={r.label} className="grid grid-cols-[minmax(0,1fr)_minmax(0,5.5rem)_minmax(0,1fr)] items-center gap-2 text-xs leading-5">
-          <span className={`text-right font-semibold ${num(r.away) >= num(r.home) ? 'text-fs-text' : 'text-fs-muted-2'}`}>{r.away || '—'}</span>
-          <span className="text-center text-fs-muted-2 truncate">{r.label}</span>
-          <span className={`text-left font-semibold ${num(r.home) > num(r.away) ? 'text-fs-text' : 'text-fs-muted-2'}`}>{r.home || '—'}</span>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function num(v: string | undefined): number {
-  if (!v) return -1
-  const m = String(v).trim().match(/^([\d.]+)/)
-  return m ? parseFloat(m[1]) : -1
 }
 
 export default function WeeklySchedule({
@@ -166,6 +112,13 @@ export default function WeeklySchedule({
         </div>
       </div>
 
+      {error && events && (
+        <div role="status" className="fs-panel px-4 py-2.5 mb-4 flex flex-wrap items-center justify-between gap-3 text-sm text-fs-gold">
+          <span>Couldn&rsquo;t refresh — showing the last updated schedule.</span>
+          <button type="button" className="fs-btn" onClick={() => void load()}>Retry</button>
+        </div>
+      )}
+
       <div className="flex items-center gap-4 mb-6">
         <Link
           href={`/nfl?week=${week}&view=all`}
@@ -210,87 +163,42 @@ export default function WeeklySchedule({
             const isCompleted = isFinalGame(game)
             const isLive = isLiveGame(game)
             const detail = gameDetail(game)
+            const phase: GameCardPhase = isCompleted ? 'final' : isLive ? 'live' : 'pre'
+            const kickoff = new Date(game.date).toLocaleString('en-US', {
+              weekday: 'short',
+              month: 'short',
+              day: 'numeric',
+              hour: 'numeric',
+              minute: '2-digit',
+              timeZone: 'America/New_York',
+            })
 
             return (
-              <Link key={game.id} href={`/nfl/game/${game.id}`} className="block group">
-                <div
-                  className={`fs-panel p-4 sm:p-5 hover-card cursor-pointer group transition-all duration-300 ${isLive ? 'ring-1 ring-fs-red/40' : ''}`}
-                  style={{ '--tint': '#013369', '--tint-border': '#01336926', '--card-color': '#013369' } as React.CSSProperties}
-                >
-                  <div className="flex items-center justify-between mb-3 gap-2">
-                    <span className="fs-meta truncate">
-                      {game.week?.text ??
-                        (typeof game.week?.number === 'number' ? `Week ${game.week.number}` : 'Game')}
-                    </span>
-                    <span
-                      className={`px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${
-                        isCompleted
-                          ? 'bg-white/10 text-fs-muted-2'
-                          : isLive
-                            ? 'bg-fs-red/20 text-fs-red animate-pulse'
-                            : 'bg-fs-gold/20 text-fs-gold'
-                      }`}
-                    >
-                      {isLive ? `LIVE${detail ? ` · ${detail}` : ''}` : isCompleted ? 'FINAL' : status?.shortDetail || 'PRE'}
-                    </span>
-                  </div>
-
-                  <div className="space-y-3">
-                    {awayTeam && (
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          {awayTeam.team?.logo && (
-                            <img aria-hidden="true" src={awayTeam.team.logo} alt="" className="w-8 h-8 object-contain" />
-                          )}
-                          <span className="font-semibold text-sm truncate">{awayTeam.team?.abbreviation}</span>
-                          {awayTeam.winner === true && !isLive && (
-                            <span className="text-[10px] font-bold text-fs-turf">W</span>
-                          )}
-                        </div>
-                        <span className={`text-lg font-bold tabular-nums ${isCompleted && awayTeam.winner !== true ? 'text-fs-muted-2' : ''}`}>
-                          {dispScore(awayTeam.score) || '-'}
-                        </span>
-                      </div>
-                    )}
-
-                    <div className="border-t border-fs-line"></div>
-
-                    {homeTeam && (
-                      <div className="flex items-center justify-between gap-3">
-                        <div className="flex items-center gap-3 min-w-0">
-                          {homeTeam.team?.logo && (
-                            <img aria-hidden="true" src={homeTeam.team.logo} alt="" className="w-8 h-8 object-contain" />
-                          )}
-                          <span className="font-semibold text-sm truncate">{homeTeam.team?.abbreviation}</span>
-                          {homeTeam.winner === true && !isLive && (
-                            <span className="text-[10px] font-bold text-fs-turf">W</span>
-                          )}
-                        </div>
-                        <span className={`text-lg font-bold tabular-nums ${isCompleted && homeTeam.winner !== true ? 'text-fs-muted-2' : ''}`}>
-                          {dispScore(homeTeam.score) || '-'}
-                        </span>
-                      </div>
-                    )}
-                  </div>
-
-                  {isLive && (
-                    <div className="mt-3 pt-3 border-t border-fs-line">
-                      <LiveStatsBlock eventId={game.id} />
-                    </div>
-                  )}
-
-                  {!isLive && !isCompleted && (
-                    <div className="mt-3 pt-3 border-t border-fs-line">
-                      <p className="text-xs text-fs-muted">
-                        {new Date(game.date).toLocaleString('en-US', {
-                          weekday: 'short', month: 'short', day: 'numeric',
-                          hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York',
-                        })} ET
-                      </p>
-                    </div>
-                  )}
-                </div>
-              </Link>
+              <GameCard
+                key={game.id}
+                href={`/nfl/game/${game.id}`}
+                accent="#013369"
+                meta={
+                  game.week?.text ??
+                  (typeof game.week?.number === 'number' ? `Week ${game.week.number}` : 'Game')
+                }
+                phase={phase}
+                statusLabel={phase === 'live' ? detail : status?.shortDetail}
+                away={{
+                  abbr: awayTeam?.team?.abbreviation ?? '',
+                  logo: awayTeam?.team?.logo ?? null,
+                  score: dispScore(awayTeam?.score),
+                  winner: awayTeam?.winner ?? null,
+                }}
+                home={{
+                  abbr: homeTeam?.team?.abbreviation ?? '',
+                  logo: homeTeam?.team?.logo ?? null,
+                  score: dispScore(homeTeam?.score),
+                  winner: homeTeam?.winner ?? null,
+                }}
+                liveStatsEventId={isLive ? game.id : null}
+                footer={phase === 'pre' ? <p className="text-xs text-fs-muted">{kickoff} ET</p> : null}
+              />
             )
           })}
         </div>

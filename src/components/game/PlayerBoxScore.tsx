@@ -46,24 +46,24 @@ export function LinescoreTable({ sport, away, home }: { sport: SportKey; away: B
   const sum = (arr: number[] = []) => arr.reduce((a, b) => a + b, 0)
 
   const row = (team: BoxTeam | null, fallback: string) => (
-    <div className="flex items-center justify-center gap-2 sm:gap-2.5">
-      <span className="w-8 text-right font-semibold text-fs-muted">{team?.abbreviation ?? fallback}</span>
+    <div role="row" className="flex items-center justify-center gap-2 sm:gap-2.5">
+      <span role="rowheader" className="w-8 text-right font-semibold text-fs-muted">{team?.abbreviation ?? fallback}</span>
       {Array.from({ length: maxPeriods }, (_, i) => (
-        <span key={i} className="flex flex-col items-center min-w-6">
-          <span className="text-[9px] uppercase tracking-wider opacity-70">{labels[i] ?? ''}</span>
+        <span key={i} role="cell" className="flex flex-col items-center min-w-6">
+          <span aria-hidden="true" className="text-[9px] uppercase tracking-wider opacity-70">{labels[i] ?? ''}</span>
           <span className="font-mono">{team?.linescores?.[i] ?? '–'}</span>
         </span>
       ))}
-      <span className="flex flex-col items-center min-w-6">
-        <span className="text-[9px] uppercase tracking-wider opacity-70">T</span>
+      <span role="cell" className="flex flex-col items-center min-w-6">
+        <span aria-hidden="true" className="text-[9px] uppercase tracking-wider opacity-70">T</span>
         <span className="font-mono font-semibold text-fs-text">{team ? sum(team.linescores) : '–'}</span>
       </span>
     </div>
   )
 
   return (
-    <div className="mb-4 overflow-x-auto" data-testid="linescores">
-      <div className="mx-auto flex w-fit min-w-full flex-col gap-1 text-[11px] tabular-nums text-fs-muted-2">
+    <div className="mb-4 overflow-x-auto" data-testid="linescores" tabIndex={0} role="region" aria-label="Scoring by period">
+      <div role="table" aria-label="Scoring by period" className="mx-auto flex w-fit min-w-full flex-col gap-1 text-[11px] tabular-nums text-fs-muted-2">
         {row(away, 'Away')}
         {row(home, 'Home')}
       </div>

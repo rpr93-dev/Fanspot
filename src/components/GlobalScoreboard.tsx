@@ -10,6 +10,7 @@ import {
   type NormalizedGame,
   type SportKey,
 } from '@/lib/models'
+import { sportTheme } from '@/lib/sportTheme'
 import { useFavorites } from '@/hooks/useFavorites'
 import { useLivePoll } from '@/hooks/useLivePoll'
 import { ScoreCard } from './scoreboard/ScoreCard'
@@ -35,10 +36,13 @@ export function GlobalScoreboard({
   initialDateKey,
   sports = LEAGUE_ORDER,
   showDateNav = true,
+  layout = 'rail',
 }: {
   initialDateKey?: string
   sports?: SportKey[]
   showDateNav?: boolean
+  /** 'rail' = compact horizontal scroll (cross-league strip); 'grid' = full standard cards (single-league hubs). */
+  layout?: 'rail' | 'grid'
 }) {
   const [dateKey, setDateKey] = useState(() => initialDateKey ?? todayKey())
   const [data, setData] = useState<MultiResponse | null>(null)
@@ -52,6 +56,7 @@ export function GlobalScoreboard({
   dataRef.current = data
   const dateRef = useRef(dateKey)
   dateRef.current = dateKey
+  const sportsKey = sports.join(',')
 
   const load = useCallback(async () => {
     const key = dateRef.current
@@ -72,7 +77,8 @@ export function GlobalScoreboard({
     } finally {
       if (dateRef.current === key) setLoading(false)
     }
-  }, [sports.join(',')])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sportsKey])
 
   useLivePoll(
     load,
@@ -119,7 +125,7 @@ export function GlobalScoreboard({
     <section aria-label="Scoreboard">
       {showDateNav && (
         <div className="flex items-center gap-2 mb-3 flex-wrap">
-          <div className="flex gap-1 p-1 rounded-full border border-fs-line bg-fs-panel/60" role="tablist" aria-label="Date">
+          <div className="flex gap-1 p-1 rounded-full border border-fs-line bg-fs-panel/60" role="group" aria-label="Date">
             {[
               { key: shiftDateKey(today, -1), label: 'Yesterday' },
               { key: today, label: 'Today' },
@@ -128,8 +134,7 @@ export function GlobalScoreboard({
               <button
                 key={d.key}
                 type="button"
-                role="tab"
-                aria-selected={dateKey === d.key}
+                aria-pressed={dateKey === d.key}
                 onClick={() => pickDate(d.key)}
                 className={`fs-chip ${dateKey === d.key ? 'fs-chip-active' : ''}`}
               >
@@ -156,6 +161,13 @@ export function GlobalScoreboard({
         </div>
       )}
 
+      {error && data && (
+        <div role="status" className="fs-panel px-4 py-2.5 mb-3 flex flex-wrap items-center justify-between gap-3 text-sm text-fs-gold">
+          <span>Scores may be stale — retrying might help.</span>
+          <button type="button" className="fs-btn" onClick={() => { setLoading(true); void load() }}>Retry</button>
+        </div>
+      )}
+
       {loading && !data ? (
         <div className="flex gap-3 overflow-hidden" aria-hidden="true">
           {Array.from({ length: 4 }, (_, i) => (
@@ -172,11 +184,13 @@ export function GlobalScoreboard({
             const games = relevanceSort(gamesOf(data, sport), boost)
             if (games.length === 0) return null
             const live = games.filter((g) => g.status.phase === 'live').length
+            const theme = sportTheme(sport)
             return (
               <div key={sport}>
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="fs-meta">{sport}</span>
-                  <span className="fs-meta opacity-60">
+                <div className="flex items-center gap-2.5 mb-2.5">
+                  <span className="w-1 h-4 rounded-full shrink-0" style={{ background: theme.accent }} />
+                  <span className="fs-title text-base">{sport}</span>
+                  <span className="fs-meta opacity-70">
                     {games.length} game{games.length === 1 ? '' : 's'}
                   </span>
                   {live > 0 && (
@@ -187,13 +201,17 @@ export function GlobalScoreboard({
                   )}
                 </div>
                 <div
-                  className="flex gap-3 overflow-x-auto pb-2 snap-x"
+                  className={
+                    layout === 'grid'
+                      ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'
+                      : 'flex gap-3 overflow-x-auto pb-2 snap-x'
+                  }
                   role="list"
                   aria-label={`${sport} games for ${dayLabel(dateKey)}`}
                 >
                   {games.map((g) => (
-                    <div key={g.id} role="listitem" className="snap-start">
-                      <ScoreCard game={g} />
+                    <div key={g.id} role="listitem" className={layout === 'grid' ? undefined : 'snap-start'}>
+                      <ScoreCard game={g} className={layout === 'grid' ? '' : undefined} />
                     </div>
                   ))}
                 </div>

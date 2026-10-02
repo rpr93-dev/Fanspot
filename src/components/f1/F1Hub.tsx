@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { teams } from '@/data/teams'
 import { F1Badge } from './F1Badge'
+import { NewsFeed } from '@/components/NewsFeed'
+import { SectionHeader, ErrorState, EmptyState } from '@/components/feedback'
 
 interface Round {
   round: number
@@ -28,17 +30,20 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
   const [liveKey, setLiveKey] = useState<number | null>(null)
   const [liveName, setLiveName] = useState<string | null>(null)
   const [now, setNow] = useState(() => Date.now())
+  const [scheduleFailed, setScheduleFailed] = useState(false)
+  const [standingsFailed, setStandingsFailed] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
 
   useEffect(() => {
     let cancelled = false
     fetch('/api/f1/schedule')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (!cancelled && j) setSchedule(j) })
-      .catch(() => {})
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`schedule ${r.status}`))))
+      .then((j) => { if (!cancelled) { setSchedule(j); setScheduleFailed(false) } })
+      .catch(() => { if (!cancelled) setScheduleFailed(true) })
     fetch('/api/f1/standings')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((j) => { if (!cancelled && j) setStandings(j) })
-      .catch(() => {})
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`standings ${r.status}`))))
+      .then((j) => { if (!cancelled) { setStandings(j); setStandingsFailed(false) } })
+      .catch(() => { if (!cancelled) setStandingsFailed(true) })
     fetch('/api/f1/live')
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
@@ -50,7 +55,9 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
       .catch(() => {})
     const t = setInterval(() => setNow(Date.now()), 30_000)
     return () => { cancelled = true; clearInterval(t) }
-  }, [])
+  }, [reloadKey])
+
+  const reload = () => setReloadKey((k) => k + 1)
 
   const next = schedule?.next ?? null
   const msToNext = next ? Date.parse(next.startIso) - now : NaN
@@ -90,23 +97,34 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
               {next.circuit ?? ''}{next.locality ? ` · ${next.locality}` : ''}{next.country ? `, ${next.country}` : ''}
             </p>
             <p className="fs-mono text-sm mt-2 tabular-nums" title={new Date(next.startIso).toString()}>
-              {Number.isFinite(msToNext) && msToNext > 0 ? countdown(msToNext) : 'Date TBC'} ·{' '}
+              {!Number.isFinite(msToNext)
+                ? 'Date TBC'
+                : msToNext > 0
+                  ? countdown(msToNext)
+                  : 'Underway — live timing starting soon'}{' '}
+              ·{' '}
               {new Date(next.startIso).toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}
             </p>
           </Link>
+        ) : scheduleFailed ? (
+          <ErrorState message="Couldn't load the F1 calendar." onRetry={reload} />
         ) : (
           <div className="fs-panel p-5 sm:p-6"><p className="text-sm text-fs-muted">Calendar loading…</p></div>
         )}
       </section>
 
       {/* Schedule — every round clickable */}
-      <section aria-label="Calendar">
+      <section id="calendar" aria-label="Calendar" className="scroll-mt-20">
         <div className="flex items-baseline justify-between mb-4">
           <h2 className="fs-title text-xl">{season} Calendar</h2>
           <p className="fs-meta">Tap a GP for results + sessions</p>
         </div>
-        {!schedule ? (
+        {scheduleFailed ? (
+          <ErrorState message="Couldn't load the F1 calendar." onRetry={reload} />
+        ) : !schedule ? (
           <div className="fs-panel px-4 py-3 text-sm text-fs-muted-2">Loading calendar…</div>
+        ) : (schedule.rounds ?? []).length === 0 ? (
+          <EmptyState title="No rounds on the calendar yet" hint="The season schedule will appear here once it's published." />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {(schedule.rounds ?? []).map((r) => {
@@ -171,7 +189,7 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
       </section>
 
       {/* Standings */}
-      <section aria-label="Championships" className="grid gap-6 md:grid-cols-2 items-start">
+      <section id="standings" aria-label="Championships" className="grid gap-6 md:grid-cols-2 items-start scroll-mt-20">
         <div className="fs-panel overflow-hidden">
           <div className="flex items-baseline justify-between px-4 pt-4 pb-1">
             <h2 className="fs-title text-xl">Drivers</h2>
@@ -198,7 +216,13 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
                 </li>
               )
             })}
-            {!standings ? <li className="px-4 py-3 text-sm text-fs-muted-2">Loading…</li> : null}
+            {standingsFailed ? (
+              <li className="px-4 py-3 text-sm text-fs-red">Standings unavailable.</li>
+            ) : !standings ? (
+              <li className="px-4 py-3 text-sm text-fs-muted-2">Loading…</li>
+            ) : (standings.drivers ?? []).length === 0 ? (
+              <li className="px-4 py-3 text-sm text-fs-muted-2">Standings not published yet.</li>
+            ) : null}
           </ol>
         </div>
         <div className="fs-panel overflow-hidden">
@@ -232,13 +256,19 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
                 </li>
               )
             })}
-            {!standings ? <li className="px-4 py-3 text-sm text-fs-muted-2">Loading…</li> : null}
+            {standingsFailed ? (
+              <li className="px-4 py-3 text-sm text-fs-red">Standings unavailable.</li>
+            ) : !standings ? (
+              <li className="px-4 py-3 text-sm text-fs-muted-2">Loading…</li>
+            ) : (standings.constructors ?? []).length === 0 ? (
+              <li className="px-4 py-3 text-sm text-fs-muted-2">Standings not published yet.</li>
+            ) : null}
           </ol>
         </div>
       </section>
 
       {/* Constructors grid with logos */}
-      <section aria-label="Constructors">
+      <section id="constructors" aria-label="Constructors" className="scroll-mt-20">
         <h2 className="fs-title text-xl mb-4">Constructors</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {constructors.map((t) => {
@@ -266,6 +296,17 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
             )
           })}
         </div>
+      </section>
+
+      {/* League news — same NewsFeed every other hub uses, scoped to F1 */}
+      <section id="news" aria-label="F1 news" className="scroll-mt-20">
+        <SectionHeader
+          eyebrow="Latest"
+          title="F1 News"
+          description="Headlines from around the paddock, newest first."
+          tint="#E10600"
+        />
+        <NewsFeed ranking="balanced" limit={12} leagues={['f1']} initialFilter="f1" />
       </section>
     </div>
   )

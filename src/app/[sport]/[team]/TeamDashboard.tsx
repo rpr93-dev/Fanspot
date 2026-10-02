@@ -21,6 +21,7 @@ import { isGameComplete } from '@/lib/propLedger'
 function useTeamDashboard(sport: string, teamId: string, teamName: string) {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!teamId || !teamName) { setLoading(false); return }
@@ -35,9 +36,13 @@ function useTeamDashboard(sport: string, teamId: string, teamName: string) {
         const dashboard = await res.json()
         if (cancelled) return
       setData(dashboard)
+      setError(null)
     } catch (err) {
       console.error('[dashboard] Failed to load:', err)
-      if (!cancelled) setData(null)
+      if (!cancelled) {
+        setData(null)
+        setError(err instanceof Error ? err.message : 'Failed to load team data')
+      }
     } finally {
       if (!cancelled) setLoading(false)
     }
@@ -46,7 +51,7 @@ function useTeamDashboard(sport: string, teamId: string, teamName: string) {
     load()
   }, [teamId, sport, teamName])
 
-  return { dashboard: data, loading }
+  return { dashboard: data, loading, error }
 }
 
 function getTeamLogoUrl(teamAbbr: string, sport: string): string {
@@ -222,7 +227,41 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
     if (team) document.title = `${team.name} - Fanspot`
   }, [team])
 
-  const { dashboard, loading: dashLoading } = useTeamDashboard(sport, teamId, team?.name ?? '')
+  const { dashboard, loading: dashLoading, error: dashboardError } = useTeamDashboard(sport, teamId, team?.name ?? '')
+
+  const keyActivate = (fn: () => void) => (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn() }
+  }
+
+  const openNextGameCard = () => {
+    if (!data?.upcoming?.eventId && !data?.spotlightEventId) return
+    if (data.upcoming?.eventId) {
+      if (data.upcoming.isLive) {
+        const liveId = data.upcoming.eventId
+        setShowNextGame(false)
+        setSelectedGameId((cur) => (cur === liveId ? null : (liveId as string)))
+      } else {
+        setSelectedGameId(null)
+        setShowNextGame((v) => !v)
+      }
+    } else {
+      const sid = data.spotlightEventId ?? null
+      setShowNextGame(false)
+      setSelectedGameId((cur) => (cur === sid ? null : sid))
+    }
+  }
+
+  const openMobileNextGame = () => {
+    if (!data?.upcoming?.eventId) return
+    if (data.upcoming.isLive) {
+      setShowNextGame(false)
+      const liveId = data.upcoming.eventId
+      setSelectedGameId((cur) => (cur === liveId ? null : (liveId as string)))
+    } else {
+      setSelectedGameId(null)
+      setShowNextGame((v) => !v)
+    }
+  }
 
   useEffect(() => {
     if (dashLoading) return
@@ -519,29 +558,21 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
       <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10">
         <Link href={`/${sport}`} className="hover-lift fs-meta hover:text-fs-text inline-block mb-8" style={{ '--card-color': team.colors.primary } as React.CSSProperties}>&larr; {config.name}</Link>
 
+        {dashboardError && !dashLoading && (
+          <div role="alert" className="fs-panel p-4 mb-5 text-sm text-fs-gold">
+            Live team data couldn&apos;t be loaded — showing a limited snapshot. Some scores, news and odds may be
+            missing or out of date.
+          </div>
+        )}
+
         <div className="hidden md:grid md:grid-cols-12 gap-5 mb-5 items-stretch">
             <div className={`md:col-span-7 min-w-0 fs-panel p-5 sm:p-6 ${data?.upcoming?.eventId ? 'hover-card cursor-pointer group' : ''}`}
               style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}26`, '--card-color': team.colors.primary } as React.CSSProperties}
-              onClick={() => {
-                if (!data?.upcoming?.eventId && !data?.spotlightEventId) return
-                if (data.upcoming?.eventId) {
-                  if (data.upcoming.isLive) {
-                    // Toggle: open the live box score, or close it back to the main page.
-                    const liveId = data.upcoming.eventId
-                    setShowNextGame(false)
-                    setSelectedGameId((cur) => (cur === liveId ? null : (liveId as string)))
-                  } else {
-                    // Upcoming game: open the preview panel (odds + prop model).
-                    setSelectedGameId(null)
-                    setShowNextGame((v) => !v)
-                  }
-                } else {
-                  // Spotlight-only card (no upcoming game in the feed) — open its box score
-                  const sid = data.spotlightEventId ?? null
-                  setShowNextGame(false)
-                  setSelectedGameId((cur) => (cur === sid ? null : sid))
-                }
-              }}>
+              role="button"
+              tabIndex={0}
+              aria-label="Open next game details"
+              onClick={openNextGameCard}
+              onKeyDown={keyActivate(openNextGameCard)}>
               <div className="flex items-center justify-between gap-3 mb-4">
                 <h2 className="fs-eyebrow" style={{ '--tint': team.colors.primary } as React.CSSProperties}>{data?.upcoming?.isLive ? 'Live' : data?.spotlightEvent && !data?.upcoming ? 'This Week' : 'Next Game'}</h2>
                 {(data?.upcoming?.eventId || data?.spotlightEventId) && (
@@ -722,7 +753,11 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
             </div>
 
             <div className="md:col-span-5 min-w-0 hover-card fs-panel p-6 flex items-center gap-5 cursor-pointer group" style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}24`, '--card-color': team.colors.primary } as React.CSSProperties}
-              onClick={() => setShowRoster((v) => !v)}>
+              role="button"
+              tabIndex={0}
+              aria-label="Toggle roster"
+              onClick={() => setShowRoster((v) => !v)}
+              onKeyDown={keyActivate(() => setShowRoster((v) => !v))}>
               <div className="w-20 h-20 flex items-center justify-center shrink-0 relative">
                 {logoFailed ? (
                   <div className="w-20 h-20 rounded-full flex items-center justify-center" style={{ backgroundColor: team.colors.primary }}>
@@ -740,7 +775,7 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
               <div className="min-w-0">
                 <h1 className="fs-title text-3xl text-fs-text truncate">{team.name}</h1>
                 <p className="fs-meta mt-1.5">{team.conference} &middot; {team.division}</p>
-                <div className="mt-2.5">
+                <div className="mt-2.5" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                   <FavoriteButton
                     favorite={{ kind: 'team', sport: team.sport, teamId: team.id, abbr: team.abbreviation, name: team.name }}
                   />
@@ -955,17 +990,11 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
               {data?.upcoming ? (
                 <div className={`fs-panel p-4 ${data.upcoming.eventId ? 'hover-card cursor-pointer' : ''}`}
                   style={{ '--tint': team.colors.primary, '--tint-border': `${team.colors.primary}20`, '--card-color': team.colors.primary } as React.CSSProperties}
-                  onClick={() => {
-                    if (!data?.upcoming?.eventId) return
-                    if (data.upcoming.isLive) {
-                      setShowNextGame(false)
-                      const liveId = data.upcoming.eventId
-                      setSelectedGameId((cur) => (cur === liveId ? null : (liveId as string)))
-                    } else {
-                      setSelectedGameId(null)
-                      setShowNextGame((v) => !v)
-                    }
-                  }}>
+                  role={data.upcoming.eventId ? 'button' : undefined}
+                  tabIndex={data.upcoming.eventId ? 0 : undefined}
+                  aria-label="Open next game details"
+                  onClick={openMobileNextGame}
+                  onKeyDown={keyActivate(openMobileNextGame)}>
                   <div className="flex items-center gap-3 min-w-0">
                     {data.upcoming.opponentLogo && (
                       <img onError={(e) => { e.currentTarget.style.display = 'none' }} src={data.upcoming.opponentLogo} alt="" className="w-10 h-10 object-contain shrink-0" />
@@ -1005,7 +1034,11 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
                     </div>
                   )}
                 </div>
-              ) : null}
+              ) : (
+                <div className="fs-panel p-4">
+                  <p className="text-sm text-fs-muted-2">No upcoming games scheduled</p>
+                </div>
+              )}
 
               <div>
                 <div className="flex items-center justify-between mb-2 px-1">
@@ -1335,7 +1368,11 @@ function LastFiveTiles({ games, selectedId, onSelect, teamColor, standing, loadi
         <div className="flex md:grid md:grid-cols-5 gap-2 overflow-x-auto md:overflow-visible snap-x snap-mandatory md:snap-none pb-1 md:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
           {games.map((game) => (
             <div key={game.eventId} className="hover-card rounded-lg px-3 py-2.5 flex items-center gap-2.5 text-left cursor-pointer snap-start min-w-[11rem] md:min-w-0 flex-1" style={{ backgroundColor: `${teamColor}0d`, border: `1px solid ${game.eventId === selectedId ? teamColor : `${teamColor}18`}`, '--card-color': teamColor } as React.CSSProperties}
-              onClick={() => onSelect(game.eventId)}>
+              role="button"
+              tabIndex={0}
+              aria-label={`${game.result} result vs ${game.opponent}, ${game.score}`}
+              onClick={() => onSelect(game.eventId)}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(game.eventId) } }}>
               <span className={`inline-flex items-center justify-center w-6 h-6 rounded-full text-xs font-medium shrink-0 ${RESULT_STYLE[game.result].text}`}
                 style={{ backgroundColor: RESULT_STYLE[game.result].bg }}>
                 {game.result}

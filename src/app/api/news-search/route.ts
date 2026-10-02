@@ -170,7 +170,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Missing team' }, { status: 400 })
   }
   if (teamName.length > MAX_TEAM_PARAM || !SPORT_ALLOWLIST.includes(sport.toLowerCase() as any)) {
-    return NextResponse.json({ error: 'INVALID_PARAM', message: `team (≤${MAX_TEAM_PARAM} chars) and sport (NFL/NBA/NHL/MLB) required` }, { status: 400 })
+    return NextResponse.json({ error: 'INVALID_PARAM', message: `team (≤${MAX_TEAM_PARAM} chars) and sport (NFL/NBA/NHL/MLB/F1) required` }, { status: 400 })
   }
 
   // Route-level cache: the client news poll re-hits this route every 120s per

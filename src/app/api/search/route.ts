@@ -33,6 +33,7 @@ const SLUG_TO_SPORT: Record<string, SportKey> = {
   nba: 'NBA',
   nhl: 'NHL',
   mlb: 'MLB',
+  f1: 'F1',
 }
 
 function matchTeams(q: string, limit: number): TeamResult[] {

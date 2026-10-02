@@ -33,7 +33,9 @@ export function F1TrackCanvas({
     const draw = () => {
       const dpr = Math.min(window.devicePixelRatio || 1, 2)
       const w = wrap.clientWidth
-      const h = height
+      // Keep the map from eating a whole phone viewport: cap the height on
+      // narrow screens while honouring the requested height on desktop.
+      const h = Math.min(height, Math.max(220, Math.round(w * 0.8)))
       canvas.width = w * dpr
       canvas.height = h * dpr
       canvas.style.width = `${w}px`
@@ -117,7 +119,22 @@ export function F1TrackCanvas({
 
   return (
     <div ref={wrapRef} className="w-full">
-      <canvas ref={canvasRef} aria-label="Live car positions on the circuit map" />
+      <canvas
+        ref={canvasRef}
+        role="img"
+        aria-label={`Live car positions on the circuit map — ${cars.length} car${cars.length === 1 ? '' : 's'} on track`}
+      />
+      <ul className="sr-only">
+        {cars.map((c) => {
+          const d = drivers.find((x) => x.number === c.number)
+          return (
+            <li key={c.number}>
+              {d?.acronym ?? `#${c.number}`}: position {c.position ?? 'unknown'}
+              {c.dnf ? ' (retired)' : ''}
+            </li>
+          )
+        })}
+      </ul>
     </div>
   )
 }

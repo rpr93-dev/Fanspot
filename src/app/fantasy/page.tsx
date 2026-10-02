@@ -30,9 +30,7 @@ export default function FantasyPage() {
               >
                 <h2 className="text-2xl font-bold">{s.name}</h2>
                 <p className="text-sm text-gray-500 mt-1">Coming soon — projections cover the NFL only for now.</p>
-                <Link href="/fantasy/nfl" className="text-sm text-gray-400 mt-2 inline-block hover:text-white">
-                  View NFL steals &rarr;
-                </Link>
+                <p className="text-sm text-gray-500 mt-2">NFL only for now.</p>
               </div>
             )
           }

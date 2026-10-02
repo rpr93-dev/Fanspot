@@ -75,13 +75,20 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
   const [scraperLoading, setScraperLoading] = useState<Record<string, boolean>>({})
   const [modelLoaded, setModelLoaded] = useState(false)
   const [oddsStatus, setOddsStatus] = useState<Record<string, 'loading' | 'found' | 'none' | 'no-game' | 'error'>>({})
+  const [scraperError, setScraperError] = useState<string | null>(null)
+  const [boxScoreGaveUp, setBoxScoreGaveUp] = useState(false)
+  const tabDefaultedRef = useRef(false)
 
   const isLive = game?.status.phase === 'live'
   const isFinal = game?.status.phase === 'final'
 
-  // Default tab follows game state: finals open on the box score.
+  // Default tab follows game state: finals open on the box score — but only
+  // once, so a game going final mid-read doesn't yank the user's tab away.
   useEffect(() => {
-    if (isFinal) setTab((t) => (t === 'summary' ? 'box' : t))
+    if (isFinal && !tabDefaultedRef.current) {
+      tabDefaultedRef.current = true
+      setTab((t) => (t === 'summary' ? 'box' : t))
+    }
   }, [isFinal])
 
   const loadGame = useCallback(async () => {
@@ -181,13 +188,17 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
   const scraperFiredRef = useRef<string | null>(null)
   useEffect(() => {
     boxScoreAttempts.current = 0
+    setBoxScoreGaveUp(false)
   }, [sport, eventId])
   useLivePoll(
     loadBoxScore,
     () => {
       if (isLive) return 15_000
       if (boxScoreRef.current) return null
-      if (boxScoreAttempts.current >= 8) return null
+      if (boxScoreAttempts.current >= 8) {
+        setBoxScoreGaveUp(true)
+        return null
+      }
       boxScoreAttempts.current += 1
       return 10_000
     },
@@ -275,6 +286,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
           }
         } catch (err) {
           console.error(`[scraper] Failed for ${teamAbbr}:`, err)
+          setScraperError('Prop lines are temporarily unavailable — try again in a moment.')
         } finally {
           setScraperLoading((prev) => ({ ...prev, [teamAbbr]: false }))
         }
@@ -348,14 +360,41 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
           <div className="space-y-6">
             <GameHeader game={game} />
 
+            {boxScoreGaveUp && !boxScore && (
+              <ErrorState
+                message="Couldn't load the box score for this game yet."
+                onRetry={() => {
+                  boxScoreAttempts.current = 0
+                  setBoxScoreGaveUp(false)
+                  void loadBoxScore()
+                }}
+              />
+            )}
+
             <div className="flex gap-1 p-1 rounded-full border border-fs-line bg-fs-panel/60 w-fit max-w-full overflow-x-auto" role="tablist" aria-label="Game sections">
-              {availableTabs.map((t) => (
+              {availableTabs.map((t, i) => (
                 <button
                   key={t}
                   type="button"
                   role="tab"
+                  id={`game-tab-${t}`}
+                  aria-controls={`game-panel-${t}`}
                   aria-selected={activeTab === t}
+                  tabIndex={activeTab === t ? 0 : -1}
                   onClick={() => setTab(t)}
+                  onKeyDown={(e) => {
+                    const last = availableTabs.length - 1
+                    let next = -1
+                    if (e.key === 'ArrowRight') next = i === last ? 0 : i + 1
+                    else if (e.key === 'ArrowLeft') next = i === 0 ? last : i - 1
+                    else if (e.key === 'Home') next = 0
+                    else if (e.key === 'End') next = last
+                    if (next >= 0) {
+                      e.preventDefault()
+                      setTab(availableTabs[next])
+                      requestAnimationFrame(() => document.getElementById(`game-tab-${availableTabs[next]}`)?.focus())
+                    }
+                  }}
                   className={`fs-tab whitespace-nowrap ${activeTab === t ? 'fs-tab-active' : ''}`}
                 >
                   {TAB_LABELS[t]}
@@ -364,7 +403,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
             </div>
 
             {activeTab === 'summary' && (
-              <div className="space-y-4" role="tabpanel">
+              <div className="space-y-4" role="tabpanel" id="game-panel-summary" aria-labelledby="game-tab-summary">
                 {game.status.phase === 'pre' ? (
                   <div className="fs-panel p-5">
                     <h2 className="fs-title text-lg mb-2">Pregame</h2>
@@ -413,7 +452,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
             )}
 
             {activeTab === 'box' && (
-              <div role="tabpanel">
+              <div role="tabpanel" id="game-panel-box" aria-labelledby="game-tab-box">
                 {game.status.phase === 'pre' && !hasPlayerStats ? (
                   <EmptyState title="Box score opens at kickoff." />
                 ) : (
@@ -430,13 +469,13 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
             )}
 
             {activeTab === 'plays' && (
-              <div role="tabpanel">
+              <div role="tabpanel" id="game-panel-plays" aria-labelledby="game-tab-plays">
                 <PlayByPlay plays={plays} loading={!playsChecked} error={playsError} onRetry={loadPlays} />
               </div>
             )}
 
             {activeTab === 'teams' && (
-              <div role="tabpanel">
+              <div role="tabpanel" id="game-panel-teams" aria-labelledby="game-tab-teams">
                 <LinescoreTable
                   sport={sportKey}
                   away={awayBs ? { abbreviation: awayBs.abbreviation, linescores: awayBs.linescores, homeAway: 'away' } : null}
@@ -457,7 +496,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
             )}
 
             {activeTab === 'model' && teamsInfo.away && teamsInfo.home && (
-              <div className="space-y-6" role="tabpanel">
+              <div className="space-y-6" role="tabpanel" id="game-panel-model" aria-labelledby="game-tab-model">
                 {/* One panel models both teams (targets, snapshot and table all
                     cover the full game) — a second panel only duplicated the
                     Model-vs-Final / Prop Model sections. The ledger record is
@@ -479,6 +518,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
                   isPreseason={isPreseason}
                   scraperLoading={mergedScraperLoading}
                   scraperData={mergedScraperData}
+                  scraperError={scraperError}
                   isLive={isLive}
                   phase={isFinal ? 'final' : isLive ? 'live' : 'pre'}
                   liveBoxScore={boxScore}

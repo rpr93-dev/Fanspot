@@ -21,7 +21,7 @@ export default async function F1TeamPage({ params }: { params: Promise<{ teamId:
   const config = sportConfig.F1
   return (
     <div className="min-h-screen fs-page" style={{ '--glow': `${config.color}22` } as React.CSSProperties}>
-      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10 max-w-5xl">
+      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10">
         <F1TeamPanel team={team} teamColor={config.color} />
       </div>
     </div>

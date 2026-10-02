@@ -8,8 +8,17 @@ const parser = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@_
  * Its own fetch job rather than a hook into news-momentum: that one is scoped to a
  * single player and capped at the top 10 of a board, which is the wrong shape for
  * cross-league coverage.
+ *
+ * F1 has no trades/signings in the stick-and-ball sense — driver-market and
+ * race-weekend queries return far better coverage than the generic set.
  */
-const QUERIES_PER_LEAGUE = ['trade', 'signs contract', 'breaking news', 'injury news']
+const QUERIES_BY_LEAGUE: Record<StoryLeague, string[]> = {
+  nfl: ['trade', 'signs contract', 'breaking news', 'injury news'],
+  nba: ['trade', 'signs contract', 'breaking news', 'injury news'],
+  nhl: ['trade', 'signs contract', 'breaking news', 'injury news'],
+  mlb: ['trade', 'signs contract', 'breaking news', 'injury news'],
+  f1: ['Formula 1 news', 'F1 Grand Prix results', 'F1 qualifying', 'F1 driver contract'],
+}
 const ITEMS_PER_QUERY = 12
 
 /** Significance-ranked, so this does not need to be near real time. */
@@ -44,7 +53,9 @@ function normalize(s: string): string {
 }
 
 async function fetchLeagueQuery(league: StoryLeague, query: string): Promise<RawStory[]> {
-  const q = `${league.toUpperCase()} ${query}`
+  // F1 queries are already fully qualified ("Formula 1 news", "F1 Grand Prix
+  // results") — prefixing another "F1" would just narrow the search.
+  const q = league === 'f1' ? query : `${league.toUpperCase()} ${query}`
   const url = `https://news.google.com/rss/search?q=${encodeURIComponent(q)}&hl=en-US&gl=US&ceid=US:en`
   try {
     const res = await fetch(url, { signal: AbortSignal.timeout(8000) })
@@ -111,13 +122,14 @@ export async function getTopStories(
 
   const perLeague = await Promise.all(
     leagues.map(async (league) => {
-      const batches = await Promise.all(QUERIES_PER_LEAGUE.map((q) => fetchLeagueQuery(league, q)))
+      const queries = QUERIES_BY_LEAGUE[league] ?? QUERIES_BY_LEAGUE.nfl
+      const batches = await Promise.all(queries.map((q) => fetchLeagueQuery(league, q)))
       let raw = batches.flat()
       if (raw.length === 0) {
         // Narrow queries can all whiff (offseason lull or upstream hiccup),
         // leaving a whole league tab empty — fall back to a broad league
         // query before declaring the league empty.
-        raw = await fetchLeagueQuery(league, '')
+        raw = await fetchLeagueQuery(league, league === 'f1' ? 'Formula 1' : '')
       }
       return { league, raw }
     }),

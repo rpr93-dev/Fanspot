@@ -6,7 +6,7 @@ import { todayKey, SPORT_KEYS, type NormalizedGame } from '@/lib/models'
 import { useFavorites } from '@/hooks/useFavorites'
 import { favoriteTeamIds } from '@/lib/favorites'
 import { ScoreCard } from '@/components/scoreboard/ScoreCard'
-import { SectionHeader } from '@/components/feedback'
+import { SectionHeader, ErrorState } from '@/components/feedback'
 
 /**
  * For You: games involving favorite teams today (live first), plus a
@@ -14,8 +14,9 @@ import { SectionHeader } from '@/components/feedback'
  * still shows below. Onboarding prompt when empty.
  */
 export function ForYou() {
-  const { favorites } = useFavorites()
+  const { favorites, hydrated } = useFavorites()
   const [games, setGames] = useState<NormalizedGame[] | null>(null)
+  const [failed, setFailed] = useState(false)
 
   const favAbbrs = new Set(
     favorites.filter((f) => f.kind === 'team').map((f) => (f.kind === 'team' ? f.abbr.toUpperCase() : '')),
@@ -26,7 +27,7 @@ export function ForYou() {
     if (favAbbrs.size === 0) return
     try {
       const res = await fetch(`/api/scoreboard/multi?date=${todayKey()}`, { cache: 'no-store' })
-      if (!res.ok) return
+      if (!res.ok) throw new Error(`board returned ${res.status}`)
       const json = await res.json()
       const all: NormalizedGame[] = SPORT_KEYS.flatMap((s) => json?.leagues?.[s] ?? [])
       const mine = all.filter(
@@ -37,8 +38,10 @@ export function ForYou() {
         (a, b) => rank(a) - rank(b) || new Date(a.date).getTime() - new Date(b.date).getTime(),
       )
       setGames(mine)
+      setFailed(false)
     } catch {
       /* best-effort personalization; the rest of home still renders */
+      setFailed(true)
     }
   }, [favorites])
 
@@ -46,6 +49,19 @@ export function ForYou() {
   useEffect(() => {
     load()
   }, [load])
+
+  if (!hydrated) {
+    return (
+      <section aria-label="For you">
+        <SectionHeader eyebrow="Personalize" title="For You" />
+        <div className="flex gap-3 overflow-hidden" aria-hidden="true">
+          {[0, 1].map((i) => (
+            <div key={i} className="fs-skeleton h-36 w-56 sm:w-64 shrink-0" />
+          ))}
+        </div>
+      </section>
+    )
+  }
 
   if (favorites.length === 0) {
     return (
@@ -74,7 +90,12 @@ export function ForYou() {
           </Link>
         }
       />
-      {games === null ? (
+      {failed && games === null ? (
+        <ErrorState
+          message="Couldn't load your teams' games right now — scores and news below still work."
+          onRetry={() => void load()}
+        />
+      ) : games === null ? (
         <div className="flex gap-3 overflow-hidden" aria-hidden="true">
           {[0, 1].map((i) => (
             <div key={i} className="fs-skeleton h-36 w-56 sm:w-64 shrink-0" />

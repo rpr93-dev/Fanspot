@@ -16,6 +16,7 @@ export interface SearchData {
 export function useSearch(query: string, delayMs = 300) {
   const [data, setData] = useState<SearchData>({ teams: [], players: [] })
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const seq = useRef(0)
 
   useEffect(() => {
@@ -23,9 +24,11 @@ export function useSearch(query: string, delayMs = 300) {
     if (q.length < 2) {
       setData({ teams: [], players: [] })
       setLoading(false)
+      setError(null)
       return
     }
     setLoading(true)
+    setError(null)
     const id = ++seq.current
     const timer = setTimeout(async () => {
       try {
@@ -34,7 +37,10 @@ export function useSearch(query: string, delayMs = 300) {
         const json = (await res.json()) as SearchData
         if (seq.current === id) setData({ teams: json.teams ?? [], players: json.players ?? [] })
       } catch {
-        if (seq.current === id) setData({ teams: [], players: [] })
+        if (seq.current === id) {
+          setData({ teams: [], players: [] })
+          setError('Search failed — check your connection and try again.')
+        }
       } finally {
         if (seq.current === id) setLoading(false)
       }
@@ -42,5 +48,5 @@ export function useSearch(query: string, delayMs = 300) {
     return () => clearTimeout(timer)
   }, [query, delayMs])
 
-  return { ...data, loading }
+  return { ...data, loading, error }
 }

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { teams } from '@/data/teams'
 import { F1Badge } from './F1Badge'
+import { ErrorState } from '@/components/feedback'
 
 interface WeekendSession {
   key: number
@@ -58,7 +59,8 @@ function fmtDate(iso: string): string {
  */
 export function WeekendView({ round, season }: { round: string; season?: string }) {
   const [data, setData] = useState<WeekendData | null>(null)
-  const [error, setError] = useState<string | null>(null)
+  const [error, setError] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
   const [activeKey, setActiveKey] = useState<number | null>(null)
   // Per-session fallback: if the weekend payload missed a finished session's
   // classification, backfill it from the single-session endpoint on demand.
@@ -66,6 +68,7 @@ export function WeekendView({ round, season }: { round: string; season?: string 
 
   useEffect(() => {
     let cancelled = false
+    setError(false)
     const yr = season ?? String(new Date().getFullYear())
     fetch(`/api/f1/weekend?season=${encodeURIComponent(yr)}&round=${encodeURIComponent(round)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Weekend ${r.status}`))))
@@ -78,9 +81,9 @@ export function WeekendView({ round, season }: { round: string; season?: string 
         const lastFinal = [...ordered].reverse().find((s) => s.state === 'final')
         setActiveKey((live ?? race ?? lastFinal ?? ordered[0] ?? null)?.key ?? null)
       })
-      .catch((e) => { if (!cancelled) setError(e?.message ?? 'Weekend unavailable') })
+      .catch(() => { if (!cancelled) setError(true) })
     return () => { cancelled = true }
-  }, [round, season])
+  }, [round, season, reloadKey])
 
   const ordered = useMemo(
     () => [...(data?.sessions ?? [])].sort((a, b) => sessionRank(a.name) - sessionRank(b.name)),
@@ -132,7 +135,10 @@ export function WeekendView({ round, season }: { round: string; season?: string 
     return (
       <div className="space-y-6">
         <Link href="/f1" className="fs-meta hover:text-fs-text">← All of F1</Link>
-        <div className="fs-panel p-6"><p className="text-sm text-fs-red">{error}</p></div>
+        <ErrorState
+          message="Couldn't load this Grand Prix weekend — it may not be published yet."
+          onRetry={() => setReloadKey((k) => k + 1)}
+        />
       </div>
     )
   }
@@ -140,6 +146,9 @@ export function WeekendView({ round, season }: { round: string; season?: string 
     return (
       <div className="space-y-6">
         <Link href="/f1" className="fs-meta hover:text-fs-text">← All of F1</Link>
+        <h1 className="fs-title text-3xl sm:text-5xl">
+          {round ? `Round ${round}` : 'Grand Prix weekend'}
+        </h1>
         <div className="fs-panel p-6"><p className="text-sm text-fs-muted">Loading Grand Prix weekend…</p></div>
       </div>
     )
@@ -195,14 +204,30 @@ export function WeekendView({ round, season }: { round: string; season?: string 
         <>
           {/* Session tabs */}
           <div className="inline-flex flex-wrap gap-1 rounded-full border border-fs-line bg-white/[0.03] p-1" role="tablist" aria-label="Weekend sessions">
-            {ordered.map((s) => {
+            {ordered.map((s, i) => {
               const isActive = s.key === active?.key
               return (
                 <button
                   key={s.key}
                   role="tab"
+                  id={`weekend-tab-${s.key}`}
+                  aria-controls="weekend-session-panel"
                   aria-selected={isActive}
+                  tabIndex={isActive ? 0 : -1}
                   onClick={() => setActiveKey(s.key)}
+                  onKeyDown={(e) => {
+                    const last = ordered.length - 1
+                    let next = -1
+                    if (e.key === 'ArrowRight') next = i === last ? 0 : i + 1
+                    else if (e.key === 'ArrowLeft') next = i === 0 ? last : i - 1
+                    else if (e.key === 'Home') next = 0
+                    else if (e.key === 'End') next = last
+                    if (next >= 0) {
+                      e.preventDefault()
+                      setActiveKey(ordered[next].key)
+                      requestAnimationFrame(() => document.getElementById(`weekend-tab-${ordered[next].key}`)?.focus())
+                    }
+                  }}
                   className={`fs-tab !px-4 ${isActive ? 'fs-tab-active' : ''}`}
                 >
                   <span
@@ -220,7 +245,11 @@ export function WeekendView({ round, season }: { round: string; season?: string 
             })}
           </div>
 
-          {active ? <SessionPanel session={active} driverByNumber={driverByNumber} /> : null}
+          {active ? (
+            <div role="tabpanel" id="weekend-session-panel" aria-labelledby={`weekend-tab-${active.key}`}>
+              <SessionPanel session={active} driverByNumber={driverByNumber} />
+            </div>
+          ) : null}
         </>
       )}
     </div>
@@ -253,14 +282,15 @@ function SessionPanel({
       </div>
 
       {rows.length > 0 ? (
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead>
             <tr className="fs-meta !text-[10px] text-left border-y border-fs-line">
-              <th className="font-medium pl-4 sm:pl-5 pr-2 py-2 w-14">POS</th>
-              <th className="font-medium py-2 pr-2">DRIVER</th>
-              <th className="font-medium py-2 pr-2 hidden md:table-cell">TEAM</th>
-              <th className="font-medium py-2 pr-2 text-right">GAP</th>
-              <th className="font-medium py-2 pl-2 pr-4 sm:pr-5 text-right">PTS</th>
+              <th scope="col" className="font-medium pl-4 sm:pl-5 pr-2 py-2 w-14">POS</th>
+              <th scope="col" className="font-medium py-2 pr-2">DRIVER</th>
+              <th scope="col" className="font-medium py-2 pr-2 hidden md:table-cell">TEAM</th>
+              <th scope="col" className="font-medium py-2 pr-2 text-right">GAP</th>
+              <th scope="col" className="font-medium py-2 pl-2 pr-4 sm:pr-5 text-right">PTS</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-fs-line">
@@ -321,6 +351,7 @@ function SessionPanel({
             })}
           </tbody>
         </table>
+        </div>
       ) : (
         <p className="px-4 sm:px-5 pb-5 text-sm text-fs-muted-2">
           {session.state === 'upcoming' ? 'No classification yet — lights out ' + fmtDate(session.dateStart) + '.' : 'Timing data pending for this session.'}

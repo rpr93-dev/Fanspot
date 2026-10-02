@@ -1,7 +1,7 @@
 import type { MetadataRoute } from 'next'
 import { teams } from '@/data/teams'
 
-const sports = ['nfl', 'nba', 'nhl', 'mlb']
+const sports = ['nfl', 'nba', 'nhl', 'mlb', 'f1']
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const leagueEntries = sports.map((sport) => ({
