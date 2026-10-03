@@ -1,4 +1,4 @@
-import { extractLiveStats, quartersPlayed, isGameComplete, namesMatch, periodsPlayed, periodLabel } from '@/lib/propLedger'
+import { extractLiveStats, quartersPlayed, isGameComplete, namesMatch, findAthleteByName, periodsPlayed, periodLabel } from '@/lib/propLedger'
 
 /** Minimal /api/box-score-shaped fixture (labels as the route emits them). */
 function boxScore() {
@@ -49,6 +49,31 @@ describe('namesMatch', () => {
   })
   it('matches single-token abbreviations', () => {
     expect(namesMatch('T.Tagovailoa', 'Tua Tagovailoa')).toBe(true)
+  })
+  it('matches punctuation and accent variants', () => {
+    expect(namesMatch('A.J. Brown', 'AJ Brown')).toBe(true)
+    expect(namesMatch("Ja'Marr Chase", 'JaMarr Chase')).toBe(true)
+    expect(namesMatch('Nikola Jokić', 'Nikola Jokic')).toBe(true)
+  })
+  it('rejects first-name prefixes and substrings', () => {
+    expect(namesMatch('Chris Jones', 'Christian Jones')).toBe(false)
+    expect(namesMatch('Josh Allen', 'Josh Allender')).toBe(false)
+    expect(namesMatch('Allen', 'Josh Allen')).toBe(false)
+  })
+})
+
+describe('findAthleteByName', () => {
+  const roster = [
+    { displayName: 'Jameson Williams' },
+    { displayName: 'Jonah Williams' },
+    { displayName: 'Amon-Ra St. Brown' },
+  ]
+  it('prefers the exact name', () => {
+    expect(findAthleteByName(roster, 'Jameson Williams')?.displayName).toBe('Jameson Williams')
+    expect(findAthleteByName(roster, 'Amon-Ra St. Brown')?.displayName).toBe('Amon-Ra St. Brown')
+  })
+  it('refuses an initial that fits two teammates', () => {
+    expect(findAthleteByName(roster, 'J. Williams')).toBeUndefined()
   })
 })
 

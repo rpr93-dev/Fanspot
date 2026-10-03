@@ -3,11 +3,12 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { isFantasySportLive } from '@/lib/providers/fantasy-constants'
+import { hasFantasyDraftRoom, isFantasySportLive } from '@/lib/providers/fantasy-constants'
 import { resolveTeamTheme, themeVars } from '@/lib/fantasy/team-theme'
 import AuctionBoard from './AuctionBoard'
 import MockDraftRoom from './MockDraftRoom'
 import { DetailPanel, type DetailState, type PlayerDetail } from './PlayerDetailPanel'
+import { boardConfigFor, formatBoardValue } from './board-config'
 import styles from './steals.module.css'
 
 type InjuryTier = 'healthy' | 'probable' | 'questionable' | 'doubtful' | 'out' | 'severe'
@@ -44,6 +45,13 @@ interface StealRow {
   gateReason?: 'severe-injury' | 'suspended' | 'doubtful-rank-floor'
   rankByGap?: number
   suspended?: boolean
+  /** NBA: ranks are league-wide and positions are an eligibility filter. */
+  rankScope?: 'position' | 'overall'
+  eligible?: string[]
+  /** 'z' = 9-cat z-score value (one decimal), 'pts' = fantasy points. */
+  valueUnit?: 'pts' | 'z'
+  /** NBA per-game line: "x PTS · x REB · x AST · x STL · x BLK · x 3PM". */
+  statLine?: string
 }
 
 const INJURY_BADGES: Partial<Record<InjuryTier, { label: string; warn?: boolean }>> = {
@@ -64,14 +72,7 @@ interface BoardResponse {
 }
 
 const SPORT_NAMES: Record<string, string> = { nfl: 'NFL', nba: 'NBA', mlb: 'MLB', nhl: 'NHL' }
-const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'D/ST']
 const PAGE_SIZE = 40
-
-const SCORING_OPTIONS = [
-  { value: 'ppr', label: 'PPR' },
-  { value: 'half-ppr', label: 'Half-PPR' },
-  { value: 'standard', label: 'Standard' },
-]
 
 function FieldBar({ row }: { row: StealRow }) {
   const max = Math.max(row.posPoolSize, 1)
@@ -114,6 +115,8 @@ function Row({
   target?: boolean
 }) {
   const isValue = row.valueGap > 0
+  const z = row.valueUnit === 'z'
+  const unit = z ? 'z' : 'pts'
   // A suspension outranks any injury tag: it is why the player is unavailable.
   const badge = row.suspended ? { label: 'SUSPENDED', warn: false } : INJURY_BADGES[row.injuryTier]
   return (
@@ -185,8 +188,16 @@ function Row({
             <span className={styles.meta} data-tip="% of ESPN leagues rostering this player" tabIndex={0}>
               Roster&apos;d <b>{row.ownedPct}%</b>
             </span>
-            <span className={styles.meta} data-tip={`Projected ${row.projectedPoints} fantasy points this season`} tabIndex={0}>
-              Proj <b>{row.projectedPoints}</b>
+            <span
+              className={styles.meta}
+              data-tip={
+                z
+                  ? `Projected 9-category value ${formatBoardValue(row.projectedPoints, 'z')} — sum of per-game z-scores, scaled by games played`
+                  : `Projected ${row.projectedPoints} fantasy points this season`
+              }
+              tabIndex={0}
+            >
+              {z ? 'Value' : 'Proj'} <b>{formatBoardValue(row.projectedPoints, row.valueUnit)}</b>
             </span>
             {row.impliedTeamTotal != null && (
               <span className={styles.meta} data-tip="Vegas implied points per game for this player's team" tabIndex={0}>
@@ -195,13 +206,18 @@ function Row({
             )}
             <span className={styles.meta}>{row.note}</span>
           </div>
+          {row.statLine && (
+            <div className={styles.statLine} title="Projected per-game averages">
+              {row.statLine}
+            </div>
+          )}
         </div>
         <FieldBar row={row} />
         <div className={styles.gap}>
           <div className={`${styles.num} ${isValue ? styles.pos : styles.neg}`}>
-            {isValue ? '+' : ''}{Math.round(row.valueGap)}
+            {isValue ? '+' : ''}{formatBoardValue(row.valueGap, row.valueUnit)}
           </div>
-          <div className={styles.lab}>{isValue ? 'pts of value' : row.valueGap === 0 ? 'on value' : 'pts behind'}</div>
+          <div className={styles.lab}>{isValue ? `${unit} of value` : row.valueGap === 0 ? 'on value' : `${unit} behind`}</div>
         </div>
       </div>
       {open && detail && <DetailPanel state={detail} />}
@@ -214,6 +230,8 @@ export default function FantasySportPage() {
   const searchParams = useSearchParams()
   const sport = ((params.sport as string) || 'nfl').toLowerCase()
   const live = isFantasySportLive(sport)
+  const cfg = boardConfigFor(sport)
+  const draftRoom = hasFantasyDraftRoom(sport)
 
   const teamFilter = searchParams.get('team')
   const targetPlayerId = Number(searchParams.get('player')) || null
@@ -221,17 +239,17 @@ export default function FantasySportPage() {
   // Themed only when arriving from a team page; a direct visit keeps the neutral palette.
   const theme = resolveTeamTheme(sport, searchParams.get('theme'))
 
-  const initialPos = (searchParams.get('pos') ?? 'QB').toUpperCase()
-  const [pos, setPos] = useState(POSITIONS.includes(initialPos) ? initialPos : 'QB')
+  const initialPos = (searchParams.get('pos') ?? cfg.defaultPos).toUpperCase()
+  const [pos, setPos] = useState(cfg.positions.includes(initialPos) ? initialPos : cfg.defaultPos)
   const [mode, setMode] = useState<'snake' | 'auction' | 'mock'>(
     searchParams.get('mode') === 'auction'
       ? 'auction'
-      : searchParams.get('mode') === 'mock'
+      : searchParams.get('mode') === 'mock' && draftRoom
         ? 'mock'
         : 'snake',
   )
   const [sort, setSort] = useState('gap')
-  const [scoring, setScoring] = useState('ppr')
+  const [scoring, setScoring] = useState(cfg.defaultScoring)
   const [adpPlatform, setAdpPlatform] = useState('espn')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -257,21 +275,22 @@ export default function FantasySportPage() {
     return () => clearTimeout(t)
   }, [search])
 
+  const nflExtras = cfg.nflExtras
   const buildUrl = useCallback(
     (offset: number) => {
       const q = new URLSearchParams({
         pos,
         sort,
         scoring,
-        adpPlatform,
         limit: String(PAGE_SIZE),
         offset: String(offset),
       })
+      if (nflExtras) q.set('adpPlatform', adpPlatform)
       if (debouncedSearch) q.set('q', debouncedSearch)
       if (teamFilter) q.set('team', teamFilter)
       return `/api/fantasy/steals/${sport}?${q.toString()}`
     },
-    [sport, pos, sort, scoring, adpPlatform, debouncedSearch, teamFilter],
+    [sport, pos, sort, scoring, adpPlatform, debouncedSearch, teamFilter, nflExtras],
   )
 
   const load = useCallback(async () => {
@@ -323,7 +342,7 @@ export default function FantasySportPage() {
       rows.some((r) => r.playerId === targetPlayerId) ||
       injuryWatch.some((r) => r.playerId === targetPlayerId)
     if (!present) {
-      // The board only tracks players rostered in at least 1% of leagues, so a
+      // The board only tracks players rostered in a minimum share of leagues, so a
       // deep-linked starter can legitimately be absent. Say so instead of leaving
       // an unexplained empty list.
       setMissingTarget(true)
@@ -363,19 +382,24 @@ export default function FantasySportPage() {
           <div className={styles.soon} style={{ marginTop: 22 }}>
             <p className={styles.soonTag}>Coming soon</p>
             <p>
-              The pipeline only has real projection and ADP data for the NFL right now.
-              Rather than show {SPORT_NAMES[sport] ?? sport.toUpperCase()} numbers that are
-              really NFL numbers, this board stays closed until the data is genuinely there.
+              The pipeline only has real projection and ADP data for the NFL and NBA right now.
+              Rather than show {SPORT_NAMES[sport] ?? sport.toUpperCase()} numbers borrowed from
+              another sport, this board stays closed until the data is genuinely there.
             </p>
-            <Link href="/fantasy/nfl" className={styles.soonLink}>Go to NFL steals</Link>
+            <Link href="/fantasy/nfl" className={styles.soonLink}>Go to NFL steals</Link>{' '}
+            <Link href="/fantasy/nba" className={styles.soonLink}>Go to NBA steals</Link>
           </div>
         </div>
       </div>
     )
   }
 
-  const posLabel = pos === 'ALL' ? 'players' : `${pos}s`
+  const posLabel = pos === 'ALL' ? 'players' : cfg.overall ? `${pos}-eligible players` : `${pos}s`
+  const scoringLabel = cfg.scoring.find((s) => s.value === scoring)?.label ?? scoring
   const hasMore = rows.length < total
+  const updatedAt = generatedAt
+    ? new Date(generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : null
 
   async function togglePlayer(playerId: number) {
     if (openPlayer === playerId) {
@@ -427,6 +451,11 @@ export default function FantasySportPage() {
               make the picks, nine to nineteen reasonable-manager bots fill in the rest, and the room
               grades the result.
             </>
+          ) : cfg.overall ? (
+            <>
+              Players going <b>later</b> than their projected value. Ranked league-wide — the position
+              buttons filter by eligibility, so a PF/C shows under both.
+            </>
           ) : (
             <>
               Players going <b>later</b> than their projected value. Ranked within position — a QB and a kicker are never compared directly.
@@ -434,9 +463,9 @@ export default function FantasySportPage() {
           )}
           {mode === 'snake' && (
             <span className={styles.subDetail}>
-              A steal is the point gap between the slot a player is projected for and the slot their
-              ADP prices them at, normalized to their projection and weighted by confidence — so a
-              low-confidence waiver outlier can't outrank a stable difference-maker.
+              A steal is the {cfg.overall ? 'value' : 'point'} gap between the slot a player is projected for and the slot their
+              ADP prices them at, normalized and weighted by confidence — so a
+              low-confidence waiver outlier can&apos;t outrank a stable difference-maker.
             </span>
           )}
         </p>
@@ -470,22 +499,25 @@ export default function FantasySportPage() {
             aria-pressed={mode === 'mock'}
             className={mode === 'mock' ? styles.active : undefined}
             onClick={() => setMode('mock')}
+            disabled={!draftRoom}
+            title={draftRoom ? undefined : 'Mock and auction draft rooms are coming soon for this sport'}
           >
-            Mock Draft
+            Mock Draft{draftRoom ? '' : ' · Soon'}
           </button>
         </div>
 
-        {mode === 'mock' && <MockDraftRoom sport={sport} />}
+        {mode === 'mock' && draftRoom && <MockDraftRoom sport={sport} />}
 
         {mode === 'auction' && <AuctionBoard sport={sport} teamFilter={teamFilter} />}
 
         {mode === 'snake' && (
-        <>
+        <div className={styles.layout}>
+        <div className={styles.main}>
 
         <div className={styles.stickybar}>
           <div className={styles.controls}>
             <div className={styles.postabs} role="group" aria-label="Position filter">
-              {POSITIONS.map((p) => (
+              {cfg.positions.map((p) => (
                 <button
                   key={p}
                   type="button"
@@ -508,19 +540,21 @@ export default function FantasySportPage() {
             <div className={styles.spacer} />
             <select className={styles.select} aria-label="Sort order" value={sort} onChange={(e) => setSort(e.target.value)}>
               <option value="gap">Sort: Value gap</option>
-              <option value="scheme">Sort: Scheme value</option>
+              {cfg.nflExtras && <option value="scheme">Sort: Scheme value</option>}
               <option value="adp">Sort: ADP rank</option>
               <option value="proj">Sort: Proj. rank</option>
             </select>
             <select className={styles.select} aria-label="Scoring format" value={scoring} onChange={(e) => setScoring(e.target.value)}>
-              {SCORING_OPTIONS.map((s) => (
+              {cfg.scoring.map((s) => (
                 <option key={s.value} value={s.value}>{s.label}</option>
               ))}
             </select>
-            <select className={styles.select} aria-label="ADP platform" value={adpPlatform} onChange={(e) => setAdpPlatform(e.target.value)}>
-              <option value="espn">ADP: ESPN</option>
-              <option value="sleeper">ADP: Sleeper</option>
-            </select>
+            {cfg.nflExtras && (
+              <select className={styles.select} aria-label="ADP platform" value={adpPlatform} onChange={(e) => setAdpPlatform(e.target.value)}>
+                <option value="espn">ADP: ESPN</option>
+                <option value="sleeper">ADP: Sleeper</option>
+              </select>
+            )}
           </div>
 
           <div className={styles.scaleNote}>
@@ -553,9 +587,11 @@ export default function FantasySportPage() {
         {!loading && !error && missingTarget && (
           <p className={styles.notice}>
             {targetName ? `${targetName} isn't` : "That player isn't"} on the Steals board.
-            The board only ranks players rostered in at least 1% of leagues, so a listed
-            starter can still be absent — that's a signal in itself, not a missing record.
-            <Link href={`/fantasy/${sport}?pos=${pos}`}>See every {pos} instead</Link>
+            The board only ranks players rostered in at least {cfg.minOwnedPct}% of leagues, so a listed
+            starter can still be absent — that&apos;s a signal in itself, not a missing record.
+            <Link href={`/fantasy/${sport}?pos=${pos}`}>
+              {pos === 'ALL' ? 'See the whole board instead' : `See every ${pos} instead`}
+            </Link>
           </p>
         )}
 
@@ -584,30 +620,62 @@ export default function FantasySportPage() {
                 : 'All players shown'}
           </button>
         )}
+        </div>
 
-        {!loading && !error && injuryWatch.length > 0 && (
-          <>
-            <h2 className={styles.watchHead}>Availability Watch</h2>
-            <p className={styles.watchSub}>
-              Held off the main board because they are unavailable — a long-term injury or a
-              suspension — not because of their ADP gap. Ranked by the same value math — they
-              just aren&apos;t steals while the return timeline is open.
+        <aside className={styles.aside} aria-label="Board summary and availability watch">
+          <section className={styles.asideCard}>
+            <h2>Board</h2>
+            <p>
+              <b>{scoringLabel}</b> scoring · {pos === 'ALL' ? 'all positions' : posLabel}
+              {teamFilter ? ` · ${teamFilter.toUpperCase()} only` : ''}
             </p>
-            {injuryWatch.map((row, i) => (
-              <Row
-                key={row.playerId}
-                row={row}
-                index={i}
-                watch
-                target={row.playerId === targetPlayerId}
-                open={openPlayer === row.playerId}
-                detail={details[row.playerId]}
-                onToggle={() => togglePlayer(row.playerId)}
-              />
-            ))}
-          </>
-        )}
-        </>
+            <p>
+              {loading ? 'Loading…' : `${total} ranked · ${tracked} tracked`}
+              {updatedAt ? ` · updated ${updatedAt}` : ''}
+            </p>
+          </section>
+
+          <section className={styles.asideCard}>
+            <h2>How to read a row</h2>
+            <ul>
+              <li><b>Field bar</b> — projected rank vs. ADP rank{cfg.overall ? ' across the whole league' : ' within the position'}. Green = value, red = reach.</li>
+              <li><b>Conf</b> — 0–100 trust in the projection{cfg.overall ? ' (durability, minutes, injury, roster share, experience)' : ''}.</li>
+              <li>
+                <b>{cfg.overall && scoring === 'category' ? 'Value' : 'Proj'}</b> —{' '}
+                {cfg.overall && scoring === 'category'
+                  ? 'sum of per-game 9-cat z-scores × games/82 (TO counts against).'
+                  : 'projected season fantasy points.'}
+              </li>
+              <li>
+                <b>Gap</b> — {cfg.overall && scoring === 'category' ? 'z' : 'points'} of value between the projected slot and the ADP slot.
+              </li>
+            </ul>
+          </section>
+
+          {!loading && !error && injuryWatch.length > 0 && (
+            <>
+              <h2 className={styles.watchHead}>Availability Watch</h2>
+              <p className={styles.watchSub}>
+                Held off the main board because they are unavailable — a long-term injury or a
+                suspension — not because of their ADP gap. Ranked by the same value math — they
+                just aren&apos;t steals while the return timeline is open.
+              </p>
+              {injuryWatch.map((row, i) => (
+                <Row
+                  key={row.playerId}
+                  row={row}
+                  index={i}
+                  watch
+                  target={row.playerId === targetPlayerId}
+                  open={openPlayer === row.playerId}
+                  detail={details[row.playerId]}
+                  onToggle={() => togglePlayer(row.playerId)}
+                />
+              ))}
+            </>
+          )}
+        </aside>
+        </div>
         )}
 
         <footer className={styles.footer}>
@@ -616,13 +684,17 @@ export default function FantasySportPage() {
           ) : (
             <span>
               {tracked} players tracked
-              {generatedAt ? ` · updated ${new Date(generatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}
+              {updatedAt ? ` · updated ${updatedAt}` : ''}
             </span>
           )}
           <span>
             {mode === 'auction'
-              ? 'value = projection above the last startable player, priced to your budget'
-              : 'gap = ADP rank − projected rank, within position'}
+              ? cfg.overall
+                ? 'value = projection above the last rostered player league-wide, priced to your budget'
+                : 'value = projection above the last startable player, priced to your budget'
+              : cfg.overall
+                ? 'gap = ADP rank − projected rank, overall'
+                : 'gap = ADP rank − projected rank, within position'}
           </span>
         </footer>
       </div>

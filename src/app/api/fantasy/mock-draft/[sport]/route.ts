@@ -72,6 +72,20 @@ export async function GET(
       )
     }
 
+    // The mock room's bots, roster template and grading are football-shaped (QB/RB/WR/
+    // TE/FLEX/K/DST). Running them on NBA players would draft nonsense, so NBA is held
+    // back explicitly rather than falling through to the NFL engine.
+    if (lowerSport === 'nba') {
+      return NextResponse.json(
+        {
+          error: 'mock-draft-not-available',
+          sport: lowerSport,
+          message: 'Mock drafts for NBA are coming soon. The NBA steals board and auction values are live.',
+        },
+        { status: 400 },
+      )
+    }
+
     const url = new URL(req.url)
     const teams = clampInt(url.searchParams.get('teams'), 2, 20, DEFAULT_MOCK_SETTINGS.teams)
     const pick = clampInt(url.searchParams.get('pick'), 1, teams, DEFAULT_MOCK_SETTINGS.pick)

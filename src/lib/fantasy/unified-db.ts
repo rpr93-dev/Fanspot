@@ -39,9 +39,19 @@ export interface BuildReport {
   buildTimeMs: number
 }
 
-let lastBuildReport: BuildReport | null = null
-let unifiedCache: UnifiedPlayer[] | null = null
-let cacheExpiresAt = 0
+interface UnifiedCacheEntry {
+  players: UnifiedPlayer[]
+  report: BuildReport
+  expiresAt: number
+}
+
+/**
+ * Keyed by `sport:season` so a request for one season (or, later, another sport) can
+ * never be answered with a different one's build. This pipeline is NFL-only — NBA has
+ * its own ESPN-master database in `nba/nba-db.ts` — but the key still names the sport
+ * so the two caches can never be confused.
+ */
+const unifiedCache = new Map<string, UnifiedCacheEntry>()
 
 /**
  * The unified database is fed by caches that are far longer-lived than this used to
@@ -54,27 +64,36 @@ const UNIFIED_DB_TTL_MS = 15 * 60 * 1000
 
 /**
  * Single-flight: the steals, mock draft and auction boards can be requested at once
- * right after expiry. Sharing one in-progress build keeps the upstream providers
- * (Sleeper, ESPN, Vegas) from being fetched N times in parallel.
+ * right after expiry. Sharing one in-progress build (per cache key) keeps the upstream
+ * providers (Sleeper, ESPN, Vegas) from being fetched N times in parallel.
  */
-let buildInFlight: Promise<{ players: UnifiedPlayer[]; report: BuildReport }> | null = null
+const buildInFlight = new Map<string, Promise<{ players: UnifiedPlayer[]; report: BuildReport }>>()
+
+export function unifiedCacheKey(sport: string, season: number): string {
+  return `${sport.toLowerCase()}:${season}`
+}
 
 export async function buildUnifiedDatabase(options: BuildOptions = {}): Promise<{
   players: UnifiedPlayer[]
   report: BuildReport
 }> {
-  if (unifiedCache && Date.now() < cacheExpiresAt && options.cacheOnly !== true) {
-    log('info', 'cache', 'Returning cached unified database')
-    return { players: unifiedCache, report: lastBuildReport as BuildReport }
+  const season = options.season ?? new Date().getFullYear()
+  const key = unifiedCacheKey('nfl', season)
+  const cached = unifiedCache.get(key)
+  if (cached && Date.now() < cached.expiresAt && options.cacheOnly !== true) {
+    log('info', 'cache', `Returning cached unified database (${key})`)
+    return { players: cached.players, report: cached.report }
   }
 
   // Share one build across concurrent callers; a failed build clears the slot so the
   // next request retries instead of inheriting the rejection forever.
-  if (buildInFlight) return buildInFlight
-  buildInFlight = buildUnifiedDatabaseInternal(options).finally(() => {
-    buildInFlight = null
+  const inFlight = buildInFlight.get(key)
+  if (inFlight) return inFlight
+  const build = buildUnifiedDatabaseInternal({ ...options, season }).finally(() => {
+    buildInFlight.delete(key)
   })
-  return buildInFlight
+  buildInFlight.set(key, build)
+  return build
 }
 
 async function buildUnifiedDatabaseInternal(options: BuildOptions = {}): Promise<{
@@ -239,9 +258,11 @@ async function buildUnifiedDatabaseInternal(options: BuildOptions = {}): Promise
     buildTimeMs,
   }
 
-  lastBuildReport = report
-  unifiedCache = unified
-  cacheExpiresAt = Date.now() + UNIFIED_DB_TTL_MS
+  unifiedCache.set(unifiedCacheKey('nfl', season), {
+    players: unified,
+    report,
+    expiresAt: Date.now() + UNIFIED_DB_TTL_MS,
+  })
 
   log('info', 'pipeline', `Build complete: ${unified.length} unified players in ${buildTimeMs}ms`)
 

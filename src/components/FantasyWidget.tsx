@@ -34,10 +34,14 @@ const INJURY_LABEL: Partial<Record<InjuryTier, string>> = {
   severe: 'INJ WATCH',
 }
 
-/** A team fields one defense, so it has no depth number the way a QB1 does. */
-function slotLabel(pos: string): string {
+/** A team fields one defense, so it has no depth number the way a QB1 does. NBA rows are
+ *  the team's top fantasy assets, not depth-chart slots, so they show the position alone. */
+function slotLabel(pos: string, sport: string): string {
+  if (sport.toUpperCase() === 'NBA') return pos
   return pos === 'D/ST' ? 'D/ST' : `${pos}1`
 }
+
+const OUTLOOK_SPORTS = new Set(['NFL', 'NBA'])
 
 export default function FantasyWidget({
   sport,
@@ -57,7 +61,7 @@ export default function FantasyWidget({
     async function load() {
       setLoading(true)
       setError(null)
-      if (sport.toUpperCase() !== 'NFL') {
+      if (!OUTLOOK_SPORTS.has(sport.toUpperCase())) {
         if (!cancelled) {
           setStarters([])
           setError(`Fantasy outlook for ${teamAbbr} is not available — the pipeline has no ${sport.toUpperCase()} projection data yet.`)
@@ -102,7 +106,9 @@ export default function FantasyWidget({
       style={{ '--tint': teamColor, '--tint-border': `${teamColor}20` } as React.CSSProperties}
     >
       <h2 className="fs-eyebrow mb-1" style={{ '--tint': teamColor } as React.CSSProperties}>Fantasy Outlook</h2>
-      <p className="fs-meta mb-4">Current starter at each position</p>
+      <p className="fs-meta mb-4">
+        {sport.toUpperCase() === 'NBA' ? 'Top fantasy assets by projected value' : 'Current starter at each position'}
+      </p>
 
       {loading && (
         <div className="animate-pulse space-y-3 flex-1">
@@ -119,14 +125,14 @@ export default function FantasyWidget({
           {starters.map((s) => (
             <Link
               prefetch={false}
-              key={s.pos}
+              key={s.player?.playerId ?? s.pos}
               href={stealsHref(s)}
               className="block rounded-lg p-3 transition hover:brightness-125"
               style={{ backgroundColor: `${teamColor}0c`, border: `1px solid ${teamColor}14` }}
             >
               <div className="flex items-baseline justify-between gap-2">
                 <div className="flex items-baseline gap-2 min-w-0">
-                  <span className="fs-meta shrink-0">{slotLabel(s.pos)}</span>
+                  <span className="fs-meta shrink-0">{slotLabel(s.pos, sport)}</span>
                   <span className="text-sm font-medium text-fs-text/85 truncate">
                     {s.player ? s.player.name : '—'}
                   </span>

@@ -24,8 +24,11 @@ describe('fantasy-types', () => {
   })
 
   it('mapProTeamId returns correct abbreviation', () => {
-    expect(mapProTeamId('nfl', 18)).toBe('NE')
-    expect(mapProTeamId('nba', 8)).toBe('GSW')
+    expect(mapProTeamId('nfl', 17)).toBe('NE')
+    expect(mapProTeamId('nfl', 14)).toBe('LAR')
+    expect(mapProTeamId('nfl', 24)).toBe('LAC')
+    expect(mapProTeamId('nfl', 22)).toBe('ARI')
+    expect(mapProTeamId('nba', 9)).toBe('GSW')
     expect(mapProTeamId('nhl', 25)).toBe('LAK')
     expect(mapProTeamId('mlb', 19)).toBe('NYY')
   })

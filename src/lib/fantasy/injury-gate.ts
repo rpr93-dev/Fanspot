@@ -256,8 +256,9 @@ export async function applyInjuryGate(ranked: StealRow[], opts: GateOptions): Pr
 }
 
 function gapClause(row: StealRow): string {
-  const projected = `${row.pos}${row.posRank}`
-  const priced = `${row.pos}${row.adpRank}`
+  const overall = row.rankScope === 'overall'
+  const projected = overall ? `#${row.posRank} overall` : `${row.pos}${row.posRank}`
+  const priced = overall ? `#${row.adpRank}` : `${row.pos}${row.adpRank}`
   if (row.gap > 0) return `Falling past projected value — ${projected} projection at ${priced} price`
   if (row.gap < 0) return `Going ahead of projection — drafted ${priced} for ${projected} production`
   return `Priced about right — ${projected} projection at ${priced}`
@@ -308,6 +309,11 @@ export function composeNote(row: StealRow): string {
   }
   if (row.injuryTier === 'out') {
     const rank = row.rankByGap ? `Ranked #${row.rankByGap} by ADP-gap, but ` : ''
+    // NBA (overall-ranked) boards are draft prep before tip-off: a preseason Out has no
+    // game week to be specific to, so it reads as an open return timeline instead.
+    if (row.rankScope === 'overall') {
+      return `${rank}listed Out${detail} — return timeline not confirmed; check the latest news before drafting.`
+    }
     return `${rank}listed Out${detail} — a week-specific absence, not a season-long write-off.${environmentClause(row)}`
   }
   if (row.injuryTier === 'questionable' || row.injuryTier === 'probable') {

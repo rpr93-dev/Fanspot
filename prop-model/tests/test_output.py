@@ -29,10 +29,9 @@ def test_resolve_player_id_matches_name_and_team():
     # Both HOU rows normalize to the same name; the most recent (week 2) wins.
     assert resolve_player_id(weekly, "C.J. Stroud", "HOU") == "00-2"
     assert resolve_player_id(weekly, "c.j. stroud", "lv") == "00-3"
-    # Name-only fallback: a player who changed teams still resolves (their
-    # history lives under the old team), but the requested team is preferred
-    # when both exist.
-    assert resolve_player_id(weekly, "C.J. Stroud", "SEA") == "00-3"
+    # Name-only fallback with several distinct ids all active in the latest
+    # season is ambiguous (could be namesakes): refuse rather than guess.
+    assert resolve_player_id(weekly, "C.J. Stroud", "SEA") is None
     assert resolve_player_id(weekly, "Nobody", "HOU") is None
 
 
@@ -45,8 +44,49 @@ def test_resolve_player_id_prefers_requested_team():
     # Both teams present: the requested team (LV, the player's current team)
     # wins even though ATL has more games.
     assert resolve_player_id(weekly, "Kirk Cousins", "LV") == "00-2"
-    # No rows on the requested team → fall back to name-only.
-    assert resolve_player_id(weekly, "Kirk Cousins", "HOU") == "00-1"
+    # No rows on the requested team and two ids active in the same season:
+    # indistinguishable from namesakes, so refuse rather than guess.
+    assert resolve_player_id(weekly, "Kirk Cousins", "HOU") is None
+
+
+def test_normalize_name_strips_suffixes():
+    assert normalize_name("Marvin Harrison Jr.") == "marvin harrison"
+    assert normalize_name("Michael Pittman III") == "michael pittman"
+    # A real first/last token that merely looks like a suffix is kept.
+    assert normalize_name("Vi Jones") == "vi jones"
+
+
+def test_resolve_player_id_refuses_active_namesakes():
+    weekly = pd.DataFrame([
+        {"player_id": "00-7", "player_name": "Josh Johnson", "recent_team": "BAL", "position": "QB", "season": 2025, "week": 3},
+        {"player_id": "00-8", "player_name": "Josh Johnson", "recent_team": "DET", "position": "RB", "season": 2025, "week": 4},
+    ])
+    # Requested team pins it.
+    assert resolve_player_id(weekly, "Josh Johnson", "BAL") == "00-7"
+    # Unknown team, two active players: ambiguous.
+    assert resolve_player_id(weekly, "Josh Johnson", "NYJ") is None
+    # The stat's valid positions disambiguate (passing yards → QB only).
+    assert resolve_player_id(weekly, "Josh Johnson", "NYJ", positions=("QB",)) == "00-7"
+
+
+def test_resolve_player_id_namesake_from_old_season_does_not_block():
+    weekly = pd.DataFrame([
+        {"player_id": "00-1", "player_name": "Mike Williams", "recent_team": "TB", "season": 2018, "week": 5},
+        {"player_id": "00-2", "player_name": "Mike Williams", "recent_team": "PIT", "season": 2025, "week": 9},
+    ])
+    # Team changed (no rows on SEA): the only player active in the latest
+    # season is the answer; the retired namesake is ignored.
+    assert resolve_player_id(weekly, "Mike Williams", "SEA") == "00-2"
+
+
+def test_resolve_player_id_prefers_explicit_id_with_name_check():
+    weekly = pd.DataFrame([
+        {"player_id": "00-1", "player_name": "Josh Allen", "recent_team": "BUF", "season": 2025, "week": 1},
+        {"player_id": "00-2", "player_name": "Josh Allen", "recent_team": "BUF", "season": 2025, "week": 2},
+    ])
+    assert resolve_player_id(weekly, "Josh Allen", "BUF", player_id="00-1") == "00-1"
+    # An id whose name doesn't agree is ignored (bad join), name path used.
+    assert resolve_player_id(weekly, "Someone Else", "BUF", player_id="00-1") is None
 
 
 def test_cli_uses_espn_prior_for_rookie(tmp_path):

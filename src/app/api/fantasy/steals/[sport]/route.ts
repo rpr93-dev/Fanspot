@@ -7,6 +7,9 @@ import { getPlayerMomentum } from '@/lib/fantasy/news-momentum'
 import { buildTeamEnvironment } from '@/lib/fantasy/environment'
 import { getSchemeSignals } from '@/lib/fantasy/scheme-news'
 import type { FantasySport, ScoringFormat, FantasyPlayerEnriched, AdpPlatform } from '@/lib/fantasy-types'
+import { buildNbaDatabase } from '@/lib/fantasy/nba/nba-db'
+import { buildNbaStealBoard, nbaRowMatchesPos } from '@/lib/fantasy/nba/nba-steal-engine'
+import { NBA_POSITIONS, NBA_SCORING_FORMATS, isNbaScoring, nbaSeasonId } from '@/lib/fantasy/nba/nba-scoring'
 
 const SORTS = ['gap', 'adp', 'proj', 'scheme'] as const
 type SortKey = (typeof SORTS)[number]
@@ -35,6 +38,8 @@ export async function GET(
         { status: 501 },
       )
     }
+
+    if (lowerSport === 'nba') return await nbaSteals(req)
 
     const url = new URL(req.url)
     const scoringFormat = (url.searchParams.get('scoring') ?? url.searchParams.get('scoringFormat') ?? 'ppr') as ScoringFormat
@@ -129,6 +134,75 @@ export async function GET(
       { status: 500 },
     )
   }
+}
+
+const NBA_METHODOLOGY =
+  'NBA positions are fluid, so the board ranks league-wide: projected overall rank against ADP overall rank (ESPN STANDARD rank for points leagues, ROTO rank for categories, live ADP as fallback). Points = ESPN default points scoring (PTS 1, 3PM 1, FGM 2, FGA -1, FTM 1, FTA -1, REB 1, AST 2, STL 4, BLK 4, TO -2) on the season projection. Categories = 9-cat z-score value: per-game PTS, REB, AST, STL, BLK, 3PM, TO (negative) and volume-weighted FG%/FT% impact, z-scored over the ~156-player draftable pool, then scaled by projected games / 82. Gap = the value the rank curve assigns to the projected slot minus the value at the ADP slot; the curve is fit to last season’s real values and flattens past the top 150 (12 teams × 13). The gap is normalized to the startable value spread and weighted by confidence (durability = last season’s games / 82, minutes stability, injury, roster share, experience). Position filters use multi-position eligibility. Severe injuries and suspensions move to the Availability Watch; Doubtful players are held out of the top 10.'
+
+async function nbaSteals(req: NextRequest): Promise<NextResponse> {
+  const url = new URL(req.url)
+  const scoring = url.searchParams.get('scoring') ?? url.searchParams.get('scoringFormat') ?? 'points'
+  const posParam = (url.searchParams.get('pos') ?? 'ALL').toUpperCase()
+  const sortParam = (url.searchParams.get('sort') ?? 'gap') as SortKey
+  const query = (url.searchParams.get('q') ?? '').trim().toLowerCase()
+  const teamFilter = url.searchParams.get('team')
+  const limit = Math.min(Math.max(parseInt(url.searchParams.get('limit') ?? '40', 10) || 40, 1), 200)
+  const offset = Math.max(parseInt(url.searchParams.get('offset') ?? '0', 10) || 0, 0)
+  const seasonParam = url.searchParams.get('season')
+  const season = seasonParam ? parseInt(seasonParam, 10) : nbaSeasonId()
+
+  if (!isNbaScoring(scoring)) {
+    return NextResponse.json({ error: `invalid-scoring. NBA must be one of: ${NBA_SCORING_FORMATS.join(', ')}` }, { status: 400 })
+  }
+  if (!(SORTS as readonly string[]).includes(sortParam) || sortParam === 'scheme') {
+    return NextResponse.json({ error: 'invalid-sort. NBA must be one of: gap, adp, proj' }, { status: 400 })
+  }
+  if (posParam !== 'ALL' && !(NBA_POSITIONS as readonly string[]).includes(posParam)) {
+    return NextResponse.json({ error: `invalid-pos. Must be ALL or one of: ${NBA_POSITIONS.join(', ')}` }, { status: 400 })
+  }
+  if (isNaN(season) || season < 2000 || season > 2100) {
+    return NextResponse.json({ error: 'invalid-season' }, { status: 400 })
+  }
+
+  const { players } = await buildNbaDatabase({ season })
+  const allRows = buildNbaStealBoard(players, { scoring })
+
+  const counts: Record<string, number> = { ALL: allRows.length }
+  for (const pos of NBA_POSITIONS) counts[pos] = allRows.filter((r) => nbaRowMatchesPos(r, pos)).length
+
+  let filtered = allRows.filter((r) => nbaRowMatchesPos(r, posParam))
+  if (teamFilter) filtered = filtered.filter((r) => r.team.toUpperCase() === teamFilter.toUpperCase())
+  if (query) filtered = filtered.filter((r) => r.name.toLowerCase().includes(query))
+  sortRows(filtered, sortParam)
+
+  const { board, injuryWatch } = await applyInjuryGate(filtered, {
+    sport: 'nba',
+    fetchHeadlines:
+      offset === 0 ? async (name, team, s) => (await getPlayerMomentum(name, team, s)).headlines : undefined,
+  })
+
+  return NextResponse.json(
+    {
+      rows: board.slice(offset, offset + limit),
+      injuryWatch,
+      total: board.length,
+      offset,
+      limit,
+      counts,
+      positions: NBA_POSITIONS,
+      pos: posParam,
+      sort: sortParam,
+      scoring,
+      adpPlatform: 'espn',
+      season,
+      tracked: board.length + injuryWatch.length,
+      crossCheckedTop: offset === 0 ? DEFAULT_CROSS_CHECK_TOP : 0,
+      generatedAt: new Date().toISOString(),
+      methodology: NBA_METHODOLOGY,
+      dataPipeline: 'nba-espn-v1',
+    },
+    { headers: { 'Cache-Control': 'public, s-maxage=120, stale-while-revalidate=600' } },
+  )
 }
 
 function sortRows(rows: StealRow[], sort: SortKey): void {

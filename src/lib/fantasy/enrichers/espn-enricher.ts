@@ -25,8 +25,11 @@ const ESPN_ENRICH_TTL_MS = 15 * 60 * 1000
 const ESPN_PAGE_SIZE = 500
 const ESPN_MAX_PLAYERS = 2000
 
-function getEspnFantasyUrl(season: number): string {
-  return `${ESPN_FANTASY_BASE}/ffl/seasons/${season}/segments/0/leaguedefaults/1?view=kona_player_info`
+/** ESPN fantasy game slug: `ffl` football, `fba` basketball. */
+export type EspnFantasyGame = 'ffl' | 'fba'
+
+function getEspnFantasyUrl(season: number, game: EspnFantasyGame = 'ffl'): string {
+  return `${ESPN_FANTASY_BASE}/${game}/seasons/${season}/segments/0/leaguedefaults/1?view=kona_player_info`
 }
 
 /**
@@ -44,7 +47,7 @@ function buildFantasyFilter(limit: number, offset: number): string {
   })
 }
 
-interface RawEspnPlayer {
+export interface RawEspnPlayer {
   id: number
   player: {
     id: number
@@ -96,8 +99,14 @@ interface EspnApiResponse {
   players: RawEspnPlayer[]
 }
 
-async function fetchEspnPage(season: number, offset: number, limit: number): Promise<RawEspnPlayer[]> {
-  const url = getEspnFantasyUrl(season)
+/** One `kona_player_info` page for any ESPN fantasy game (paged via X-Fantasy-Filter). */
+export async function fetchEspnPage(
+  season: number,
+  offset: number,
+  limit: number,
+  game: EspnFantasyGame = 'ffl',
+): Promise<RawEspnPlayer[]> {
+  const url = getEspnFantasyUrl(season, game)
   const res = await withBackoff(async () => {
     const r = await fetch(url, {
       headers: {

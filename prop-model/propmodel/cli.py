@@ -56,7 +56,8 @@ logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="NFL player prop projection pipeline")
+    p = argparse.ArgumentParser(description="NFL/NBA player prop projection pipeline")
+    p.add_argument("--sport", choices=["nfl", "nba"], default="nfl", help="league to project (default nfl). nba = ESPN box-score minutes x rate model (propmodel/nba); stats points/rebounds/assists/threes; --seasons are ESPN season years (2026 = 2025-26)")
     p.add_argument("--player", help="player display name (single-run mode)")
     p.add_argument("--stat", help="stat key: passing_yards, rushing_yards, receiving_yards, receptions, tds")
     p.add_argument("--team", help="player's 3-letter team code (e.g. HOU)")
@@ -103,6 +104,9 @@ def _targets_from_args(args) -> list[dict]:
                 # usable NFL history (rookie / barely played) so we project
                 # instead of refusing.
                 "prior": t.get("prior"),
+                # Optional source-native id (gsis for nflverse, ESPN athlete
+                # id for --data-source espn): beats any name heuristic.
+                "player_id": None if t.get("player_id") in (None, "") else str(t.get("player_id")),
             })
         return out
     if args.player and args.stat and args.team:
@@ -321,7 +325,7 @@ class RunMemo:
     """
 
     def __init__(self) -> None:
-        self.pids: dict[tuple[str, str], str | None] = {}
+        self.pids: dict[tuple, str | None] = {}
         self.rates: dict = {}
         self._name_index = None
 
@@ -336,13 +340,23 @@ def _resolve_pid(
     weekly: pd.DataFrame,
     player: str,
     team: str,
+    player_id: str | None = None,
+    positions: tuple[str, ...] | None = None,
 ) -> str | None:
-    """Player-id resolution, memoized per run via the shared name index."""
+    """Player-id resolution, memoized per run via the shared name index.
+
+    ``positions`` (the stat's valid positions) drops off-position namesakes;
+    ``player_id`` (when the target carries one) wins over any name match.
+    """
+    pos = tuple(positions) if positions else None
     if memo is None:
-        return resolve_player_id(weekly, player, team)
-    key = (player, team)
+        return resolve_player_id(weekly, player, team, player_id=player_id, positions=pos)
+    key = (player, team, player_id, pos)
     if key not in memo.pids:
-        memo.pids[key] = resolve_player_id(weekly, player, team, name_index=memo.name_index(weekly))
+        memo.pids[key] = resolve_player_id(
+            weekly, player, team, name_index=memo.name_index(weekly),
+            player_id=player_id, positions=pos,
+        )
     return memo.pids[key]
 
 
@@ -413,7 +427,10 @@ def _project_one(
     opponent = normalize_team_code(target.get("opponent") or "", known_codes)
     seasons = args.seasons or default_seasons()
 
-    pid = _resolve_pid(memo, weekly, player, team)
+    pid = _resolve_pid(
+        memo, weekly, player, team,
+        player_id=target.get("player_id"), positions=get_stat(stat).positions,
+    )
     prior = target.get("prior")
     lines = lines_provider.fetch(team, opponent) if lines_provider else None
     gs = script_adjustment(team, opponent, lines, stat_key=stat)
@@ -512,6 +529,11 @@ def _project_one(
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     setup_logging(logging.DEBUG if args.verbose else logging.INFO)
+
+    if args.sport == "nba":
+        from .nba.runner import run_nba
+
+        return run_nba(args)
 
     try:
         targets = _targets_from_args(args)

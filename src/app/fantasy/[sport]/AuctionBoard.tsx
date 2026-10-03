@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react'
 import { DetailPanel, type DetailState, type PlayerDetail } from './PlayerDetailPanel'
+import { boardConfigFor, formatBoardValue } from './board-config'
 import styles from './steals.module.css'
 
 interface AuctionRow {
@@ -18,6 +19,9 @@ interface AuctionRow {
   injuryTier: string
   injuryDetail?: string
   suspended?: boolean
+  eligible?: string[]
+  valueUnit?: 'pts' | 'z'
+  statLine?: string
 }
 
 interface Assumptions {
@@ -39,14 +43,7 @@ interface AuctionResponse {
   methodology: string
 }
 
-const POSITIONS = ['ALL', 'QB', 'RB', 'WR', 'TE', 'K', 'D/ST']
 const PAGE_SIZE = 40
-
-const SCORING_OPTIONS = [
-  { value: 'ppr', label: 'Scoring: PPR' },
-  { value: 'half-ppr', label: 'Scoring: Half-PPR' },
-  { value: 'standard', label: 'Scoring: Standard' },
-]
 
 function money(n: number | null): string {
   return n == null ? '—' : `$${n.toFixed(0)}`
@@ -65,6 +62,10 @@ function Row({
   onToggle: () => void
   meta?: string
 }) {
+  const z = row.valueUnit === 'z'
+  const proj = `${formatBoardValue(row.projectedPoints, row.valueUnit)} ${z ? 'z value' : 'proj'}`
+  // NBA eligibility is a filter on one league-wide pool, so replacement is league-wide too.
+  const replacementWho = row.eligible ? 'player the league rosters' : `startable ${row.pos}`
   return (
     <>
       <div
@@ -84,8 +85,9 @@ function Row({
         <span className={styles.auctionName}>
           <b>{row.name}</b>
           <em>
-            {row.pos} · {row.team} · {meta ?? `${row.projectedPoints} proj`}
+            {row.pos} · {row.team} · {meta ?? proj}
           </em>
+          {row.statLine && <span className={styles.statLine}>{row.statLine}</span>}
         </span>
         <span className={styles.auctionValue}>{money(row.value)}</span>
         <span className={styles.auctionMarket}>{money(row.market)}</span>
@@ -104,8 +106,8 @@ function Row({
           hideAuctionStat
           extra={
             <p className={styles.detailLine}>
-              Worth <b>{money(row.value)}</b> here — {row.vorp.toFixed(0)} points above the last startable{' '}
-              {row.pos}.{' '}
+              Worth <b>{money(row.value)}</b> here — {z ? row.vorp.toFixed(1) : row.vorp.toFixed(0)}{' '}
+              {z ? 'z of value' : 'points'} above the last {replacementWho}.{' '}
               {row.market == null
                 ? 'No market price published, so there is nothing to compare it against.'
                 : `Going for ${money(row.market)} — ESPN's average winning bid, rescaled to your league's money — so the model expects ${
@@ -120,10 +122,11 @@ function Row({
 }
 
 export default function AuctionBoard({ sport, teamFilter }: { sport: string; teamFilter: string | null }) {
+  const cfg = boardConfigFor(sport)
   const [budget, setBudget] = useState(200)
   const [teams, setTeams] = useState(12)
-  const [rosterSize, setRosterSize] = useState(16)
-  const [scoring, setScoring] = useState('ppr')
+  const [rosterSize, setRosterSize] = useState(cfg.defaultRosterSize)
+  const [scoring, setScoring] = useState(cfg.defaultScoring)
   const [pos, setPos] = useState('ALL')
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -231,13 +234,15 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
   }
 
   const a = data?.assumptions
+  const unitWord = cfg.overall && scoring === 'category' ? 'z of value' : 'point'
 
   return (
-    <>
+    <div className={styles.layout}>
+      <div className={styles.main}>
       <div className={styles.stickybar}>
         <div className={styles.controls}>
           <div className={styles.postabs}>
-            {POSITIONS.map((p) => (
+            {cfg.positions.map((p) => (
               <button
                 key={p}
                 type="button"
@@ -258,8 +263,8 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
           />
           <div className={styles.spacer} />
           <select className={styles.select} aria-label="Scoring format" value={scoring} onChange={(e) => setScoring(e.target.value)}>
-            {SCORING_OPTIONS.map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
+            {cfg.scoring.map((s) => (
+              <option key={s.value} value={s.value}>Scoring: {s.label}</option>
             ))}
           </select>
           <label className={styles.numField}>
@@ -287,7 +292,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
             <input
               type="number"
               min={1}
-              max={40}
+              max={cfg.overall ? 25 : 40}
               value={rosterSize}
               onChange={(e) => setRosterSize(Number(e.target.value) || 0)}
             />
@@ -297,7 +302,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
         {a && (
           <p className={styles.assumptionLine}>
             ${a.totalMoney.toLocaleString()} across {a.teams} teams · ${a.discretionary.toLocaleString()} left to
-            bid with after the $1-per-slot floor · ${a.dollarsPerPoint.toFixed(2)} per point above replacement
+            bid with after the $1-per-slot floor · ${a.dollarsPerPoint.toFixed(2)} per {unitWord} above replacement
           </p>
         )}
       </div>
@@ -358,6 +363,24 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
           )}
         </>
       )}
+      </div>
+
+      <aside className={styles.aside} aria-label="League assumptions and availability watch">
+      {a && (
+        <section className={styles.asideCard}>
+          <h2>Your league</h2>
+          <p>
+            <b>${a.totalMoney.toLocaleString()}</b> across {a.teams} teams × {a.rosterSize} roster spots.
+          </p>
+          <p>
+            Replacement level:{' '}
+            {Object.entries(a.replacementLevels)
+              .map(([k, v]) => `${k === 'ALL' ? 'league-wide' : k} ${formatBoardValue(v, cfg.overall && scoring === 'category' ? 'z' : 'pts')}`)
+              .join(' · ')}
+          </p>
+          <p>Every rostered player costs at least $1; the rest is split by value above replacement.</p>
+        </section>
+      )}
 
       {!loading && data && data.injuryWatch.length > 0 && (
         <section className={styles.injurySection}>
@@ -386,6 +409,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
           Modelled values, not quoted prices. {a?.marketUnavailable ? 'No market prices available for comparison.' : 'Market is ESPN’s average winning bid, rescaled to this league’s money.'}
         </p>
       )}
-    </>
+      </aside>
+    </div>
   )
 }

@@ -261,6 +261,17 @@ export interface StealRow {
   schemeDelta?: number
   /** First headline behind the scheme signal, for the tooltip. */
   schemeHeadline?: string
+  /**
+   * `overall` when posRank/adpRank are league-wide rather than within position (NBA,
+   * where positions are fluid). Absent = within position (NFL).
+   */
+  rankScope?: 'position' | 'overall'
+  /** Every position the player is eligible at (NBA multi-position eligibility). */
+  eligible?: string[]
+  /** Unit of projectedPoints/valueGap: fantasy points (default) or 9-cat z-score value. */
+  valueUnit?: 'pts' | 'z'
+  /** Sport-specific per-game stat line for the row (NBA: PTS/REB/AST/STL/BLK/3PM). */
+  statLine?: string
 }
 
 export interface BoardConfig {

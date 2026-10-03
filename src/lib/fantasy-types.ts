@@ -159,20 +159,27 @@ export function assertEspnShape(data: unknown): asserts data is EspnFantasyRespo
   }
 }
 
+// Verified against site.api.espn.com/apis/site/v2/sports/football/nfl/teams.
+// Fanspot/Sleeper use WAS for Washington (ESPN's site API says WSH).
 const NFL_TEAM_MAP: Record<number, string> = {
   1: 'ATL', 2: 'BUF', 3: 'CHI', 4: 'CIN', 5: 'CLE', 6: 'DAL', 7: 'DEN',
-  8: 'DET', 9: 'GB', 10: 'TEN', 11: 'IND', 12: 'KC', 13: 'LV', 14: 'LAC',
-     15: 'LAR', 16: 'MIN', 17: 'MIA', 18: 'NE', 19: 'NO', 20: 'NYG', 21: 'NYJ',
-  22: 'PHI', 23: 'ARI', 24: 'PIT', 25: 'SF', 26: 'SEA', 27: 'TB', 28: 'WAS',
+  8: 'DET', 9: 'GB', 10: 'TEN', 11: 'IND', 12: 'KC', 13: 'LV', 14: 'LAR',
+  15: 'MIA', 16: 'MIN', 17: 'NE', 18: 'NO', 19: 'NYG', 20: 'NYJ', 21: 'PHI',
+  22: 'ARI', 23: 'PIT', 24: 'LAC', 25: 'SF', 26: 'SEA', 27: 'TB', 28: 'WAS',
   29: 'CAR', 30: 'JAX', 33: 'BAL', 34: 'HOU',
 }
 
-const NBA_TEAM_MAP: Record<number, string> = {
-  1: 'ATL', 2: 'BOS', 3: 'CHI', 4: 'CLE', 5: 'DAL', 6: 'DEN', 7: 'DET',
-  8: 'GSW', 9: 'HOU', 10: 'IND', 11: 'LAC', 12: 'LAL', 14: 'MEM', 15: 'MIA',
-  16: 'MIL', 17: 'MIN', 18: 'BKN', 19: 'NO', 20: 'NYK', 21: 'OKC', 22: 'ORL',
-  23: 'PHI', 24: 'PHX', 25: 'POR', 26: 'SAC', 27: 'SAS', 28: 'TOR', 29: 'UTA',
-  30: 'WSH', 31: 'CHA',
+/**
+ * ESPN fantasy basketball (`fba`) proTeamId -> Fanspot NBA abbreviation (src/data/teams.ts).
+ * Verified against the live kona_player_info feed (24 = Spurs/Wembanyama, 25 = Thunder/SGA,
+ * 7 = Nuggets/Jokic). 0 is a free agent and is intentionally absent.
+ */
+export const NBA_TEAM_MAP: Record<number, string> = {
+  1: 'ATL', 2: 'BOS', 3: 'NO', 4: 'CHI', 5: 'CLE', 6: 'DAL', 7: 'DEN',
+  8: 'DET', 9: 'GSW', 10: 'HOU', 11: 'IND', 12: 'LAC', 13: 'LAL', 14: 'MIA',
+  15: 'MIL', 16: 'MIN', 17: 'BKN', 18: 'NYK', 19: 'ORL', 20: 'PHI', 21: 'PHX',
+  22: 'POR', 23: 'SAC', 24: 'SAS', 25: 'OKC', 26: 'UTA', 27: 'WSH', 28: 'TOR',
+  29: 'MEM', 30: 'CHA',
 }
 
 const NHL_TEAM_MAP: Record<number, string> = {

@@ -5,6 +5,9 @@ import { buildPlayerOutlook, formatProjStats } from '@/lib/fantasy/steal-engine'
 import { pickTeamStarters } from '@/lib/fantasy/team-starters'
 import { resolveInjuryTier } from '@/lib/fantasy/injury-gate'
 import type { FantasySport, FantasyPlayerEnriched } from '@/lib/fantasy-types'
+import { buildNbaDatabase } from '@/lib/fantasy/nba/nba-db'
+import { computeNbaValues, nbaAdpFor, nbaInjury } from '@/lib/fantasy/nba/nba-steal-engine'
+import { nbaSeasonId, nbaStatLineText } from '@/lib/fantasy/nba/nba-scoring'
 
 export async function GET(
   req: NextRequest,
@@ -28,6 +31,8 @@ export async function GET(
         { status: 501 },
       )
     }
+
+    if (lowerSport === 'nba') return await nbaTeamOutlook(req, teamAbbr)
 
     const seasonParam = req.nextUrl.searchParams.get('season')
     const season = seasonParam ? parseInt(seasonParam, 10) : new Date().getFullYear()
@@ -85,4 +90,59 @@ export async function GET(
       { status: 500 },
     )
   }
+}
+
+/** NBA rotations have no fixed depth chart in ESPN's feed: the outlook is the team's top
+ *  five fantasy assets by projected points-league value, each with its per-game line. */
+const NBA_OUTLOOK_SIZE = 5
+
+async function nbaTeamOutlook(req: NextRequest, teamAbbr: string): Promise<NextResponse> {
+  const seasonParam = req.nextUrl.searchParams.get('season')
+  const season = seasonParam ? parseInt(seasonParam, 10) : nbaSeasonId()
+  if (isNaN(season) || season < 2000 || season > 2100) {
+    return NextResponse.json({ error: 'invalid-season' }, { status: 400 })
+  }
+  const { players } = await buildNbaDatabase({ season })
+  const projected = players.filter((p) => p.active && p.projection && p.projection.gp > 0)
+  const { value } = computeNbaValues(projected, 'points')
+  const overall = [...projected].sort((a, b) => (value.get(b.id) ?? 0) - (value.get(a.id) ?? 0))
+  const overallRank = new Map(overall.map((p, i) => [p.id, i + 1]))
+
+  const top = overall.filter((p) => p.team === teamAbbr).slice(0, NBA_OUTLOOK_SIZE)
+  if (top.length === 0) {
+    return NextResponse.json(
+      { error: 'team-not-found', message: `No NBA fantasy projections found for ${teamAbbr}.` },
+      { status: 404 },
+    )
+  }
+
+  const starters = top.map((p) => {
+    const injury = nbaInjury(p)
+    const rank = overallRank.get(p.id) as number
+    const adp = nbaAdpFor(p, 'points')
+    const market =
+      adp == null ? 'no draft rank' : adp > rank + 15 ? `drafted ~#${Math.round(adp)} — a value target` : adp < rank - 15 ? `drafted ~#${Math.round(adp)} — priced above projection` : `drafted ~#${Math.round(adp)}`
+    return {
+      pos: p.pos,
+      player: {
+        playerId: p.id,
+        name: p.name,
+        projectedPoints: Math.round(value.get(p.id) ?? 0),
+        statLine: nbaStatLineText(p.projection),
+        percentStarted: Math.round(p.percentStarted),
+        injuryTier: injury.tier,
+        injuryDetail: injury.detail || undefined,
+        outlook: `${nbaStatLineText(p.projection)} — projected #${rank} overall, ${market}.`,
+      },
+      contender: null,
+      unsettled: false,
+      evidence: 'projection' as const,
+      reason: '',
+    }
+  })
+
+  return NextResponse.json(
+    { sport: 'nba', team: teamAbbr, season, starters, generatedAt: new Date().toISOString() },
+    { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=900' } },
+  )
 }

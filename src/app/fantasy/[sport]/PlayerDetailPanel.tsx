@@ -28,6 +28,8 @@ export interface PlayerDetail {
   lastSeason: { year?: number; points: number } | null
   market: { adpRank?: number; ownedPct: number; startedPct: number; auctionValue: number }
   vegas: { teamImpliedPoints: number } | null
+  /** ESPN season outlook blurb (NBA). */
+  outlook?: string
   news: PlayerNews[]
 }
 
@@ -92,6 +94,8 @@ export function DetailPanel({
           {d.lastSeason ? ` · ${d.lastSeason.points} FP in ${d.lastSeason.year ?? 'the last completed season'}` : ''}
         </p>
       )}
+
+      {d.outlook && <p className={styles.detailLine}>{d.outlook}</p>}
 
       <p className={styles.newsHead}>Latest news</p>
       {d.news.length === 0 ? (

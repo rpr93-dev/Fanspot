@@ -45,19 +45,51 @@ export function eventDateToAsOf(eventDate?: string | null): string | null {
   return null
 }
 
-/** Token-based name match (same semantics as the panel's scraped-line matcher). */
+const NAME_SUFFIX = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v', 'junior', 'senior'])
+
+function nameTokens(n: string): string[] {
+  return n
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/['’`]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t && !NAME_SUFFIX.has(t))
+}
+
+/**
+ * Strict player-name match. Same person when the suffix/punctuation-free
+ * names are identical ("A.J. Brown" = "AJ Brown", "Michael Pittman Jr" =
+ * "Michael Pittman"), or the last names are equal and one first name is the
+ * other's initial ("T.Tagovailoa" = "Tua Tagovailoa"). Token prefixes do NOT
+ * match — "Chris Jones" is not "Christian Jones", and a shared last name alone
+ * ("Bijan Robinson" / "Brian Robinson") never matches.
+ */
 export function namesMatch(a: string, b: string): boolean {
-  const norm = (n: string) =>
-    n.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
-  const SUFFIX = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v', 'junior', 'senior'])
-  const want = norm(a)
-  const wantToks = want.split(' ').filter(Boolean).filter((w) => !SUFFIX.has(w))
-  const otherToks = norm(b).split(' ').filter(Boolean).filter((w) => !SUFFIX.has(w))
-  const other = otherToks.join(' ')
-  return other === want
-    || (wantToks.length > 0 && wantToks.every((w) => other.includes(w)))
-    || (otherToks.length > 0 && otherToks.every((s) => want.includes(s)))
-    || (wantToks.length === 1 && want.length > 3 && other.includes(want.slice(1)))
+  const ta = nameTokens(a)
+  const tb = nameTokens(b)
+  if (ta.length === 0 || tb.length === 0) return false
+  if (ta.join('') === tb.join('')) return true
+  if (ta.length < 2 || tb.length < 2) return false
+  if (ta[ta.length - 1] !== tb[tb.length - 1]) return false
+  const fa = ta.slice(0, -1).join('')
+  const fb = tb.slice(0, -1).join('')
+  if (fa === fb) return true
+  return (fa.length === 1 && fb.startsWith(fa)) || (fb.length === 1 && fa.startsWith(fb))
+}
+
+/**
+ * The athlete in `athletes` that is `name`: an exact normalized hit wins;
+ * otherwise a single strict `namesMatch` hit. Two initial-style hits
+ * ("J. Williams" with two Williamses on the roster) are ambiguous → none.
+ */
+export function findAthleteByName<T extends { displayName?: unknown }>(athletes: T[], name: string): T | undefined {
+  const named = athletes.filter((x) => typeof x?.displayName === 'string')
+  const want = nameTokens(name).join('')
+  const exact = named.find((x) => nameTokens(x.displayName as string).join('') === want)
+  if (exact) return exact
+  const loose = named.filter((x) => namesMatch(name, x.displayName as string))
+  return loose.length === 1 ? loose[0] : undefined
 }
 
 function toNum(v: unknown): number | null {
@@ -79,7 +111,7 @@ function athleteValues(categories: any[] | undefined, name: string): Record<stri
     const label = String(cat?.label ?? '').toLowerCase()
     const athletes = cat?.athletes
     if (!Array.isArray(athletes)) continue
-    const a = athletes.find((x: any) => typeof x?.displayName === 'string' && namesMatch(name, x.displayName))
+    const a = findAthleteByName(athletes, name)
     if (!a || typeof a.stats !== 'object' || a.stats == null) continue
     const s = a.stats as Record<string, unknown>
     if (label === 'passing') {
@@ -147,7 +179,7 @@ function findAthlete(categories: any[], name: string): { label: string; stats: R
   for (const cat of categories) {
     const athletes = cat?.athletes
     if (!Array.isArray(athletes)) continue
-    const a = athletes.find((x: any) => typeof x?.displayName === 'string' && namesMatch(name, x.displayName))
+    const a = findAthleteByName(athletes, name)
     if (a && typeof a.stats === 'object' && a.stats != null) {
       hits.push({ label: String(cat?.label ?? '').toLowerCase(), stats: a.stats as Record<string, unknown> })
     }

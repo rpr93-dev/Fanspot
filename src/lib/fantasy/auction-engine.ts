@@ -95,6 +95,12 @@ export interface AuctionRow {
   injuryTier: InjuryTier
   injuryDetail?: string
   suspended?: boolean
+  /** Every position the player is eligible at (NBA multi-position eligibility). */
+  eligible?: string[]
+  /** Unit of projectedPoints/vorp: fantasy points (default) or 9-cat z-score value. */
+  valueUnit?: 'pts' | 'z'
+  /** Sport-specific per-game stat line (NBA: PTS/REB/AST/STL/BLK/3PM). */
+  statLine?: string
 }
 
 export interface AuctionAssumptions {

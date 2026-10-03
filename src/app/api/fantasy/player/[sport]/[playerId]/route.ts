@@ -4,6 +4,8 @@ import { buildUnifiedDatabase, unifiedToFantasyPlayerEnriched } from '@/lib/fant
 import { formatProjStats } from '@/lib/fantasy/steal-engine'
 import { searchWeb } from '@/lib/wigolo'
 import type { FantasySport, FantasyPlayerEnriched } from '@/lib/fantasy-types'
+import { buildNbaDatabase } from '@/lib/fantasy/nba/nba-db'
+import { nbaFantasyPoints, nbaSeasonId, nbaStatLineText } from '@/lib/fantasy/nba/nba-scoring'
 
 /** Sleeper reports height as inches for some players and as a `6'2"` string for others. */
 function formatHeight(raw: unknown): string | undefined {
@@ -43,6 +45,8 @@ export async function GET(
     }
 
     const url = new URL(req.url)
+    if (lowerSport === 'nba') return await nbaPlayer(id, url)
+
     const seasonParam = url.searchParams.get('season')
     const season = seasonParam ? parseInt(seasonParam, 10) : new Date().getFullYear()
     if (isNaN(season)) {
@@ -123,4 +127,57 @@ export async function GET(
       { status: 500 },
     )
   }
+}
+
+async function nbaPlayer(id: number, url: URL): Promise<NextResponse> {
+  const seasonParam = url.searchParams.get('season')
+  const season = seasonParam ? parseInt(seasonParam, 10) : nbaSeasonId()
+  if (isNaN(season) || season < 2000 || season > 2100) {
+    return NextResponse.json({ error: 'invalid-season' }, { status: 400 })
+  }
+  const { players } = await buildNbaDatabase({ season })
+  const p = players.find((x) => x.id === id)
+  if (!p) return NextResponse.json({ error: 'player-not-found', playerId: id }, { status: 404 })
+
+  const s = p.sleeper
+  const news = await searchWeb(`${p.name} ${p.team === 'FA' ? '' : p.team} NBA`.trim(), 'nba', url.origin)
+  const injured = p.injured || (p.injuryStatus !== 'ACTIVE' && p.injuryStatus !== 'unknown')
+
+  return NextResponse.json(
+    {
+      playerId: id,
+      name: p.name,
+      pos: p.eligible.join('/') || p.pos,
+      team: p.team,
+      bio: {
+        age: s?.age,
+        yearsExp: s?.yearsExp,
+        height: formatHeight(s?.height),
+        weight: s?.weight,
+        college: s?.college,
+        jersey: s?.number,
+      },
+      injury: {
+        injured,
+        status: p.injuryStatus === 'unknown' ? (s?.injuryStatus ?? 'ACTIVE') : p.injuryStatus,
+      },
+      projection: p.projection
+        ? { points: Math.round(nbaFantasyPoints(p.projection)), line: `${nbaStatLineText(p.projection)} over ${p.projection.gp} GP` }
+        : null,
+      lastSeason: p.prior ? { year: p.priorSeason, points: Math.round(nbaFantasyPoints(p.prior)) } : null,
+      market: {
+        adpRank: p.standardRank ?? p.adp,
+        adpSource: 'espn',
+        ownedPct: Math.round(p.percentOwned),
+        startedPct: Math.round(p.percentStarted),
+        auctionValue: Math.round(p.auctionValueAverage),
+      },
+      vegas: null,
+      outlook: p.outlook,
+      news: news.slice(0, 4).map((n) => ({ title: n.title, url: n.url, source: n.source, snippet: n.snippet })),
+      newsSource: 'wigolo',
+      generatedAt: new Date().toISOString(),
+    },
+    { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=900' } },
+  )
 }

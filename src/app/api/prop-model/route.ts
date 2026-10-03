@@ -9,6 +9,7 @@ import {
   eventDateToAsOf,
   isColdStartFailure,
   preferredDataSource,
+  propModelSport,
   runModelCli,
   tunedWeightsPath,
   warmPropModel,
@@ -19,6 +20,7 @@ import {
  *
  * POST /api/prop-model
  *   { targets: [{ player, stat, team, opponent }, ...],
+ *     sport?: 'nfl' | 'nba',   // NBA runs the minutes-x-rate model (points/rebounds/assists/threes)
  *     lines?: { [team]: { total, spread, favorite } },
  *     eventDate?: "YYYYMMDD" }   // projections use only data before this date
  *
@@ -34,15 +36,21 @@ const STAT_LABELS: Record<string, { label: string; unit: string }> = {
   receiving_yards: { label: 'Receiving Yards', unit: 'yds' },
   receptions: { label: 'Receptions', unit: 'rec' },
   tds: { label: 'Touchdowns', unit: 'td' },
+  // NBA (propmodel/nba — minutes x rate model over ESPN box scores).
+  points: { label: 'Points', unit: 'pts' },
+  rebounds: { label: 'Rebounds', unit: 'reb' },
+  assists: { label: 'Assists', unit: 'ast' },
+  threes: { label: '3-Pointers Made', unit: '3pm' },
 }
 
-const WARMING_MESSAGE =
-  'The prop model is warming up — its first run downloads NFL data. Try again in a minute.'
+const WARMING_MESSAGES: Record<string, string> = {
+  nfl: 'The prop model is warming up — its first run downloads NFL data. Try again in a minute.',
+  nba: 'The prop model is warming up — its first run downloads NBA box scores. Try again in a minute.',
+}
 
 export async function POST(request: Request) {
   const limited = checkRateLimit(request, 'prop-model')
   if (limited) return limited
-  warmPropModel()
 
   let body: any
   try {
@@ -50,6 +58,10 @@ export async function POST(request: Request) {
   } catch {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
   }
+
+  // Anything unrecognized is NFL — the dashboard only ever sends nfl/nba.
+  const sport = propModelSport(body?.sport)
+  warmPropModel(sport)
 
   const targets = body?.targets
   if (!Array.isArray(targets) || targets.length === 0 || targets.length > 40) {
@@ -92,9 +104,15 @@ export async function POST(request: Request) {
       '--input', batchPath,
       '--output', outPath,
       '--cache-dir', CACHE_DIR,
-      '--data-source', dataSource,
     ]
-    if (weightsPath) args.push('--weights-json', weightsPath)
+    if (sport === 'nba') {
+      // The NBA runner reads ESPN box scores under cache/nba and ignores NFL
+      // flags (--data-source, --weights-json take NFL ModelWeights).
+      args.push('--sport', 'nba')
+    } else {
+      args.push('--data-source', dataSource)
+      if (weightsPath) args.push('--weights-json', weightsPath)
+    }
     if (asOf) args.push('--as-of', asOf)
     if (body?.preseason) args.push('--preseason')
     const lines = body?.lines
@@ -144,12 +162,12 @@ export async function POST(request: Request) {
   } catch (err: any) {
     const detail = (err?.stderr || err?.message || String(err)).toString()
     console.error('[prop-model] run failed:', detail.slice(-2000))
-    if (await isColdStartFailure(err)) {
+    if (await isColdStartFailure(err, sport)) {
       // Cold start (empty cache → multi-MB download) or a stale data pull:
       // a friendly retry beats a Python traceback tail. The warm-up fetch has
       // been kicked off in the background; the next click usually succeeds.
-      warmPropModel()
-      return NextResponse.json({ error: WARMING_MESSAGE, warmingUp: true }, { status: 503 })
+      warmPropModel(sport)
+      return NextResponse.json({ error: WARMING_MESSAGES[sport], warmingUp: true }, { status: 503 })
     }
     // Generic user-safe message; full detail already logged server-side.
     return NextResponse.json(

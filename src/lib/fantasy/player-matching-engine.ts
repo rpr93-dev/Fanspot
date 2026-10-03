@@ -10,17 +10,38 @@ export interface UnmatchedEspnPlayer {
   team: string
 }
 
-const FUZZY_THRESHOLD = 0.85
+const FUZZY_THRESHOLD = 0.88
+/** Best fuzzy candidate must beat the runner-up by this much, else ambiguous. */
+const FUZZY_MARGIN = 0.05
+/** An ESPN-id hit whose names disagree this badly is a bad id join, not a match. */
+const ID_NAME_SANITY = 0.5
 
-function normalizeName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]/g, '').trim()
+const NAME_SUFFIXES = new Set(['jr', 'sr', 'ii', 'iii', 'iv', 'v'])
+
+function nameTokens(name: string): string[] {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/[.'’`-]/g, '')
+    .split(/[^a-z0-9]+/)
+    .filter((t) => t && !NAME_SUFFIXES.has(t))
 }
 
-function nameSimilarity(a: string, b: string): number {
+/** Lowercase, accent/punctuation-free, generational suffixes dropped. */
+export function normalizeName(name: string): string {
+  return nameTokens(name).join('')
+}
+
+function lastNameKey(name: string): string {
+  const t = nameTokens(name)
+  return t[t.length - 1] ?? ''
+}
+
+export function nameSimilarity(a: string, b: string): number {
   const na = normalizeName(a)
   const nb = normalizeName(b)
   if (na === nb) return 1.0
-  if (na.includes(nb) || nb.includes(na)) return 0.9
   const longer = na.length >= nb.length ? na : nb
   const shorter = na.length < nb.length ? na : nb
   const maxLen = longer.length
@@ -45,14 +66,29 @@ function levenshteinDistance(a: string, b: string): number {
   return dp[m][n]
 }
 
+const FREE_AGENT = new Set(['', 'FA', 'NONE'])
+const isFreeAgent = (team: string | undefined) => FREE_AGENT.has((team ?? '').toUpperCase())
+
+/**
+ * Team agreement between an ESPN row and a master row. Unknown/free-agent on
+ * either side is "compatible" (offseason moves); a real mismatch is not.
+ */
+function teamCompatible(a: string, b: string): boolean {
+  if (isFreeAgent(a) || isFreeAgent(b)) return true
+  return a.toUpperCase() === b.toUpperCase()
+}
+
 export interface MatchContext {
   master: {
     bySleeperId: Map<string, CanonicalPlayer>
     byEspnId: Map<number, CanonicalPlayer>
     byGsisId: Map<string, CanonicalPlayer>
     byPfrId: Map<string, CanonicalPlayer>
+    /** Unique name|position keys only; namesakes live in `byName`. */
     byNamePosition: Map<string, CanonicalPlayer>
     byNameTeam: Map<string, CanonicalPlayer>
+    /** Every master player sharing a normalized name (namesake detection). */
+    byName: Map<string, CanonicalPlayer[]>
   }
 }
 
@@ -63,19 +99,34 @@ export function buildMatchContext(master: {
   byPfrId: Map<string, CanonicalPlayer>
   players: CanonicalPlayer[]
 }): MatchContext {
+  const byName = new Map<string, CanonicalPlayer[]>()
+  for (const p of master.players) {
+    const key = normalizeName(p.fullName)
+    if (!key) continue
+    const list = byName.get(key)
+    if (!list) byName.set(key, [p])
+    else if (!list.some((q) => q.sleeperId === p.sleeperId)) list.push(p)
+  }
+
+  // Name-keyed maps only hold keys that resolve to exactly one player. A
+  // first-wins map would silently hand a namesake's projection to whichever
+  // player happened to load first.
   const byNamePosition = new Map<string, CanonicalPlayer>()
   const byNameTeam = new Map<string, CanonicalPlayer>()
-
-  for (const p of master.players) {
-    const npKey = `${normalizeName(p.fullName)}|${p.position}`
-    if (!byNamePosition.has(npKey)) {
-      byNamePosition.set(npKey, p)
-    }
-    const ntKey = `${normalizeName(p.fullName)}|${p.team}`
-    if (!byNameTeam.has(ntKey)) {
-      byNameTeam.set(ntKey, p)
+  const dupNp = new Set<string>()
+  const dupNt = new Set<string>()
+  for (const [name, list] of byName) {
+    for (const p of list) {
+      const np = `${name}|${p.position}`
+      if (byNamePosition.has(np)) dupNp.add(np)
+      else byNamePosition.set(np, p)
+      const nt = `${name}|${p.team}`
+      if (byNameTeam.has(nt)) dupNt.add(nt)
+      else byNameTeam.set(nt, p)
     }
   }
+  for (const k of dupNp) byNamePosition.delete(k)
+  for (const k of dupNt) byNameTeam.delete(k)
 
   return {
     master: {
@@ -85,6 +136,7 @@ export function buildMatchContext(master: {
       byPfrId: master.byPfrId,
       byNamePosition,
       byNameTeam,
+      byName,
     },
   }
 }
@@ -95,34 +147,69 @@ export function matchEspnPlayerToMaster(
 ): PlayerMatchResult | null {
   const existing = ctx.master.byEspnId.get(espnPlayer.espnId)
   if (existing) {
-    return { canonical: existing, strategy: 'espn-id', confidence: 1.0 }
+    // Trust the id join, but not blindly: a stale/mis-keyed espn_id on the
+    // Sleeper side would otherwise attach a different player. D/ST names
+    // differ by convention ("Bills D/ST" vs "Buffalo Bills").
+    const dst = existing.position === 'D/ST' || espnPlayer.position === 'D/ST'
+    const sameLast = lastNameKey(espnPlayer.fullName) === lastNameKey(existing.fullName)
+    if (dst || sameLast || nameSimilarity(espnPlayer.fullName, existing.fullName) >= ID_NAME_SANITY) {
+      return { canonical: existing, strategy: 'espn-id', confidence: 1.0 }
+    }
+    console.warn(
+      `[matching-engine] espn-id ${espnPlayer.espnId} name mismatch: ESPN "${espnPlayer.fullName}" vs master "${existing.fullName}"; falling back to name match`,
+    )
   }
 
-  const npKey = `${normalizeName(espnPlayer.fullName)}|${espnPlayer.position}`
-  const npMatch = ctx.master.byNamePosition.get(npKey)
-  if (npMatch) {
-    return { canonical: npMatch, strategy: 'name-position', confidence: 0.95 }
+  const name = normalizeName(espnPlayer.fullName)
+  if (!name) return null
+  const namesakes = ctx.master.byName.get(name) ?? []
+
+  if (namesakes.length > 0) {
+    const espnTeam = espnPlayer.team.toUpperCase()
+    // Exact name + position + team agreement is the strongest name signal.
+    const samePos = namesakes.filter(
+      (p) => p.position === espnPlayer.position && teamCompatible(p.team, espnPlayer.team),
+    )
+    const samePosTeam = samePos.filter((p) => p.team.toUpperCase() === espnTeam)
+    if (samePosTeam.length === 1) {
+      return { canonical: samePosTeam[0], strategy: 'name-position', confidence: 0.97 }
+    }
+    if (samePos.length === 1) {
+      return { canonical: samePos[0], strategy: 'name-position', confidence: 0.95 }
+    }
+
+    // Position labels drift between providers (TE/QB hybrids), so allow a
+    // cross-position match only when the team pins it to exactly one player.
+    if (!isFreeAgent(espnPlayer.team)) {
+      const sameTeam = namesakes.filter((p) => p.team.toUpperCase() === espnTeam)
+      if (sameTeam.length === 1) {
+        return { canonical: sameTeam[0], strategy: 'name-team', confidence: 0.9 }
+      }
+    }
+    // Exact-name hits exist but none (or several) agree on position/team:
+    // ambiguous or a different person. Never guess.
+    return null
   }
 
-  const ntKey = `${normalizeName(espnPlayer.fullName)}|${espnPlayer.team}`
-  const ntMatch = ctx.master.byNameTeam.get(ntKey)
-  if (ntMatch) {
-    return { canonical: ntMatch, strategy: 'name-team', confidence: 0.9 }
-  }
-
-  let bestFuzzy: { player: CanonicalPlayer; score: number } | null = null
+  // Fuzzy covers spelling variants only: same position, compatible team,
+  // same/near last name, and a clear winner over the runner-up.
+  const lastKey = lastNameKey(espnPlayer.fullName)
+  const scored: { player: CanonicalPlayer; score: number }[] = []
   for (const p of ctx.master.bySleeperId.values()) {
     if (!FANTASY_POSITIONS_NFL.has(p.position)) continue
+    if (p.position !== espnPlayer.position) continue
+    if (!teamCompatible(p.team, espnPlayer.team)) continue
+    const pLast = lastNameKey(p.fullName)
+    if (pLast !== lastKey && levenshteinDistance(pLast, lastKey) > 1) continue
     const sim = nameSimilarity(espnPlayer.fullName, p.fullName)
-    if (sim > FUZZY_THRESHOLD && sim > (bestFuzzy?.score ?? 0)) {
-      bestFuzzy = { player: p, score: sim }
-    }
+    if (sim >= FUZZY_THRESHOLD) scored.push({ player: p, score: sim })
   }
-  if (bestFuzzy) {
-    return { canonical: bestFuzzy.player, strategy: 'fuzzy', confidence: bestFuzzy.score }
-  }
-
-  return null
+  if (scored.length === 0) return null
+  scored.sort((a, b) => b.score - a.score)
+  if (scored.length > 1 && scored[0].score - scored[1].score < FUZZY_MARGIN) return null
+  // Capped below every exact strategy so a later exact match for the same
+  // master player always wins the enricher's highest-confidence tie-break.
+  return { canonical: scored[0].player, strategy: 'fuzzy', confidence: Math.min(0.89, scored[0].score) }
 }
 
 export function logUnmatchedPlayers(unmatched: UnmatchedEspnPlayer[]): void {

@@ -8,6 +8,10 @@ import {
   DEFAULT_STARTERS,
 } from '@/lib/fantasy/auction-engine'
 import type { FantasySport, FantasyPlayerEnriched } from '@/lib/fantasy-types'
+import { buildNbaDatabase } from '@/lib/fantasy/nba/nba-db'
+import { buildNbaAuctionBoard, clampNbaAuctionSettings } from '@/lib/fantasy/nba/nba-auction'
+import { nbaRowMatchesPos } from '@/lib/fantasy/nba/nba-steal-engine'
+import { NBA_POSITIONS, nbaSeasonId } from '@/lib/fantasy/nba/nba-scoring'
 
 const METHODOLOGY =
   'Value over replacement. Replacement level is the projection of the last player at each position the league will actually start, given the team count and starter slots. A player is worth $1 plus their projection above that line, priced at the league-wide rate of (total money - $1 per roster slot) divided by total value over replacement. Market is ESPN\u2019s average winning bid rescaled to this league\u2019s money supply, since ESPN does not publish the budget behind its averages. Surplus is value minus market: positive means the model expects the player to go cheaper than they are worth. These are modelled figures, not quoted prices.'
@@ -37,6 +41,8 @@ export async function GET(
         { status: 501 },
       )
     }
+
+    if (lowerSport === 'nba') return await nbaAuction(req)
 
     const url = new URL(req.url)
     const settings = clampSettings({
@@ -115,4 +121,62 @@ export async function GET(
       { status: 500 },
     )
   }
+}
+
+const NBA_METHODOLOGY =
+  'Value over replacement, league-wide. NBA lineups are mostly flexible (G/F/UT slots), so replacement is the value of the last player this league will roster (teams × roster size, about the top 150), not a per-position line. Value is ESPN default points (PTS 1, 3PM 1, FGM 2, FGA -1, FTM 1, FTA -1, REB 1, AST 2, STL 4, BLK 4, TO -2) or 9-cat z-score value (per game, scaled by projected games / 82). A player is worth $1 plus their value above replacement, priced at (total money - $1 per roster slot) / total value over replacement. Market is ESPN’s average winning bid rescaled to this league’s money. Surplus = value - market. Modelled figures, not quoted prices.'
+
+async function nbaAuction(req: NextRequest): Promise<NextResponse> {
+  const url = new URL(req.url)
+  const settings = clampNbaAuctionSettings({
+    budget: url.searchParams.get('budget') ?? undefined,
+    teams: url.searchParams.get('teams') ?? undefined,
+    rosterSize: url.searchParams.get('rosterSize') ?? undefined,
+    scoring: url.searchParams.get('scoring') ?? url.searchParams.get('scoringFormat') ?? undefined,
+  })
+  const posParam = (url.searchParams.get('pos') ?? 'ALL').toUpperCase()
+  const limit = Math.max(1, Math.min(300, Number(url.searchParams.get('limit')) || 50))
+  const offset = Math.max(0, Number(url.searchParams.get('offset')) || 0)
+  const team = url.searchParams.get('team')?.toUpperCase() ?? null
+  const search = url.searchParams.get('search')?.toLowerCase().trim() ?? ''
+  const seasonParam = Number(url.searchParams.get('season'))
+  const season = seasonParam >= 2000 && seasonParam <= 2100 ? seasonParam : nbaSeasonId()
+
+  if (posParam !== 'ALL' && !(NBA_POSITIONS as readonly string[]).includes(posParam)) {
+    return NextResponse.json(
+      { error: `invalid-pos: ${posParam}. Must be ALL or one of: ${NBA_POSITIONS.join(', ')}` },
+      { status: 400 },
+    )
+  }
+
+  const { players } = await buildNbaDatabase({ season })
+  const { rows, injuryWatch, assumptions } = buildNbaAuctionBoard(players, settings)
+
+  let filtered = rows.filter((r) => nbaRowMatchesPos(r, posParam))
+  if (team) filtered = filtered.filter((r) => r.team === team)
+  if (search) filtered = filtered.filter((r) => r.name.toLowerCase().includes(search))
+  filtered = [...filtered].sort((a, b) => {
+    if (a.surplus == null && b.surplus == null) return b.value - a.value
+    if (a.surplus == null) return 1
+    if (b.surplus == null) return -1
+    return b.surplus - a.surplus
+  })
+
+  return NextResponse.json(
+    {
+      sport: 'nba',
+      season,
+      rows: filtered.slice(offset, offset + limit),
+      injuryWatch: injuryWatch.filter((r) => nbaRowMatchesPos(r, posParam)),
+      total: filtered.length,
+      offset,
+      limit,
+      settings,
+      positions: NBA_POSITIONS,
+      assumptions,
+      methodology: NBA_METHODOLOGY,
+      generatedAt: new Date().toISOString(),
+    },
+    { headers: { 'Cache-Control': 'public, s-maxage=120, stale-while-revalidate=600' } },
+  )
 }

@@ -195,6 +195,12 @@ export default function NextGamePanel({
 }) {
   const phase = phaseProp ?? (isLive ? 'live' : 'pre')
   const isNfl = sport.toUpperCase() === 'NFL'
+  // NBA has a real Python model (propmodel/nba — minutes x rate over ESPN box
+  // scores), so it shares the NFL Prop Model pipeline: starters in, targets
+  // out, snapshot locked pre-game. Every other non-NFL sport keeps the
+  // keyless season-average fallback (PlayerProjections below).
+  const isNbaModel = sport.toUpperCase() === 'NBA'
+  const isModelSport = isNfl || isNbaModel
   // Live and final both compare the frozen snapshot against a box score.
   const comparing = phase !== 'pre'
   const [props, setProps] = useState<PropsResponse | null>(null)
@@ -241,7 +247,7 @@ export default function NextGamePanel({
   // without starters used to blank the whole Model-vs-Final table even when a
   // pre-game snapshot was saved, because the empty lineup filtered every row.)
   useEffect(() => {
-    if (!isNfl) return
+    if (!isModelSport) return
     let cancelled = false
 
     async function load(abbr: string | undefined, setter: (s: Starter[] | null) => void) {
@@ -312,6 +318,16 @@ export default function NextGamePanel({
     RB: ['rushing_yards', 'receptions', 'tds'],
     WR: ['receiving_yards', 'receptions', 'tds'],
     TE: ['receiving_yards', 'receptions', 'tds'],
+    // NBA: every rotation player gets the four modeled counting stats (the
+    // outlook returns the top five assets per team, so at most 5×4×2 = 40
+    // targets — exactly the /api/prop-model batch cap).
+    PG: ['points', 'rebounds', 'assists', 'threes'],
+    SG: ['points', 'rebounds', 'assists', 'threes'],
+    SF: ['points', 'rebounds', 'assists', 'threes'],
+    PF: ['points', 'rebounds', 'assists', 'threes'],
+    C: ['points', 'rebounds', 'assists', 'threes'],
+    G: ['points', 'rebounds', 'assists', 'threes'],
+    F: ['points', 'rebounds', 'assists', 'threes'],
   }
   const statForPos = (pos: string | null): string[] => {
     const p = (pos ?? '').toUpperCase()
@@ -395,7 +411,7 @@ export default function NextGamePanel({
       const res = await fetch('/api/prop-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targets, lines: buildLines(), preseason: !!isPreseason, eventDate }),
+        body: JSON.stringify({ targets, lines: buildLines(), preseason: !!isPreseason, eventDate, ...(isNbaModel ? { sport: 'nba' } : {}) }),
         signal: AbortSignal.timeout(180000),
       })
       const json = await res.json().catch(() => ({}))
@@ -421,6 +437,11 @@ export default function NextGamePanel({
     if (stat === 'rushing_yards') return find('Rush Yds')
     if (stat === 'receiving_yards') return find('Rec Yds')
     if (stat === 'receptions') return find('Receptions')
+    // NBA season-average labels (seasonProjections) double as priors.
+    if (stat === 'points') return find('PTS')
+    if (stat === 'rebounds') return find('REB')
+    if (stat === 'assists') return find('AST')
+    if (stat === 'threes') return find('3PM')
     if (stat === 'tds') {
       // Anytime-TD prior: ESPN projects per-type TDs; sum what it has.
       const parts = [find('Pass TDs'), find('Rush TDs'), find('Rec TDs')]
@@ -595,7 +616,7 @@ export default function NextGamePanel({
   // joined to the DraftKings line. Write-once per game, like the NFL path.
   const preRecordedRef = useRef(false)
   const recordPreSnapshotAny = () => {
-    if (isNfl || !eventDate || preRecordedRef.current || ledger?.pre) return
+    if (isModelSport || !eventDate || preRecordedRef.current || ledger?.pre) return
     const projections = props?.projections
     if (!projections?.length) return
     try {
@@ -665,7 +686,7 @@ export default function NextGamePanel({
   // closing lines when it hasn't). Pre-phase only — after the final only a
   // locked snapshot counts.
   useEffect(() => {
-    if (isNfl || phase !== 'pre' || !ledgerChecked || !props?.projections?.length) return
+    if (isModelSport || phase !== 'pre' || !ledgerChecked || !props?.projections?.length) return
     if (ledger?.pre || scraperLoading) return
     recordPreSnapshotAny()
   }, [isNfl, phase, ledgerChecked, props, ledger, scraperLoading, eventDate])
@@ -673,7 +694,7 @@ export default function NextGamePanel({
   // Auto-run once per game: hydrate from the saved snapshot when present,
   // otherwise run the model once now (it only ever reads pre-game data).
   useEffect(() => {
-    if (!isNfl) return
+    if (!isModelSport) return
     if (autoRanRef.current || modelResults || modelLoading || !ledgerChecked) return
     const hydrateOnly = phase === 'final' && !!ledger?.pre?.rows?.length
     if (!hydrateOnly && !ourProjected.length && !oppProjected.length) return
@@ -697,7 +718,7 @@ export default function NextGamePanel({
   // ---- Live comparison: frozen snapshot vs ESPN box score (every sport) ----
   const liveStats = useMemo(() => {
     if (!comparing || !liveBoxScore) return null
-    const names = isNfl
+    const names = isModelSport
       ? Array.from(new Set([...(modelResults ?? []), ...(backupProjections ?? [])].map((r) => r.player))).map((name) => ({ name }))
       : Array.from(new Set(
         ((ledger?.pre?.rows ?? []) as any[]).map((r) => r?.player).filter(Boolean),
@@ -1197,7 +1218,7 @@ export default function NextGamePanel({
   // current actuals at the closing lines. The NFL table computes its own
   // inline below; this one feeds the PlayerProjections strip.
   const anyScorecard = (() => {
-    if (isNfl || !comparing || !liveStats) return null
+    if (isModelSport || !comparing || !liveStats) return null
     const preRows = ((ledger?.pre?.rows ?? []) as any[])
     if (!preRows.length) return null
     try {
@@ -1319,7 +1340,7 @@ export default function NextGamePanel({
         </div>
       )}
 
-      {!isNfl && (
+      {!isModelSport && (
         <PlayerProjections
           projections={(props?.projections ?? null) as ProjectionRow[] | null}
           bookPlayers={(props?.players ?? null) as BookPlayer[] | null}
@@ -1350,7 +1371,7 @@ export default function NextGamePanel({
       )}
 
       {/* Prop Model projections (Python pipeline) */}
-      {isNfl && !noSnapshot && (ourProjected.length > 0 || oppProjected.length > 0 || (phase !== 'pre' && (modelResults?.length ?? 0) > 0)) && (
+      {isModelSport && !noSnapshot && (ourProjected.length > 0 || oppProjected.length > 0 || (phase !== 'pre' && (modelResults?.length ?? 0) > 0)) && (
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Prop Model</p>
