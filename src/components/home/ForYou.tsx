@@ -6,6 +6,7 @@ import { todayKey, SPORT_KEYS, type NormalizedGame } from '@/lib/models'
 import { useFavorites } from '@/hooks/useFavorites'
 import { favoriteTeamIds } from '@/lib/favorites'
 import { ScoreCard } from '@/components/scoreboard/ScoreCard'
+import { HorizontalRail } from '@/components/HorizontalRail'
 import { SectionHeader, ErrorState } from '@/components/feedback'
 
 /**
@@ -56,7 +57,7 @@ export function ForYou() {
         <SectionHeader eyebrow="Personalize" title="For You" />
         <div className="flex gap-3 overflow-hidden" aria-hidden="true">
           {[0, 1].map((i) => (
-            <div key={i} className="fs-skeleton h-36 w-56 sm:w-64 shrink-0" />
+            <div key={i} className="fs-skeleton h-28 w-52 sm:w-56 shrink-0" />
           ))}
         </div>
       </section>
@@ -98,7 +99,7 @@ export function ForYou() {
       ) : games === null ? (
         <div className="flex gap-3 overflow-hidden" aria-hidden="true">
           {[0, 1].map((i) => (
-            <div key={i} className="fs-skeleton h-36 w-56 sm:w-64 shrink-0" />
+            <div key={i} className="fs-skeleton h-28 w-52 sm:w-56 shrink-0" />
           ))}
         </div>
       ) : games.length === 0 ? (
@@ -110,13 +111,13 @@ export function ForYou() {
           .
         </p>
       ) : (
-        <div className="flex gap-3 overflow-x-auto pb-2 snap-x">
+        <HorizontalRail ariaLabel="Your teams' games today">
           {games.slice(0, 8).map((g) => (
-            <div key={`${g.sport}:${g.id}`} className="snap-start">
+            <div key={`${g.sport}:${g.id}`} role="listitem">
               <ScoreCard game={g} />
             </div>
           ))}
-        </div>
+        </HorizontalRail>
       )}
       {favIds.size > 0 && (
         <p className="fs-meta mt-3">

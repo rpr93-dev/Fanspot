@@ -6,6 +6,7 @@ import { teams, sportConfig } from '@/data/teams'
 import NextGamePanel from '@/components/NextGamePanel'
 import { GameStatsSection, LastPlayBlock } from '@/components/box-score/GameStatsSection'
 import { LiveGameSummary } from '@/components/game/GameSummary'
+import { GameStreamPanel } from '@/components/streams/GameStreamPanel'
 import { GameHeader } from '@/components/game/GameHeader'
 import { LinescoreTable, PlayerBoxScore } from '@/components/game/PlayerBoxScore'
 import { PlayByPlay } from '@/components/game/PlayByPlay'
@@ -15,14 +16,15 @@ import { getEspnAbbr } from '@/lib/sports-api'
 import { normalizeEvent, normalizeSportKey, type NormalizedGame, type SportKey } from '@/lib/models'
 import type { NormalizedPlay } from '@/lib/plays'
 
-type TabId = 'summary' | 'box' | 'plays' | 'teams' | 'model'
+type TabId = 'summary' | 'watch' | 'box' | 'plays' | 'teams' | 'model'
 
 const TAB_LABELS: Record<TabId, string> = {
-  summary: 'Summary',
+  summary: 'Overview',
+  watch: 'Watch',
   box: 'Box Score',
   plays: 'Plays',
   teams: 'Team Stats',
-  model: 'Props',
+  model: 'Odds',
 }
 
 /**
@@ -70,6 +72,23 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
   const [playsError, setPlaysError] = useState<string | null>(null)
   const [playsChecked, setPlaysChecked] = useState(false)
   const [tab, setTab] = useState<TabId>('summary')
+  const [watchPreselect, setWatchPreselect] = useState<{ source: string; id: string } | null>(null)
+  const [watchAutoplay, setWatchAutoplay] = useState(false)
+
+  // Deep link from /watch (?tab=watch&source=&sid=[&autoplay=1]): open the
+  // Watch tab on mount. Read from window (not useSearchParams) so no
+  // Suspense boundary is needed; the tab falls back to summary until the
+  // effect runs.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    if (q.get('tab') === 'watch') {
+      const source = q.get('source') ?? ''
+      const sid = q.get('sid') ?? ''
+      if (source && sid) setWatchPreselect({ source, id: sid })
+      if (q.get('autoplay') === '1') setWatchAutoplay(true)
+      setTab('watch')
+    }
+  }, [])
   const [odds, setOdds] = useState<Record<string, any>>({})
   const [scraperData, setScraperData] = useState<Record<string, any>>({})
   const [scraperLoading, setScraperLoading] = useState<Record<string, boolean>>({})
@@ -317,12 +336,15 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
   )
   const hasPlays = (plays ?? []).length > 0
 
+  // The stream is a persistent companion column on desktop (not a tab), so
+  // switching game-data tabs never remounts or reloads the player.
+  const supportsStream = ['NFL', 'NBA', 'NHL', 'MLB'].includes(sport ?? '')
   const availableTabs: TabId[] = [
     'summary',
     ...(hasPlayerStats || boxScore ? ['box' as TabId] : []),
     ...(playsChecked && hasPlays ? ['plays' as TabId] : []),
     ...(hasTeamStats ? ['teams' as TabId] : []),
-    // The Props tab stays after the game: the frozen snapshot is graded
+    // The Odds/Props tab stays after the game: the frozen snapshot is graded
     // against the final box score for every sport.
     'model' as TabId,
   ]
@@ -357,7 +379,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
             <div className="fs-skeleton h-96 rounded-xl" />
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-5">
             <GameHeader game={game} />
 
             {boxScoreGaveUp && !boxScore && (
@@ -371,7 +393,24 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
               />
             )}
 
-            <div className="flex gap-1 p-1 rounded-full border border-fs-line bg-fs-panel/60 w-fit max-w-full overflow-x-auto" role="tablist" aria-label="Game sections">
+            {/* Game Hub: the stream (when the sport supports it) stays mounted
+                as a persistent companion column; only the data panel below
+                swaps tabs, so the player never remounts or reloads. */}
+            <div className={supportsStream ? 'grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start' : ''}>
+              {supportsStream && (
+                <div className="min-w-0 lg:sticky lg:top-20">
+                  <GameStreamPanel
+                    sport={sportKey.toLowerCase() as 'nfl' | 'nba' | 'nhl' | 'mlb'}
+                    awayName={game.away.name}
+                    homeName={game.home.name}
+                    preselect={watchPreselect}
+                    autoplay={watchAutoplay}
+                  />
+                </div>
+              )}
+
+              <div className="min-w-0 space-y-4">
+                <div className="flex flex-wrap gap-1 p-1 rounded-full border border-fs-line bg-fs-panel/60 w-fit max-w-full" role="tablist" aria-label="Game sections">
               {availableTabs.map((t, i) => (
                 <button
                   key={t}
@@ -528,6 +567,8 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
                 />
               </div>
             )}
+              </div>
+            </div>
           </div>
         )}
       </div>

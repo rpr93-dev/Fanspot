@@ -1,0 +1,20 @@
+# graphify code-graph scope — keeps app/service code, drops generated + log noise.
+# (Respects gitignore-style patterns; `!` negation re-includes. See .gitignore for
+# build-output ignores like .next/ and node_modules/, already skipped by default.)
+
+# graphify's own skill docs self-indexed into the graph ("graphify reference: …"
+# communities + "ALWAYS USE GRAPHIFY FIRST" hub) — tool docs, not project code.
+.opencode/skills/graphify/
+
+# Overnight agent mission/progress logs — stale run journals, not architecture.
+.overnight-prop-model/
+FANTASY-PROGRESS.md
+
+# Python test-suite for the prop model (324 nodes / ~860 edges of test_*.py).
+# Colocated src __tests__ dirs are intentionally kept in the graph.
+prop-model/tests/
+
+# Static assets and generated types — no symbols worth navigating.
+public/
+next-env.d.ts
+*.log

@@ -26,7 +26,7 @@ export function PlayByPlay({
   let lastPeriod: number | null | undefined = undefined
 
   return (
-    <ol className="space-y-1.5" aria-label="Play by play, most recent first">
+    <ol className="space-y-1" aria-label="Play by play, most recent first">
       {ordered.map((p) => {
         const showPeriod = p.period !== lastPeriod
         lastPeriod = p.period
@@ -38,7 +38,7 @@ export function PlayByPlay({
               </p>
             )}
             <div
-              className={`rounded-lg px-3 py-2.5 border ${
+              className={`rounded-lg px-3 py-2 border ${
                 p.scoring
                   ? 'border-fs-turf/40 bg-fs-turf/[0.07]'
                   : p.highlight

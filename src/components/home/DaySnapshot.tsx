@@ -11,7 +11,9 @@ import {
 import { useFavorites } from '@/hooks/useFavorites'
 import { useLivePoll } from '@/hooks/useLivePoll'
 import { ScoreCard } from '@/components/scoreboard/ScoreCard'
-import { F1SessionCountdown } from '@/components/f1/F1SessionCountdown'
+import { HorizontalRail } from '@/components/HorizontalRail'
+import { useF1Sessions, F1SessionCard } from '@/components/f1/F1SessionsBoard'
+import { RedzoneCard } from '@/components/streams/RedzoneBoard'
 import { SectionHeader, EmptyState, ErrorState } from '@/components/feedback'
 
 /**
@@ -23,6 +25,11 @@ export function DaySnapshot() {
   const [failed, setFailed] = useState(false)
   const { favoriteAbbrs, hydrated } = useFavorites()
   const boost = hydrated ? favoriteAbbrs : undefined
+  // F1 sessions (practice / sprint / quali / race) run independently of the
+  // ESPN team-sport board, so they're surfaced here in Live Now + Upcoming.
+  const f1 = useF1Sessions()
+  const f1Live = (f1 ?? []).filter((s) => s.state === 'live')
+  const f1Upcoming = (f1 ?? []).filter((s) => s.state === 'upcoming').slice(0, 3)
 
   const load = useCallback(async () => {
     try {
@@ -54,7 +61,7 @@ export function DaySnapshot() {
     return (
       <div className="grid gap-3 sm:grid-cols-3" aria-hidden="true">
         {[0, 1, 2].map((i) => (
-          <div key={i} className="fs-skeleton h-36" />
+          <div key={i} className="fs-skeleton h-28" />
         ))}
       </div>
     )
@@ -65,17 +72,25 @@ export function DaySnapshot() {
   // F1 races are covered by the session countdown below, not the Finals rail.
   const finals = relevanceSort(games.filter((g) => g.status.phase === 'final' && g.sport !== 'F1'), boost).slice(0, 6)
 
-  const rail = (list: NormalizedGame[], empty: string, wrap = false) =>
+  const rail = (list: NormalizedGame[], empty: string, label: string, wrap = false) =>
     list.length === 0 ? (
       <EmptyState title={empty} />
-    ) : (
-      <div className={wrap ? 'flex flex-wrap gap-3' : 'flex gap-3 overflow-x-auto pb-2 snap-x'}>
+    ) : wrap ? (
+      <div className="flex flex-wrap gap-3">
         {list.map((g) => (
-          <div key={`${g.sport}:${g.id}`} className={wrap ? undefined : 'snap-start'}>
+          <div key={`${g.sport}:${g.id}`}>
             <ScoreCard game={g} />
           </div>
         ))}
       </div>
+    ) : (
+      <HorizontalRail ariaLabel={label}>
+        {list.map((g) => (
+          <div key={`${g.sport}:${g.id}`} role="listitem">
+            <ScoreCard game={g} />
+          </div>
+        ))}
+      </HorizontalRail>
     )
 
   return (
@@ -85,15 +100,24 @@ export function DaySnapshot() {
           eyebrow="Happening now"
           title="Live Now"
           action={
-            live.length > 0 ? (
+            live.length + f1Live.length > 0 ? (
               <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold tracking-wider bg-fs-red/15 text-fs-red">
                 <span className="w-1.5 h-1.5 rounded-full bg-fs-red animate-pulse" aria-hidden="true" />
-                {live.length} LIVE
+                {live.length + f1Live.length} LIVE
               </span>
             ) : undefined
           }
         />
-        {rail(live, 'No games live right now.', true)}
+        {f1Live.length > 0 ? (
+          <div className="flex flex-wrap gap-3 mb-3">
+            {f1Live.map((s) => (
+              <F1SessionCard key={s.id} session={s} className="w-full" />
+            ))}
+          </div>
+        ) : null}
+        {/* NFL RedZone surfaces only while Sunday games are actually live. */}
+        <RedzoneCard className="mb-3" />
+        {rail(live, 'No games live right now.', 'Live now', true)}
       </section>
 
       <section aria-label="Upcoming">
@@ -106,15 +130,19 @@ export function DaySnapshot() {
             </Link>
           }
         />
-        {rail(upcoming, 'No more games today.', true)}
-        <div className="mt-3">
-          <F1SessionCountdown />
-        </div>
+        {f1Upcoming.length > 0 ? (
+          <div className="flex flex-wrap gap-3 mb-3">
+            {f1Upcoming.map((s) => (
+              <F1SessionCard key={s.id} session={s} className="w-full" />
+            ))}
+          </div>
+        ) : null}
+        {rail(upcoming, 'No more games today.', 'Upcoming today', true)}
       </section>
 
       <section aria-label="Recent finals">
         <SectionHeader eyebrow="Today" title="Recent Finals" />
-        {rail(finals, 'No finals yet today.')}
+        {rail(finals, 'No finals yet today.', 'Recent finals')}
       </section>
     </div>
   )

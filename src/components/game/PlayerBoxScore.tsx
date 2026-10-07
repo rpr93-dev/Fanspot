@@ -62,7 +62,7 @@ export function LinescoreTable({ sport, away, home }: { sport: SportKey; away: B
   )
 
   return (
-    <div className="mb-4 overflow-x-auto" data-testid="linescores" tabIndex={0} role="region" aria-label="Scoring by period">
+    <div className="mb-4 fs-scroll-x" data-testid="linescores" tabIndex={0} role="region" aria-label="Scoring by period">
       <div role="table" aria-label="Scoring by period" className="mx-auto flex w-fit min-w-full flex-col gap-1 text-[11px] tabular-nums text-fs-muted-2">
         {row(away, 'Away')}
         {row(home, 'Home')}
@@ -124,15 +124,15 @@ export function PlayerBoxScore({
                 <div className="px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-fs-muted-2 bg-white/[0.02]">
                   {cat.label}
                 </div>
-                <div className="overflow-x-auto">
+                <div className="fs-scroll-x">
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="text-fs-muted-2">
-                        <th scope="col" className="text-left px-2.5 py-1.5 font-medium">
+                        <th scope="col" className="text-left px-2.5 py-1.5 font-medium whitespace-nowrap">
                           Player
                         </th>
                         {cat.statNames.map((n, ni) => (
-                          <th key={ni} scope="col" className="text-right px-2 py-1.5 font-medium tabular-nums">
+                          <th key={ni} scope="col" className="text-right px-2 py-1.5 font-medium tabular-nums whitespace-nowrap">
                             {playerStatLabels[n] ?? prettifyName(n)}
                           </th>
                         ))}

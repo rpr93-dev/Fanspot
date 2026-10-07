@@ -1012,7 +1012,7 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
                     )}
                   </div>
                   {data.oddsInfo && (data.oddsInfo.spread != null || data.oddsInfo.overUnder != null) && (
-                    <div className="flex items-center gap-2 mt-3 overflow-x-auto">
+                    <div className="flex items-center gap-2 mt-3 fs-scroll-x">
                       {data.oddsInfo.spread != null && (
                         <span className="text-xs font-mono px-2.5 py-1 rounded-full whitespace-nowrap" style={{ backgroundColor: `${team.colors.primary}12`, border: `1px solid ${team.colors.primary}20` }}>
                           Spread {data.oddsInfo.spread > 0 ? '+' : ''}{data.oddsInfo.spread}
@@ -1052,7 +1052,7 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
                     ))}
                   </div>
                 ) : data?.lastFive.length ? (
-                  <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 -mx-4 px-4">
+                  <div className="flex gap-2 fs-scroll-x snap-x snap-mandatory -mx-4 px-4">
                     {data.lastFive.map((game) => (
                       <div key={game.eventId} className="rounded-lg px-3 py-2.5 flex items-center gap-2.5 cursor-pointer snap-start min-w-[10.5rem] flex-1" style={{ backgroundColor: `${team.colors.primary}0d`, border: `1px solid ${game.eventId === selectedGameId ? team.colors.primary : `${team.colors.primary}18`}` } as React.CSSProperties}
                         onClick={() => setSelectedGameId(game.eventId === selectedGameId ? null : game.eventId)}>
@@ -1365,7 +1365,7 @@ function LastFiveTiles({ games, selectedId, onSelect, teamColor, standing, loadi
           ))}
         </div>
       ) : games.length ? (
-        <div className="flex md:grid md:grid-cols-5 gap-2 overflow-x-auto md:overflow-visible snap-x snap-mandatory md:snap-none pb-1 md:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
+        <div className="flex md:grid md:grid-cols-5 gap-2 fs-scroll-x md:overflow-visible snap-x snap-mandatory md:snap-none -mx-4 px-4 sm:mx-0 sm:px-0 animate-fade-in-up" style={{ animationDelay: '50ms' }}>
           {games.map((game) => (
             <div key={game.eventId} className="hover-card rounded-lg px-3 py-2.5 flex items-center gap-2.5 text-left cursor-pointer snap-start min-w-[11rem] md:min-w-0 flex-1" style={{ backgroundColor: `${teamColor}0d`, border: `1px solid ${game.eventId === selectedId ? teamColor : `${teamColor}18`}`, '--card-color': teamColor } as React.CSSProperties}
               role="button"
@@ -1461,7 +1461,7 @@ function RosterPanel({ team, roster, loading, onBack }: { team: any; roster: any
                       const hasStats = !!athlete.seasonStats
                       const cells = hasStats ? rosterStatCells(team.sport, athlete) : []
                       return (
-                        <div key={athlete.id ?? `athlete-${pi}-${ai}`} className="flex items-center gap-2 sm:gap-3 rounded-lg px-2 sm:px-3 py-1.5 overflow-x-auto" style={{ backgroundColor: rookie ? `${team.colors.primary}12` : 'transparent' }}>
+                        <div key={athlete.id ?? `athlete-${pi}-${ai}`} className="flex items-center gap-2 sm:gap-3 rounded-lg px-2 sm:px-3 py-1.5 fs-scroll-x" style={{ backgroundColor: rookie ? `${team.colors.primary}12` : 'transparent' }}>
                           <span className="text-xs w-5 sm:w-6 text-right font-mono text-fs-muted-2 flex-shrink-0">{athlete.jersey}</span>
                           {athlete.id ? (
                             <Link

@@ -68,30 +68,30 @@ export function GameCard({
 
   const inner = (
     <div
-      className={`fs-panel p-4 sm:p-5 hover-card cursor-pointer transition-all duration-300 ${isLive ? 'ring-1 ring-fs-red/40' : ''} ${className}`}
+      className={`fs-panel p-3.5 hover-card cursor-pointer transition-all duration-300 ${isLive ? 'ring-1 ring-fs-red/40' : ''} ${className}`}
       style={accent ? ({ '--tint': accent, '--tint-border': `${accent}26`, '--card-color': accent } as React.CSSProperties) : undefined}
     >
-      <div className="flex items-center justify-between mb-3 gap-2">
-        <span className="fs-meta truncate">{meta}</span>
+      <div className="flex items-center justify-between mb-2.5 gap-2">
+        <span className="fs-meta truncate !text-[11px]">{meta}</span>
         <span className={`px-2 py-1 rounded-full text-xs font-semibold whitespace-nowrap ${pillClass}`}>
           {pillText}
         </span>
       </div>
 
-      <div className="space-y-3">
+      <div className="space-y-2">
         <TeamRow side={away} phase={phase} />
         <div className="border-t border-fs-line" />
         <TeamRow side={home} phase={phase} />
       </div>
 
       {isLive && liveStatsEventId && (
-        <div className="mt-3 pt-3 border-t border-fs-line">
+        <div className="mt-2.5 pt-2.5 border-t border-fs-line">
           <LiveStatsBlock eventId={liveStatsEventId} />
         </div>
       )}
 
       {footer && (
-        <div className="mt-3 pt-3 border-t border-fs-line">{footer}</div>
+        <div className="mt-2.5 pt-2.5 border-t border-fs-line">{footer}</div>
       )}
     </div>
   )
@@ -108,20 +108,20 @@ function TeamRow({ side, phase }: { side: GameCardSide; phase: GameCardPhase }) 
   const showW = side.winner === true && phase !== 'live'
   const dim = phase === 'final' && side.winner === false
   return (
-    <div className="flex items-center justify-between gap-3">
-      <div className="flex items-center gap-3 min-w-0">
+    <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center gap-2.5 min-w-0">
         {side.logo ? (
-          <img aria-hidden="true" src={side.logo} alt="" className="w-8 h-8 object-contain shrink-0" loading="lazy" />
+          <img aria-hidden="true" src={side.logo} alt="" className="w-7 h-7 object-contain shrink-0" loading="lazy" />
         ) : (
-          <span className="w-8 h-8 shrink-0" aria-hidden="true" />
+          <span className="w-7 h-7 shrink-0" aria-hidden="true" />
         )}
-        <span className="font-semibold text-sm truncate">{side.abbr}</span>
+        <span className="font-semibold text-[13px] truncate">{side.abbr}</span>
         {showW && <span className="text-[10px] font-bold text-fs-turf">W</span>}
         {phase === 'pre' && side.record && (
           <span className="fs-mono text-[10px] text-fs-muted-2 tabular-nums hidden sm:inline">{side.record}</span>
         )}
       </div>
-      <span className={`text-lg font-bold tabular-nums shrink-0 ${dim ? 'text-fs-muted-2' : ''}`}>
+      <span className={`text-base font-bold tabular-nums shrink-0 ${dim ? 'text-fs-muted-2' : ''}`}>
         {side.score || '-'}
       </span>
     </div>

@@ -2,9 +2,10 @@ import { NextResponse } from 'next/server'
 import { getCached, setCached, isFresh } from '@/lib/cache/cacheService'
 import { isValidEventId } from '@/lib/api-validation'
 import {
-  fetchSession, fetchDrivers, fetchLiveWindow, fetchAllLocations, fetchSessionResult, fetchLaps,
+  fetchSession, fetchDrivers, fetchLiveWindow, fetchAllLocations, fetchSessionResult, fetchLaps, fetchStints,
 } from '@/lib/f1-server'
 import { mergeLiveState, sessionState } from '@/lib/f1'
+import { f1BridgeSnapshot, f1BridgeStatus } from '@/lib/f1-live'
 
 /**
  * GET /api/f1/live?session_key=11377 (default: latest session overall)
@@ -30,6 +31,17 @@ export async function GET(request: Request) {
   const cached = getCached<any>(key)
   if (cached && isFresh(cached.ts, TTL_MS)) return NextResponse.json(cached.data)
 
+  // Live sessions: OpenF1's free tier 401s while a session is running, so the
+  // self-hosted SignalR bridge (F1's own feed) is the live source of truth.
+  const bridgeStatus = await f1BridgeStatus()
+  if (bridgeStatus?.connected && bridgeStatus?.live) {
+    const snap = await f1BridgeSnapshot()
+    if (snap) {
+      setCached(key, snap)
+      return NextResponse.json(snap)
+    }
+  }
+
   try {
     const sessions = await fetchSession(sessionKey ?? undefined)
     const session = Array.isArray(sessions) ? sessions[sessions.length - 1] : null
@@ -48,7 +60,11 @@ export async function GET(request: Request) {
 
     if (clockState === 'final') {
       // Cheap path: classification + lap history, no timing windows.
-      const [result, laps] = await Promise.all([fetchSessionResult(sk), fetchLaps(sk).catch(() => [])])
+      const [result, laps, stints] = await Promise.all([
+        fetchSessionResult(sk),
+        fetchLaps(sk).catch(() => []),
+        fetchStints(sk),
+      ])
       const posByDriver = new Map<number, any>()
       for (const r of Array.isArray(result) ? result : []) {
         if (typeof r?.driver_number === 'number') posByDriver.set(r.driver_number, r)
@@ -59,6 +75,7 @@ export async function GET(request: Request) {
         intervals: [...posByDriver.values()].map((r: any) => ({ driver_number: r.driver_number, gap_to_leader: r.gap_to_leader ?? null, date: null })),
         locations: [],
         laps: Array.isArray(laps) ? laps : [],
+        stints: Array.isArray(stints) ? stints : [],
         dnf: [...posByDriver.values()].filter((r: any) => r.dnf === true).map((r: any) => r.driver_number),
         at: new Date().toISOString(),
       })
@@ -67,7 +84,10 @@ export async function GET(request: Request) {
       // passes); look back far enough to always catch the latest sample.
       const sinceIso = new Date(Date.now() - 30_000).toISOString()
       const window = await fetchLiveWindow(sk, sinceIso)
-      const locations = await fetchAllLocations(sk, sinceIso).catch(() => [])
+      const [locations, stints] = await Promise.all([
+        fetchAllLocations(sk, sinceIso).catch(() => []),
+        fetchStints(sk),
+      ])
 
       const pitNow = new Set<number>()
       for (const p of window.pit) {
@@ -80,6 +100,7 @@ export async function GET(request: Request) {
         intervals: window.intervals,
         locations,
         laps: window.laps,
+        stints,
         pitNow,
         at: new Date().toISOString(),
       })
@@ -126,6 +147,12 @@ export async function GET(request: Request) {
     return NextResponse.json(data)
   } catch (err: any) {
     console.error('[f1/live] upstream failed:', err?.message ?? err)
+    // OpenF1 blocked (usually a live session) — fall back to the bridge.
+    const snap = await f1BridgeSnapshot()
+    if (snap) {
+      setCached(key, snap)
+      return NextResponse.json(snap)
+    }
     return NextResponse.json({ error: 'F1_UNAVAILABLE', message: 'Live timing unavailable' }, { status: 502 })
   }
 }

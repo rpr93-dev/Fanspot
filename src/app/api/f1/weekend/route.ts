@@ -27,6 +27,49 @@ function lastVal(v: any): any {
   return Array.isArray(v) ? v[v.length - 1] : v
 }
 
+/** Jolpica session fields, in the order they're announced. */
+const JOLPICA_SESSION_FIELDS: Array<[string, string]> = [
+  ['Practice 1', 'FirstPractice'],
+  ['Practice 2', 'SecondPractice'],
+  ['Practice 3', 'ThirdPractice'],
+  ['Qualifying', 'Qualifying'],
+  ['Sprint Qualifying', 'SprintQualifying'],
+  ['Sprint', 'Sprint'],
+]
+
+/**
+ * Jolpica session times for a weekend (practice/quali/sprint/race). This is the
+ * fallback schedule when OpenF1 has no meeting for the round — e.g. far-future
+ * races, or while OpenF1 blocks its API during a live session.
+ */
+function raceSchedule(race: any): Array<{ name: string; date: string; time: string | null }> {
+  const out: Array<{ name: string; date: string; time: string | null }> = []
+  for (const [name, field] of JOLPICA_SESSION_FIELDS) {
+    const s = race?.[field] ?? (name === 'Sprint Qualifying' ? race?.SprintShootout : undefined)
+    if (s?.date) out.push({ name, date: s.date, time: s.time ?? null })
+  }
+  if (race?.date) out.push({ name: 'Race', date: race.date, time: race.time ?? null })
+  return out.sort(
+    (a, b) => Date.parse(`${a.date}T${a.time ?? '00:00:00Z'}`) - Date.parse(`${b.date}T${b.time ?? '00:00:00Z'}`),
+  )
+}
+
+/** Normalize a Jolpica race into the shape the client reads (always used). */
+function normalizeRace(race: any) {
+  if (!race) return null
+  return {
+    round: Number(race.round),
+    name: race.raceName,
+    circuit: race.Circuit?.circuitName ?? null,
+    locality: race.Circuit?.Location?.locality ?? null,
+    country: race.Circuit?.Location?.country ?? null,
+    date: race.date,
+    time: race.time ?? null,
+    url: race.url ?? null,
+    sessions: raceSchedule(race),
+  }
+}
+
 /** Retry an upstream fetch a few times with linear backoff (OpenF1 429s). */
 async function withRetry<T>(fn: () => Promise<T>, tries = 3): Promise<T> {
   let last: any = null
@@ -132,9 +175,18 @@ export async function GET(request: Request) {
     }
 
     if (!meeting) {
-      // No OpenF1 meeting (future race far out, or archive gap): still return
-      // the Jolpica round so the page renders with schedule info.
-      const data = { season: seasonParam, round: roundParam ? Number(roundParam) : null, race, meeting: null, sessions: [], drivers: [] }
+      // No OpenF1 meeting (future race far out, archive gap, or OpenF1 locked
+      // its API during a live session): still return the normalized Jolpica
+      // round + its session schedule so the weekend hub renders (tabs + times,
+      // stream), just without live timing.
+      const data = {
+        season: seasonParam,
+        round: roundParam ? Number(roundParam) : null,
+        race: normalizeRace(race),
+        meeting: null,
+        sessions: [],
+        drivers: [],
+      }
       setCached(key, data)
       return NextResponse.json(data)
     }
@@ -222,18 +274,7 @@ export async function GET(request: Request) {
     const data = {
       season: seasonParam,
       round: roundParam ? Number(roundParam) : null,
-      race: race
-        ? {
-            round: Number(race.round),
-            name: race.raceName,
-            circuit: race.Circuit?.circuitName ?? null,
-            locality: race.Circuit?.Location?.locality ?? null,
-            country: race.Circuit?.Location?.country ?? null,
-            date: race.date,
-            time: race.time ?? null,
-            url: race.url ?? null,
-          }
-        : null,
+      race: normalizeRace(race),
       meeting: {
         key: meeting.meeting_key,
         name: meeting.meeting_name,

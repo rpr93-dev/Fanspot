@@ -290,4 +290,79 @@ input:focus-visible,
   .fs-input:focus {
     border-color: color-mix(in srgb, var(--tint, var(--color-fs-turf)) 55%, var(--color-fs-line-strong));
   }
+
+  /* Horizontal scroll viewport with the native scrollbar hidden. Shared by the
+     game rails, stream-listing rails, and tab strips so no page shows a stray
+     horizontal track (the old "line") under its cards while still scrolling
+     with trackpad, wheel, touch, and drag. */
+  .fs-scroll-x {
+    overflow-x: auto;
+    overflow-y: hidden;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .fs-scroll-x::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+  }
+
+  /* Shared game/listing rail: a scroll viewport plus optional desktop arrows.
+     The viewport owns horizontal overflow; the track owns the flex layout, so
+     the page itself never overflows sideways. */
+  .fs-rail {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .fs-rail-viewport {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  .fs-rail-track {
+    display: flex;
+    align-items: stretch;
+    gap: 0.75rem;
+    width: max-content;
+    min-width: 100%;
+  }
+
+  .fs-rail-nav {
+    flex: 0 0 auto;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    border: 1px solid var(--color-fs-line-strong);
+    background: var(--color-fs-panel-2);
+    color: var(--color-fs-muted-2);
+    font-size: 15px;
+    line-height: 1;
+    cursor: pointer;
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+
+  @media (min-width: 768px) {
+    .fs-rail-nav {
+      display: inline-flex;
+    }
+  }
+
+  .fs-rail-nav:hover:not(:disabled) {
+    color: var(--color-fs-text);
+    background: color-mix(in srgb, var(--color-fs-turf) 12%, var(--color-fs-panel-2));
+  }
+
+  .fs-rail-nav[data-hidden='true'] {
+    opacity: 0;
+    pointer-events: none;
+  }
 }

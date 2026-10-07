@@ -3,6 +3,7 @@ import { getCached, setCached, isFresh } from '@/lib/cache/cacheService'
 import { isValidEventId } from '@/lib/api-validation'
 import { fetchSession, fetchDrivers, fetchSessionResult } from '@/lib/f1-server'
 import { F1_TEAM_ABBR, sessionState } from '@/lib/f1'
+import { f1BridgeStatus, f1BridgeDriverList } from '@/lib/f1-live'
 
 /**
  * GET /api/f1/session?session_key=11377 (default: latest session overall)
@@ -22,6 +23,30 @@ export async function GET(request: Request) {
   const key = `f1:session:${sessionKey ?? 'latest'}`
   const cached = getCached<any>(key)
   if (cached && isFresh(cached.ts, TTL_MS)) return NextResponse.json(cached.data)
+
+  // Live sessions: OpenF1 is blocked, so take session meta + drivers from the
+  // self-hosted SignalR bridge (F1's own feed).
+  const bridge = await f1BridgeStatus()
+  if (bridge?.connected && bridge?.session?.Key) {
+    const s = bridge.session
+    const data = {
+      session: {
+        key: Number(s.Key),
+        name: s.Name ?? s.Type ?? 'Session',
+        type: s.Type ?? null,
+        location: s.Meeting?.Location ?? '',
+        country: s.Meeting?.Country?.Name ?? null,
+        circuit: s.Meeting?.Circuit?.ShortName ?? null,
+        dateStart: s.StartDate ?? null,
+        dateEnd: s.EndDate ?? null,
+        state: bridge.live ? 'live' : bridge.stale ? 'final' : 'upcoming',
+      },
+      drivers: await f1BridgeDriverList(),
+      result: [],
+    }
+    setCached(key, data)
+    return NextResponse.json(data)
+  }
 
   try {
     const sessions = await fetchSession(sessionKey ?? undefined)
@@ -68,6 +93,26 @@ export async function GET(request: Request) {
     return NextResponse.json(data)
   } catch (err: any) {
     console.error('[f1/session] upstream failed:', err?.message ?? err)
+    if (bridge?.connected && bridge?.session?.Key) {
+      const s = bridge.session
+      const data = {
+        session: {
+          key: Number(s.Key),
+          name: s.Name ?? s.Type ?? 'Session',
+          type: s.Type ?? null,
+          location: s.Meeting?.Location ?? '',
+          country: s.Meeting?.Country?.Name ?? null,
+          circuit: s.Meeting?.Circuit?.ShortName ?? null,
+          dateStart: s.StartDate ?? null,
+          dateEnd: s.EndDate ?? null,
+          state: bridge.live ? 'live' : bridge.stale ? 'final' : 'upcoming',
+        },
+        drivers: await f1BridgeDriverList(),
+        result: [],
+      }
+      setCached(key, data)
+      return NextResponse.json(data)
+    }
     return NextResponse.json({ error: 'F1_UNAVAILABLE', message: 'Session unavailable' }, { status: 502 })
   }
 }

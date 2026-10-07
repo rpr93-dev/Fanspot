@@ -164,7 +164,7 @@ export function GlobalNav() {
             <nav className="hidden md:flex items-center gap-0.5" aria-label="Primary">
               {desktopLink('/scores', 'Scores')}
               {LEAGUE_LINKS.map((l) => desktopLink(l.href, l.label))}
-              {desktopLink('/fantasy/nfl', 'Fantasy')}
+              {desktopLink('/fantasy', 'Fantasy')}
               {desktopLink('/news', 'News')}
               {desktopLink('/favorites', 'Saved')}
             </nav>
@@ -216,7 +216,7 @@ export function GlobalNav() {
         </div>
         {moreOpen && (
           <div className="border-t border-fs-line px-4 py-3 grid grid-cols-2 gap-1">
-            {[...LEAGUE_LINKS, { href: '/fantasy/nfl', label: 'Fantasy' }, { href: '/search', label: 'Search' }].map(
+            {[...LEAGUE_LINKS, { href: '/fantasy', label: 'Fantasy' }, { href: '/search', label: 'Search' }].map(
               (l) => (
                 <Link
                   key={l.href}

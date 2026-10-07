@@ -35,7 +35,7 @@ vi.mock('fs/promises', () => ({
   },
 }))
 
-import { POST } from '@/app/api/prop-model/route'
+import { POST, __clearPropModelCacheForTests } from '@/app/api/prop-model/route'
 
 const post = (body: unknown) =>
   new Request('http://localhost/api/prop-model', {
@@ -50,6 +50,7 @@ describe('POST /api/prop-model ignores client-supplied weightsJson', () => {
   beforeEach(() => {
     cliArgs.length = 0
     warnSpy.mockClear()
+    __clearPropModelCacheForTests()
   })
 
   it.each(['/etc/passwd', '../../x'])('never passes %s to the CLI', async (evil) => {
@@ -84,6 +85,7 @@ describe('POST /api/prop-model sport routing', () => {
   beforeEach(() => {
     cliArgs.length = 0
     warnSpy.mockClear()
+    __clearPropModelCacheForTests()
   })
 
   const nbaTargets = [{ player: 'Shai Gilgeous-Alexander', stat: 'points', team: 'OKC', opponent: 'DEN' }]
@@ -111,5 +113,35 @@ describe('POST /api/prop-model sport routing', () => {
     const idx = args.indexOf('--weights-json')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(args[idx + 1]).toBe('/fake/cache/tuned_weights_avg.json')
+  })
+})
+
+describe('POST /api/prop-model result cache', () => {
+  beforeEach(() => {
+    cliArgs.length = 0
+    warnSpy.mockClear()
+    __clearPropModelCacheForTests()
+  })
+
+  it('serves an identical repeat batch from cache without re-running the CLI', async () => {
+    const first = await POST(post({ targets }))
+    expect(first.status).toBe(200)
+    expect(cliArgs).toHaveLength(1)
+
+    const second = await POST(post({ targets }))
+    expect(second.status).toBe(200)
+    expect(cliArgs).toHaveLength(1)
+    const json = await second.json()
+    expect(json.cached).toBe(true)
+    expect(json.source).toBe('prop-model')
+  })
+
+  it('does not confuse batches that differ only by ignored weightsJson', async () => {
+    // weightsJson is server-ignored, so it must not bust the cache either —
+    // both requests describe the same effective run.
+    await POST(post({ targets }))
+    const res = await POST(post({ targets, weightsJson: '/etc/passwd' }))
+    expect(res.status).toBe(200)
+    expect(cliArgs).toHaveLength(1)
   })
 })

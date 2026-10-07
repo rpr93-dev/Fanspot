@@ -74,7 +74,9 @@ export interface RawEspnPlayer {
       auctionValue: number
       rankType: string
     }>>
-    stats: Array<{
+    // Optional: ESPN omits it entirely on some rows (offseason / D/ST /
+    // new-season shape). Always read via `?? []`.
+    stats?: Array<{
       statSourceId: number
       statSplitTypeId: number
       seasonId: number
@@ -249,19 +251,24 @@ function processEspnPlayers(
       )
     }
 
-    const seasonProjection = raw.player.stats
+    // ESPN occasionally returns players with no `stats` array at all (offseason
+    // rows, D/ST entries, new-season shape changes). One such row used to throw
+    // inside this loop and fail the entire unified-DB build — which emptied
+    // /api/props projections and 500'd team-outlook, gating the Prop Model off.
+    const allStats = raw.player.stats ?? []
+    const seasonProjection = allStats
       .filter((s) => s.statSourceId === 1 && s.statSplitTypeId === 0)
       .sort((a, b) => b.seasonId - a.seasonId)[0]
 
     let projection: PlayerProjection | undefined
     if (seasonProjection) {
       projection = {
-        points: seasonProjection.appliedTotal,
-        stats: seasonProjection.stats,
+        points: seasonProjection.appliedTotal ?? 0,
+        stats: seasonProjection.stats ?? {},
         source: 'espn',
       }
     } else {
-      const weeklyProjections = raw.player.stats
+      const weeklyProjections = allStats
         .filter((s) => s.statSourceId === 1 && s.statSplitTypeId === 1)
       const latestSeason = weeklyProjections.reduce((max, s) => Math.max(max, s.seasonId), 0)
       if (latestSeason > 0) {
@@ -340,7 +347,7 @@ function extractSeasonActuals(
   raw: RawEspnPlayer,
   season: number,
 ): { points: number; stats: Record<string, number>; seasonId: number } | undefined {
-  const lastCompleted = raw.player.stats
+  const lastCompleted = (raw.player.stats ?? [])
     .filter((s) => s.statSourceId === 0 && s.statSplitTypeId === 0 && s.seasonId < season)
     .sort((a, b) => b.seasonId - a.seasonId)[0]
 

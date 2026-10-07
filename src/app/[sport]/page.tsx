@@ -14,6 +14,7 @@ import { fetchCurrentNflWeek } from '@/lib/scheduleWeek'
 import { normalizeSportKey } from '@/lib/models'
 import { sportTheme } from '@/lib/sportTheme'
 import { F1Hub } from '@/components/f1/F1Hub'
+import { RedzoneBanner } from '@/components/streams/RedzoneBoard'
 
 export async function generateMetadata({ params }: { params: Promise<{ sport: string }> }): Promise<Metadata> {
   const { sport } = await params
@@ -117,6 +118,9 @@ export default async function SportPage({
         <Link href="/" className="fs-meta hover:text-fs-text inline-block mb-6 transition-colors">&larr; All Leagues</Link>
 
         <SportHero sport={sportKey} jumps={jumps} />
+
+        {/* RedZone appears automatically while Sunday games are live. */}
+        {sportKey === 'NFL' && <RedzoneBanner className="mb-9" />}
 
         <div className="space-y-14">
           <section id="schedule" aria-label="Schedule" className="scroll-mt-20">

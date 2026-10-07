@@ -87,8 +87,8 @@ export default function HomePage() {
             <section aria-label="Fantasy">
               <SectionHeader eyebrow="Fantasy" title="Draft Prep" />
               <div className="fs-panel p-4 sm:p-5 flex flex-col gap-3">
-                <p className="fs-meta leading-relaxed">Steals · Mock draft · Auction — NFL live</p>
-                <Link href="/fantasy/nfl" className="fs-btn shrink-0 self-start">
+                <p className="fs-meta leading-relaxed">Steals · Mock draft · Auction — NFL & NBA live</p>
+                <Link href="/fantasy" className="fs-btn shrink-0 self-start">
                   Open Fantasy →
                 </Link>
               </div>

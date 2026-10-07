@@ -7,7 +7,7 @@ import { GameCard, type GameCardPhase } from './GameCard'
  * every league (except F1) renders the same standard card. Links to the Game
  * Center; live games get a subtle red ring via the card.
  */
-export function ScoreCard({ game, className = 'w-56 sm:w-64 shrink-0 snap-start' }: { game: NormalizedGame; className?: string }) {
+export function ScoreCard({ game, className = 'w-52 sm:w-56 shrink-0' }: { game: NormalizedGame; className?: string }) {
   const href = `/${SPORT_SLUGS[game.sport]}/game/${game.id}`
   const isLive = game.status.phase === 'live'
   const liveLabel = game.status.periodLabel && game.status.clock

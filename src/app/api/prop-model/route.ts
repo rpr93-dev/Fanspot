@@ -48,6 +48,75 @@ const WARMING_MESSAGES: Record<string, string> = {
   nba: 'The prop model is warming up — its first run downloads NBA box scores. Try again in a minute.',
 }
 
+/**
+ * In-memory result cache: every game-hub view (both teams' panels, re-renders,
+ * live polls re-running the same batch) posts the same targets, so share one
+ * Python run per distinct batch instead of spawning a process per view.
+ * Successes only — errors/warm-ups are never cached. Per server process.
+ */
+const RESULT_TTL_MS = 10 * 60 * 1000
+const MAX_RESULT_ENTRIES = 100
+interface ModelResultEntry {
+  at: number
+  projections: unknown[]
+}
+const resultCache = new Map<string, ModelResultEntry>()
+/** Single-flight: concurrent identical POSTs share one in-progress CLI run. */
+const resultInFlight = new Map<string, Promise<{ projections: unknown[] }>>()
+
+/** Test hook — the route test suite clears this between cases. */
+export function __clearPropModelCacheForTests(): void {
+  resultCache.clear()
+  resultInFlight.clear()
+}
+
+function resultCacheKey(parts: unknown): string {
+  return JSON.stringify(parts)
+}
+
+function getFreshResult(key: string): ModelResultEntry | null {
+  const hit = resultCache.get(key)
+  if (!hit) return null
+  if (Date.now() - hit.at >= RESULT_TTL_MS) {
+    resultCache.delete(key)
+    return null
+  }
+  // LRU bump so a hot game isn't evicted by one-off batches.
+  resultCache.delete(key)
+  resultCache.set(key, hit)
+  return hit
+}
+
+function setResult(key: string, projections: unknown[]): void {
+  resultCache.delete(key)
+  resultCache.set(key, { at: Date.now(), projections })
+  while (resultCache.size > MAX_RESULT_ENTRIES) {
+    const oldest = resultCache.keys().next()
+    if (oldest.done) break
+    resultCache.delete(oldest.value)
+  }
+}
+
+/** Normalize the effective CLI inputs so equivalent batches share a cache entry. */
+function normalizeTargets(targets: any[]): { player: string; stat: string; team: string; opponent: string; prior?: number }[] {
+  return targets
+    .map((t) => ({
+      player: String(t?.player ?? ''),
+      stat: String(t?.stat ?? ''),
+      team: String(t?.team ?? '').toUpperCase(),
+      opponent: String(t?.opponent ?? '').toUpperCase(),
+      ...(t?.prior != null && Number.isFinite(Number(t.prior)) ? { prior: Number(t.prior) } : {}),
+    }))
+    .sort((a, b) => `${a.player}|${a.stat}|${a.team}`.localeCompare(`${b.player}|${b.stat}|${b.team}`))
+}
+
+function normalizeLines(lines: unknown): Record<string, unknown> | null {
+  if (!lines || typeof lines !== 'object' || Array.isArray(lines)) return null
+  const entries = Object.entries(lines as Record<string, unknown>)
+  if (!entries.length) return null
+  return Object.fromEntries(entries.sort(([a], [b]) => a.localeCompare(b)))
+}
+
 export async function POST(request: Request) {
   const limited = checkRateLimit(request, 'prop-model')
   if (limited) return limited
@@ -84,46 +153,70 @@ export async function POST(request: Request) {
     )
   }
 
-  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'propmodel-'))
-  const batchPath = path.join(tmp, 'batch.json')
-  const outPath = path.join(tmp, 'out.json')
-  try {
-    await fs.writeFile(batchPath, JSON.stringify(targets))
-    const dataSource = body?.dataSource === 'espn' || body?.dataSource === 'nflverse'
-      ? body.dataSource as string
-      : await preferredDataSource()
-    if (body?.weightsJson !== undefined) {
-      // Security: never let a client path the model's --weights-json flag —
-      // the CLI reads whatever file it points at. Always use server-owned
-      // tuned weights; a supplied value is ignored (logged once, audit trail).
-      console.warn('[prop-model] ignoring client-supplied weightsJson; using server tuned weights')
+  // Resolve every effective CLI input up front: the cache key must capture
+  // exactly what changes the output (and nothing the server ignores).
+  const dataSource = body?.dataSource === 'espn' || body?.dataSource === 'nflverse'
+    ? body.dataSource as string
+    : await preferredDataSource()
+  if (body?.weightsJson !== undefined) {
+    // Security: never let a client path the model's --weights-json flag —
+    // the CLI reads whatever file it points at. Always use server-owned
+    // tuned weights; a supplied value is ignored (logged once, audit trail).
+    console.warn('[prop-model] ignoring client-supplied weightsJson; using server tuned weights')
+  }
+  const weightsPath = await tunedWeightsPath()
+  const normLines = normalizeLines(body?.lines)
+  const preseason = !!body?.preseason
+  const cacheKey = resultCacheKey({
+    targets: normalizeTargets(targets),
+    sport, asOf, dataSource, weightsPath, lines: normLines, preseason,
+  })
+
+  const cached = getFreshResult(cacheKey)
+  if (cached) {
+    return NextResponse.json({ projections: cached.projections, source: 'prop-model', cached: true })
+  }
+  const inflight = resultInFlight.get(cacheKey)
+  if (inflight) {
+    try {
+      const { projections } = await inflight
+      return NextResponse.json({ projections, source: 'prop-model', cached: true })
+    } catch {
+      // The owner maps the failure to a response below; fall through and join
+      // a fresh attempt rather than duplicating the error mapping here.
     }
-    const weightsPath = await tunedWeightsPath()
-    const args = [
-      '-m', 'propmodel.cli',
-      '--input', batchPath,
-      '--output', outPath,
-      '--cache-dir', CACHE_DIR,
-    ]
-    if (sport === 'nba') {
-      // The NBA runner reads ESPN box scores under cache/nba and ignores NFL
-      // flags (--data-source, --weights-json take NFL ModelWeights).
-      args.push('--sport', 'nba')
-    } else {
-      args.push('--data-source', dataSource)
-      if (weightsPath) args.push('--weights-json', weightsPath)
-    }
-    if (asOf) args.push('--as-of', asOf)
-    if (body?.preseason) args.push('--preseason')
-    const lines = body?.lines
-    if (lines && typeof lines === 'object' && Object.keys(lines).length > 0) {
-      const linesPath = path.join(tmp, 'lines.json')
-      await fs.writeFile(linesPath, JSON.stringify(lines))
-      args.push('--lines-json', linesPath)
-    }
-    await runModelCli(args)
-    const out = JSON.parse(await fs.readFile(outPath, 'utf-8'))
-    const projections = (Array.isArray(out) ? out : []).map((r: any) => ({
+  }
+
+  const runOnce = async (): Promise<{ projections: any[] }> => {
+    const tmp = await fs.mkdtemp(path.join(os.tmpdir(), 'propmodel-'))
+    const batchPath = path.join(tmp, 'batch.json')
+    const outPath = path.join(tmp, 'out.json')
+    try {
+      await fs.writeFile(batchPath, JSON.stringify(targets))
+      const args = [
+        '-m', 'propmodel.cli',
+        '--input', batchPath,
+        '--output', outPath,
+        '--cache-dir', CACHE_DIR,
+      ]
+      if (sport === 'nba') {
+        // The NBA runner reads ESPN box scores under cache/nba and ignores NFL
+        // flags (--data-source, --weights-json take NFL ModelWeights).
+        args.push('--sport', 'nba')
+      } else {
+        args.push('--data-source', dataSource)
+        if (weightsPath) args.push('--weights-json', weightsPath)
+      }
+      if (asOf) args.push('--as-of', asOf)
+      if (preseason) args.push('--preseason')
+      if (normLines) {
+        const linesPath = path.join(tmp, 'lines.json')
+        await fs.writeFile(linesPath, JSON.stringify(normLines))
+        args.push('--lines-json', linesPath)
+      }
+      await runModelCli(args)
+      const out = JSON.parse(await fs.readFile(outPath, 'utf-8'))
+      const projections = (Array.isArray(out) ? out : []).map((r: any) => ({
       player: r.player,
       stat: r.stat,
       stat_label: STAT_LABELS[r.stat]?.label ?? r.stat,
@@ -158,6 +251,17 @@ export async function POST(request: Request) {
       reliability: r.reliability ?? 0,
       pred_sd: r.pred_sd ?? null,
     }))
+    return { projections }
+    } finally {
+      fs.rm(tmp, { recursive: true, force: true }).catch(() => {})
+    }
+  }
+
+  const owned = runOnce()
+  resultInFlight.set(cacheKey, owned)
+  try {
+    const { projections } = await owned
+    setResult(cacheKey, projections)
     return NextResponse.json({ projections, source: 'prop-model' })
   } catch (err: any) {
     const detail = (err?.stderr || err?.message || String(err)).toString()
@@ -175,6 +279,6 @@ export async function POST(request: Request) {
       { status: 500 },
     )
   } finally {
-    fs.rm(tmp, { recursive: true, force: true }).catch(() => {})
+    resultInFlight.delete(cacheKey)
   }
 }

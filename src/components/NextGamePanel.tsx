@@ -403,7 +403,11 @@ export default function NextGamePanel({
     setModelRunDate(new Date().toISOString().slice(5, 16))
     const targets = buildTargets()
     if (!targets.length) {
-      setModelError('No skill players available to project')
+      setModelError(
+        effectiveLineup.length === 0
+          ? 'No starters loaded yet — the lineup feed may have failed; wait a moment and hit Run model again.'
+          : 'No skill players available to project',
+      )
       setModelLoading(false)
       return
     }
@@ -691,29 +695,38 @@ export default function NextGamePanel({
     recordPreSnapshotAny()
   }, [isNfl, phase, ledgerChecked, props, ledger, scraperLoading, eventDate])
 
-  // Auto-run once per game: hydrate from the saved snapshot when present,
-  // otherwise run the model once now (it only ever reads pre-game data).
+  // Auto-run once per game, split in two so each step fires ASAP:
+  // 1. Hydrate instantly from a saved pre-game snapshot — needs nothing else
+  //    (previously this waited on props projections + both starters, so a slow
+  //    or failed /api/props kept a saved snapshot off screen indefinitely).
   useEffect(() => {
     if (!isModelSport) return
     if (autoRanRef.current || modelResults || modelLoading || !ledgerChecked) return
-    const hydrateOnly = phase === 'final' && !!ledger?.pre?.rows?.length
-    if (!hydrateOnly && !ourProjected.length && !oppProjected.length) return
-    if (!hydrateOnly && (!ourStarters || !oppStarters)) return
-    if (ledger?.pre?.rows?.length) {
-      autoRanRef.current = true
-      setModelResults(ledger.pre.rows)
-      try {
-        setModelRunDate(new Date(ledger.pre.recordedAt).toISOString().slice(5, 16))
-      } catch { setModelRunDate(null) }
-      if (ledger.pre.meta?.dataThrough) setPrevModelDataThrough(ledger.pre.meta.dataThrough)
-      return
-    }
+    if (!ledger?.pre?.rows?.length) return
+    autoRanRef.current = true
+    setModelResults(ledger.pre.rows)
+    try {
+      setModelRunDate(new Date(ledger.pre.recordedAt).toISOString().slice(5, 16))
+    } catch { setModelRunDate(null) }
+    if (ledger.pre.meta?.dataThrough) setPrevModelDataThrough(ledger.pre.meta.dataThrough)
+  }, [isModelSport, ledgerChecked, ledger, modelResults, modelLoading])
+
+  // 2. Fresh run as soon as the lineup is known and /api/props has settled.
+  //    ESPN priors are optional (espnLineFor returns null when absent), so an
+  //    empty or failed props response must not block the run forever — only
+  //    wait for it to answer, not for it to be non-empty.
+  useEffect(() => {
+    if (!isModelSport) return
+    if (autoRanRef.current || modelResults || modelLoading || !ledgerChecked) return
+    if (ledger?.pre?.rows?.length) return // hydrate effect owns this case
     // After the final whistle a fresh run would be graded against a result it
     // was never blind to — only a snapshot locked before/during the game counts.
     if (phase === 'final') return
+    if (props === null) return
+    if (effectiveLineup.length === 0) return
     autoRanRef.current = true
     void runModel()
-  }, [sport, phase, ledgerChecked, ledger, modelResults, modelLoading, ourProjected, oppProjected, ourStarters, oppStarters])
+  }, [isModelSport, phase, ledgerChecked, ledger, modelResults, modelLoading, props, effectiveLineup])
 
   // ---- Live comparison: frozen snapshot vs ESPN box score (every sport) ----
   const liveStats = useMemo(() => {
@@ -1370,8 +1383,11 @@ export default function NextGamePanel({
         </p>
       )}
 
-      {/* Prop Model projections (Python pipeline) */}
-      {isModelSport && !noSnapshot && (ourProjected.length > 0 || oppProjected.length > 0 || (phase !== 'pre' && (modelResults?.length ?? 0) > 0)) && (
+      {/* Prop Model projections (Python pipeline). Renders as soon as the lineup
+          is known (or a run is in flight / done) — previously it required
+          non-empty ESPN projections, so a slow/failed /api/props hid the whole
+          section including the manual Run button. */}
+      {isModelSport && !noSnapshot && (ourProjected.length > 0 || oppProjected.length > 0 || effectiveLineup.length > 0 || modelLoading || (modelResults?.length ?? 0) > 0 || modelError != null || fantasyError != null) && (
         <div className="mt-4">
           <div className="flex items-center justify-between mb-2">
             <p className="fs-eyebrow" style={{ '--tint': teamColor } as React.CSSProperties}>Prop Model</p>

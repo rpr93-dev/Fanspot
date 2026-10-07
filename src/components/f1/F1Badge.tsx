@@ -12,11 +12,11 @@ export function constructorByAbbr(abbr: string | null | undefined): Team | undef
 
 /**
  * Constructor logo: the official 2026 white lockup served locally (F1 teams
- * have no ESPN logo CDN). Marks are transparent, trimmed, and vary in shape,
- * so they render height-matched with auto width — never squeezed into a
- * square. Every current mark is drawn white-on-transparent and sits bare on
- * the dark card with a soft drop shadow (the `logoOnLight` white-plate branch
- * stays for any legacy dark-on-transparent asset).
+ * have no ESPN logo CDN). Marks vary wildly in shape (Aston's wide wings vs
+ * Ferrari's portrait shield), so sm/md render inside a FIXED box with
+ * object-contain — the mark letterboxes instead of stretching to fill the
+ * slot. Never use height-only + max-width clamping here: clamping the width
+ * while the height stays fixed distorts the aspect ratio.
  */
 export function F1Badge({
   abbr,
@@ -33,18 +33,20 @@ export function F1Badge({
   const p = primary ?? record?.colors.primary ?? '#E10600'
   const s = secondary ?? record?.colors.secondary ?? '#000000'
   if (record?.logo) {
-    const dims =
+    // sm/md live in fixed standings/grid slots — definite box, no distortion.
+    const box =
       size === 'sm'
-        ? 'h-6 max-w-[96px]'
-        : size === 'lg'
-          ? 'h-11 max-w-[180px]'
-          : size === 'xl'
-            ? 'h-14 max-w-[236px]'
-            : 'h-8 max-w-[128px]'
+        ? 'h-6 w-24'
+        : size === 'md'
+          ? 'h-8 w-32'
+          : size === 'lg'
+            ? 'h-11 max-w-[180px]'
+            : 'h-14 max-w-[236px]'
+    const fixed = size === 'sm' || size === 'md'
     if (record.logoOnLight) {
       return (
         <span
-          className={`shrink-0 inline-flex items-center justify-center bg-white rounded-lg px-2 py-1 ${dims}`}
+          className={`shrink-0 inline-flex items-center justify-center bg-white rounded-lg px-2 py-1 ${box}`}
           style={{ boxShadow: `0 0 14px ${p}55` }}
           title={record.name}
         >
@@ -53,19 +55,19 @@ export function F1Badge({
             alt={`${record.name} logo`}
             loading="lazy"
             draggable={false}
-            className="h-full w-auto max-w-full object-contain select-none"
+            className="h-full w-full object-contain select-none"
           />
         </span>
       )
     }
     return (
-      <span className="shrink-0 inline-flex items-center" title={record.name}>
+      <span className={`shrink-0 inline-flex items-center ${fixed ? box : ''}`} title={record.name}>
         <img
           src={record.logo}
           alt={`${record.name} logo`}
           loading="lazy"
           draggable={false}
-          className={`${dims} w-auto object-contain select-none`}
+          className={fixed ? 'h-full w-full object-contain object-left select-none' : `${box} w-auto object-contain select-none`}
           style={{ filter: 'drop-shadow(0 2px 8px rgba(0,0,0,0.65))' }}
         />
       </span>

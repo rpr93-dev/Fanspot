@@ -14,6 +14,7 @@ import { sportTheme } from '@/lib/sportTheme'
 import { useFavorites } from '@/hooks/useFavorites'
 import { useLivePoll } from '@/hooks/useLivePoll'
 import { ScoreCard } from './scoreboard/ScoreCard'
+import { HorizontalRail } from './HorizontalRail'
 import { EmptyState, ErrorState } from './feedback'
 
 const LEAGUE_ORDER: SportKey[] = ['NFL', 'NBA', 'NHL', 'MLB']
@@ -170,8 +171,8 @@ export function GlobalScoreboard({
 
       {loading && !data ? (
         <div className="flex gap-3 overflow-hidden" aria-hidden="true">
-          {Array.from({ length: 4 }, (_, i) => (
-            <div key={i} className="fs-skeleton h-36 w-56 sm:w-64 shrink-0" />
+          {Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className="fs-skeleton h-28 w-52 sm:w-56 shrink-0" />
           ))}
         </div>
       ) : error && !data ? (
@@ -187,11 +188,11 @@ export function GlobalScoreboard({
             const theme = sportTheme(sport)
             return (
               <div key={sport}>
-                <div className="flex items-center gap-2.5 mb-2.5">
+                <div className="flex items-center gap-2.5 mb-2">
                   <span className="w-1 h-4 rounded-full shrink-0" style={{ background: theme.accent }} />
                   <span className="fs-title text-base">{sport}</span>
                   <span className="fs-meta opacity-70">
-                    {games.length} game{games.length === 1 ? '' : 's'}
+                    · {games.length} game{games.length === 1 ? '' : 's'}
                   </span>
                   {live > 0 && (
                     <span className="inline-flex items-center gap-1 text-[11px] font-bold text-fs-red">
@@ -200,21 +201,27 @@ export function GlobalScoreboard({
                     </span>
                   )}
                 </div>
-                <div
-                  className={
-                    layout === 'grid'
-                      ? 'grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4'
-                      : 'flex gap-3 overflow-x-auto pb-2 snap-x'
-                  }
-                  role="list"
-                  aria-label={`${sport} games for ${dayLabel(dateKey)}`}
-                >
-                  {games.map((g) => (
-                    <div key={g.id} role="listitem" className={layout === 'grid' ? undefined : 'snap-start'}>
-                      <ScoreCard game={g} className={layout === 'grid' ? '' : undefined} />
-                    </div>
-                  ))}
-                </div>
+                {layout === 'grid' ? (
+                  <div
+                    className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4"
+                    role="list"
+                    aria-label={`${sport} games for ${dayLabel(dateKey)}`}
+                  >
+                    {games.map((g) => (
+                      <div key={g.id} role="listitem">
+                        <ScoreCard game={g} className="" />
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <HorizontalRail ariaLabel={`${sport} games for ${dayLabel(dateKey)}`}>
+                    {games.map((g) => (
+                      <div key={g.id} role="listitem">
+                        <ScoreCard game={g} />
+                      </div>
+                    ))}
+                  </HorizontalRail>
+                )}
               </div>
             )
           })}

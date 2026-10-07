@@ -2,20 +2,18 @@ import Link from 'next/link'
 import { SectionHeader } from '@/components/feedback'
 import { hasFantasyDraftRoom, isFantasySportLive } from '@/lib/providers/fantasy-constants'
 import { sportTheme } from '@/lib/sportTheme'
+import { boardConfigFor } from './[sport]/board-config'
 
-interface SportCard {
-  slug: string
-  name: string
-  scoring: string
-  ranking: string
+const SPORT_ORDER = ['nfl', 'nba', 'nhl', 'mlb'] as const
+
+const SPORT_NAMES: Record<string, string> = { nfl: 'NFL', nba: 'NBA', nhl: 'NHL', mlb: 'MLB' }
+
+const SPORT_BLURBS: Record<string, string> = {
+  nfl: 'Steals board, auction values, and mock drafts against live ADP.',
+  nba: 'League-wide value board under points or 9-category scoring.',
+  nhl: 'Projections are not wired yet — the board stays closed until the data is real.',
+  mlb: 'Projections are not wired yet — the board stays closed until the data is real.',
 }
-
-const SPORTS: SportCard[] = [
-  { slug: 'nfl', name: 'NFL', scoring: 'PPR · Half-PPR · Standard', ranking: 'Ranked within position (QB/RB/WR/TE/K/D/ST)' },
-  { slug: 'nba', name: 'NBA', scoring: 'Points · 9-cat categories', ranking: 'Ranked league-wide, filtered by PG/SG/SF/PF/C eligibility' },
-  { slug: 'mlb', name: 'MLB', scoring: '—', ranking: 'Projections not wired yet' },
-  { slug: 'nhl', name: 'NHL', scoring: '—', ranking: 'Projections not wired yet' },
-]
 
 function Tool({ href, label, soon }: { href?: string; label: string; soon?: boolean }) {
   if (soon || !href) {
@@ -32,6 +30,14 @@ function Tool({ href, label, soon }: { href?: string; label: string; soon?: bool
   )
 }
 
+function Check({ on, label }: { on: boolean; label: string }) {
+  return (
+    <span className={on ? 'text-fs-text' : 'text-fs-muted-2'}>
+      {on ? '✓' : '○'} {label}
+    </span>
+  )
+}
+
 export default function FantasyPage() {
   return (
     <div className="min-h-screen fs-page">
@@ -39,42 +45,77 @@ export default function FantasyPage() {
         <SectionHeader
           as="h1"
           eyebrow="Draft prep"
-          title="Fantasy Steals"
-          description="Find value picks across your drafts: where each player is projected to finish against where the market drafts them."
+          title="Fantasy"
+          description="Pick a sport for the full draft room — steals, auction values, and mocks. NFL and NBA are live; the rest open as soon as their projections are real."
         />
 
         <div className="grid gap-6 lg:grid-cols-12">
           <section className="lg:col-span-7" aria-label="Sports">
             <div className="grid gap-4 sm:grid-cols-2">
-              {SPORTS.map((s) => {
-                const live = isFantasySportLive(s.slug)
-                const theme = sportTheme(s.name)
-                const room = hasFantasyDraftRoom(s.slug)
+              {SPORT_ORDER.map((slug) => {
+                const live = isFantasySportLive(slug)
+                const theme = sportTheme(SPORT_NAMES[slug])
+                const room = hasFantasyDraftRoom(slug)
+                const cfg = live ? boardConfigFor(slug) : null
+                const scoring = cfg ? cfg.scoring.map((s) => s.label).join(' · ') : '—'
+                const ranks = cfg
+                  ? cfg.overall
+                    ? `Ranked league-wide, filtered by ${cfg.positions.filter((p) => p !== 'ALL').join('/')}`
+                    : `Ranked within position (${cfg.positions.filter((p) => p !== 'ALL').join('/')})`
+                  : 'Projections not wired yet'
                 return (
                   <div
-                    key={s.slug}
+                    key={slug}
                     className={`fs-panel relative p-5 ${live ? 'hover:border-white/30 transition-colors' : 'opacity-60'}`}
                     style={{ borderTop: `3px solid ${theme.accent}` }}
                   >
-                    <div className="flex items-baseline justify-between gap-3">
+                    <div className="flex items-center justify-between gap-3">
                       <h2 className="text-2xl font-bold">
                         {live ? (
-                          <Link href={`/fantasy/${s.slug}`} className="after:absolute after:inset-0">
-                            {s.name}
+                          <Link href={`/fantasy/${slug}`} className="after:absolute after:inset-0">
+                            {SPORT_NAMES[slug]}
                           </Link>
                         ) : (
-                          s.name
+                          SPORT_NAMES[slug]
                         )}
                       </h2>
-                      <span className="fs-meta">{live ? 'Live' : 'Coming soon'}</span>
+                      <span
+                        className={`fs-meta inline-flex items-center gap-1.5 ${live ? '!text-fs-turf' : ''}`}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className="w-1.5 h-1.5 rounded-full"
+                          style={{ backgroundColor: live ? 'var(--color-fs-turf)' : 'var(--color-fs-muted-2)' }}
+                        />
+                        {live ? 'Live' : 'Coming soon'}
+                      </span>
                     </div>
-                    <p className="fs-meta mt-2">{s.ranking}</p>
-                    <p className="fs-meta mt-1">Scoring: {s.scoring}</p>
+                    <p className="text-sm text-fs-muted mt-2 leading-relaxed">{SPORT_BLURBS[slug]}</p>
+                    <dl className="fs-meta mt-3 space-y-1.5">
+                      <div className="flex gap-2">
+                        <dt className="shrink-0 w-14">Scoring</dt>
+                        <dd className="min-w-0 normal-case tracking-normal">{scoring}</dd>
+                      </div>
+                      <div className="flex gap-2">
+                        <dt className="shrink-0 w-14">Ranks</dt>
+                        <dd className="min-w-0 normal-case tracking-normal">{ranks}</dd>
+                      </div>
+                      {live && (
+                        <div className="flex gap-2">
+                          <dt className="shrink-0 w-14">Tools</dt>
+                          <dd className="min-w-0 normal-case tracking-normal space-x-2">
+                            <Check on label="Steals" />
+                            <Check on label="Auction" />
+                            <Check on={room} label={room ? 'Mock' : 'Mock soon'} />
+                          </dd>
+                        </div>
+                      )}
+                    </dl>
                     {live && (
-                      <div className="mt-4 flex flex-wrap gap-2">
-                        <Tool href={`/fantasy/${s.slug}`} label="Steals board" />
-                        <Tool href={`/fantasy/${s.slug}?mode=auction`} label="Auction values" />
-                        <Tool href={`/fantasy/${s.slug}?mode=mock`} label="Mock draft" soon={!room} />
+                      <div className="mt-4 flex flex-wrap items-center gap-2">
+                        <Tool href={`/fantasy/${slug}`} label="Open full board →" />
+                        <Tool href={`/fantasy/${slug}?mode=auction`} label="Auction" />
+                        <Tool href={`/fantasy/${slug}?mode=mock`} label="Mock draft" soon={!room} />
                       </div>
                     )}
                   </div>

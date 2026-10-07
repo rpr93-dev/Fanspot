@@ -6,8 +6,10 @@ const GRAPH_HTML = path.join(process.cwd(), 'graphify-out', 'graph.html')
 
 /** GET /api/graph-html — serves the generated graphify visualization. */
 export async function GET() {
-  // Internal architecture visualization — not a production surface.
-  if (process.env.NODE_ENV === 'production') {
+  // Internal architecture visualization. Served in every environment so the
+  // /graph tab works on production builds too; set FANSPOT_DISABLE_GRAPH=1
+  // to hide it again.
+  if (process.env.FANSPOT_DISABLE_GRAPH === '1') {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
   try {

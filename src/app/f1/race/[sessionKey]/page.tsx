@@ -19,7 +19,7 @@ export default async function F1RacePage({ params }: { params: Promise<{ session
   const config = sportConfig.F1
   return (
     <div className="min-h-screen fs-page" style={{ '--glow': `${config.color}22` } as React.CSSProperties}>
-      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10 max-w-6xl">
+      <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10">
         <RaceView sessionKey={sessionKey} teamColor={config.color} />
       </div>
     </div>

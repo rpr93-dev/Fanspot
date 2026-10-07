@@ -13,10 +13,12 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ sport: string; team: string }> },
 ): Promise<NextResponse> {
+  let lowerSport = '?'
+  let teamAbbr = '?'
   try {
     const { sport, team } = await params
-    const lowerSport = sport.toLowerCase() as FantasySport
-    const teamAbbr = team.toUpperCase()
+    lowerSport = sport.toLowerCase()
+    teamAbbr = team.toUpperCase()
 
     if (!(SUPPORTED_SPORTS as readonly string[]).includes(lowerSport)) {
       return NextResponse.json({ error: `invalid-sport: ${sport}` }, { status: 400 })
@@ -85,6 +87,13 @@ export async function GET(
       { headers: { 'Cache-Control': 'public, s-maxage=300, stale-while-revalidate=900' } },
     )
   } catch (err) {
+    // Log the cause server-side: a swallowed error here once hid an ESPN shape
+    // change that silently gated the entire Prop Model off (empty projections →
+    // auto-run never fired). The client still gets the safe generic shape.
+    console.error(
+      `[team-outlook] ${lowerSport}/${teamAbbr} failed:`,
+      err instanceof Error ? (err.stack ?? err.message) : String(err),
+    )
     return NextResponse.json(
       { error: 'team-outlook-failed', message: 'Unable to load team outlook' },
       { status: 500 },

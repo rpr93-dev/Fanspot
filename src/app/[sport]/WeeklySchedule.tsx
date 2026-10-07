@@ -93,7 +93,7 @@ export default function WeeklySchedule({
           </h2>
         </div>
 
-        <div className="flex items-center gap-2 overflow-x-auto pb-2 md:pb-0">
+        <div className="flex items-center gap-2 fs-scroll-x">
           {Array.from({ length: 18 }, (_, i) => i + 1).map((w) => (
             <Link
               key={w}

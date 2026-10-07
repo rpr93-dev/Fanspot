@@ -15,8 +15,10 @@ async function fileMeta(name: string) {
 
 /** GET /api/graph-meta — freshness info so /graph knows when to reload. */
 export async function GET() {
-  // Internal architecture visualization — not a production surface.
-  if (process.env.NODE_ENV === 'production') {
+  // Internal architecture visualization. Served in every environment so the
+  // /graph tab works on production builds too; set FANSPOT_DISABLE_GRAPH=1
+  // to hide it again.
+  if (process.env.FANSPOT_DISABLE_GRAPH === '1') {
     return NextResponse.json({ error: 'Not found' }, { status: 404 })
   }
   const [html, json] = await Promise.all([fileMeta('graph.html'), fileMeta('graph.json')])

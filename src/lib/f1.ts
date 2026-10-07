@@ -32,9 +32,34 @@ export interface F1CarState {
   y: number | null
   laps: number
   lastLapSecs: number | null
+  bestLapSecs: number | null
+  /** Normalized tyre compound: SOFT | MEDIUM | HARD | INTERMEDIATE | WET. */
+  tyre: string | null
+  /** Whether the current set is new (vs scrubbed). */
+  tyreNew: boolean | null
+  /** Laps on the current set, when the feed reports it. */
+  tyreLaps: number | null
+  /** Stint number for the current set. */
+  stint: number | null
   inPit: boolean
   dnf: boolean
   updatedAt: string | null
+}
+
+/**
+ * Normalize a raw tyre compound ("SOFT", "S", "supersoft") into one of the
+ * five the UI keys colours off, else null. Unknowns are passed through upper.
+ */
+export function tyreCompound(v: unknown): string | null {
+  if (v == null) return null
+  const s = String(v).trim().toUpperCase()
+  if (!s) return null
+  if (s.startsWith('SOFT') || s === 'S' || s.includes('SUPERSOFT') || s.includes('ULTRASOFT')) return 'SOFT'
+  if (s.startsWith('MED') || s === 'M') return 'MEDIUM'
+  if (s.startsWith('HARD') || s === 'H') return 'HARD'
+  if (s.startsWith('INTER') || s === 'I') return 'INTERMEDIATE'
+  if (s.startsWith('WET') || s === 'W' || s === 'FULL WET') return 'WET'
+  return s
 }
 
 export interface F1LiveSnapshot {
@@ -122,6 +147,7 @@ export function mergeLiveState(input: {
   laps: any[]
   pitNow?: Set<number> | number[]
   dnf?: Set<number> | number[]
+  stints?: any[]
   at?: string
 }): F1CarState[] {
   const posMap = latestBy(input.positions, () => 0)
@@ -130,15 +156,28 @@ export function mergeLiveState(input: {
   const pit = input.pitNow instanceof Set ? input.pitNow : new Set(input.pitNow ?? [])
   const dnf = input.dnf instanceof Set ? input.dnf : new Set(input.dnf ?? [])
 
-  const lapsByDriver = new Map<number, { count: number; last: number | null }>()
+  const lapsByDriver = new Map<number, { count: number; last: number | null; best: number | null }>()
   for (const l of input.laps ?? []) {
     const n = l?.driver_number
     if (typeof n !== 'number') continue
-    const e = lapsByDriver.get(n) ?? { count: 0, last: null }
+    const e = lapsByDriver.get(n) ?? { count: 0, last: null, best: null }
     e.count += 1
     const dur = typeof l?.lap_duration === 'number' ? l.lap_duration : null
-    if (dur != null) e.last = dur
+    if (dur != null) {
+      e.last = dur
+      if (e.best == null || dur < e.best) e.best = dur
+    }
     lapsByDriver.set(n, e)
+  }
+
+  // Latest stint per driver (OpenF1: one row per stint with its compound).
+  const stintsByDriver = new Map<number, any>()
+  for (const s of input.stints ?? []) {
+    const n = s?.driver_number
+    if (typeof n !== 'number') continue
+    const prev = stintsByDriver.get(n)
+    const rank = (x: any) => Number(x?.stint_number ?? x?.lap_start ?? 0)
+    if (!prev || rank(s) >= rank(prev)) stintsByDriver.set(n, s)
   }
 
   const cars: F1CarState[] = []
@@ -158,6 +197,11 @@ export function mergeLiveState(input: {
       y: typeof loc?.y === 'number' ? loc.y : null,
       laps: laps?.count ?? 0,
       lastLapSecs: laps?.last ?? null,
+      bestLapSecs: laps?.best ?? null,
+      tyre: tyreCompound(stintsByDriver.get(n)?.compound),
+      tyreNew: null,
+      tyreLaps: null,
+      stint: stintsByDriver.get(n)?.stint_number != null ? Number(stintsByDriver.get(n)!.stint_number) : null,
       inPit: pit.has(n),
       dnf: dnf.has(n),
       updatedAt: loc?.date ?? pos?.date ?? iv?.date ?? input.at ?? null,
@@ -229,4 +273,111 @@ export function sessionState(dateStart: string | null, dateEnd: string | null, n
   if (nowMs < start - 10 * 60_000) return 'upcoming'
   if (Number.isFinite(end) && nowMs > end + 15 * 60_000) return 'final'
   return 'live'
+}
+
+/* ------------------------------------------------------------------ */
+/* f1-live-api bridge (self-hosted SignalR -> F1 live timing feed)     */
+/* Pure mappers, so the route layer just fetches and hands over JSON.  */
+/* ------------------------------------------------------------------ */
+
+/** Parse a bridge lap time ("2:37.849" / "37.849") into seconds, else null. */
+export function parseLapTime(v: string | null | undefined): number | null {
+  if (!v || typeof v !== 'string') return null
+  const parts = v.split(':').map((p) => Number(p))
+  if (parts.length === 0 || parts.some((n) => !Number.isFinite(n))) return null
+  if (parts.length === 1) return parts[0]
+  if (parts.length === 2) return parts[0] * 60 + parts[1]
+  if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2]
+  return null
+}
+
+/** Map bridge /drivers (or /timing) rows into the local F1Driver shape. */
+export function bridgeDrivers(rows: any[]): F1Driver[] {
+  return (Array.isArray(rows) ? rows : [])
+    .filter((d) => d && /^\d+$/.test(String(d.driver_number ?? d.number ?? '')))
+    .map((d) => {
+      const num = Number(d.driver_number ?? d.number)
+      const full = String(d.name ?? '').trim()
+      const parts = full.split(/\s+/)
+      const lastName = parts.length > 1 ? parts[parts.length - 1] : full
+      const firstName = parts.length > 1 ? parts.slice(0, -1).join(' ') : ''
+      const raw = d.team_colour ? String(d.team_colour) : ''
+      const colour = raw ? (raw.startsWith('#') ? raw : `#${raw}`) : '#999999'
+      const team = d.team ?? ''
+      return {
+        number: num,
+        acronym: d.acronym ?? '',
+        firstName,
+        lastName,
+        team,
+        teamAbbr: F1_TEAM_ABBR[team] ?? null,
+        colour,
+      }
+    })
+}
+
+/**
+ * Merge the bridge's /status + /timing + /weather + /race-control into a
+ * F1LiveSnapshot. The bridge does not expose car coordinates, so `x`/`y` stay
+ * null — the track map degrades on its own while live.
+ */
+export function bridgeSnapshot(input: {
+  status: any
+  timing: any
+  weather: any
+  raceControl: any[]
+}): F1LiveSnapshot | null {
+  const status = input.status
+  const timing = input.timing
+  if (!status && !timing) return null
+  const s = status?.session ?? {}
+  const rows: any[] = Array.isArray(timing?.drivers) ? timing.drivers : []
+  const cars: F1CarState[] = rows
+    .map((d) => ({
+      number: Number(d.driver_number),
+      position: d.position != null ? Number(d.position) : null,
+      gapToLeader: d.gap_to_leader ?? null,
+      intervalToAhead: d.interval ?? null,
+      x: null,
+      y: null,
+      laps: typeof d.laps_completed === 'number' ? d.laps_completed : 0,
+      lastLapSecs: parseLapTime(d.last_lap_time),
+      bestLapSecs: parseLapTime(d.best_lap_time),
+      tyre: tyreCompound(d.tyre_compound),
+      tyreNew: d.tyre_new === true ? true : d.tyre_new === false ? false : d.tyre_new === 'true' ? true : d.tyre_new === 'false' ? false : null,
+      tyreLaps: typeof d.tyre_laps === 'number' ? d.tyre_laps : null,
+      stint: d.stint_number != null && Number.isFinite(Number(d.stint_number)) ? Number(d.stint_number) : null,
+      inPit: d.in_pit === true,
+      dnf: d.retired === true,
+      updatedAt: timing?.timestamp ?? null,
+    }))
+    .filter((c) => Number.isFinite(c.number))
+  cars.sort((a, b) => (a.position ?? 999) - (b.position ?? 999))
+
+  const state: F1LiveSnapshot['state'] = status?.live ? 'live' : status?.stale ? 'final' : 'upcoming'
+  const lap =
+    cars.reduce((m, c) => Math.max(m, c.laps), 0) || Number(status?.lap_count?.CurrentLap) || 0
+  const messages = (Array.isArray(input.raceControl) ? input.raceControl : [])
+    .slice(0, 8)
+    .reverse()
+    .map((m: any) => ({ date: m?.Utc ?? '', category: m?.Category ?? '', message: m?.Message ?? '' }))
+  const w = input.weather ?? {}
+  const numOr = (v: any) => {
+    const n = Number(v)
+    return Number.isFinite(n) ? n : null
+  }
+  return {
+    sessionKey: Number(s.Key) || 0,
+    sessionName: s.Name ?? timing?.session ?? 'Session',
+    location: s.Meeting?.Location ?? '',
+    state,
+    cars,
+    trackStatus: status?.track_status?.Message ?? status?.track_status?.Status ?? null,
+    lap,
+    totalLaps: null,
+    messages,
+    airTemp: numOr(w.AirTemp),
+    trackTemp: numOr(w.TrackTemp),
+    fetchedAt: new Date().toISOString(),
+  }
 }
