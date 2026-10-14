@@ -81,6 +81,53 @@ STATS: dict[str, StatSpec] = {
         positions=("QB", "RB", "WR", "TE"),
         kind="count",
     ),
+    # ── DK passing markets beyond yards ─────────────────────────────────────
+    # DraftKings posts passing TDs / attempts / completions / interceptions as
+    # separate player markets, but the model used to know only five stat keys,
+    # so every such row refused ("Unknown stat") — roughly half the addressable
+    # market was invisible. The nflverse weekly frame already carries the
+    # columns, so these are pure registry additions.
+    #
+    # passing_tds is modeled as *continuous* (like yardage): a QB's TD/game
+    # (~1.5) is closer to a rate than a rare count, and the count branch's
+    # Poisson-style interval (built for anytime-TD totals) would be the wrong
+    # shape here. interceptions is a genuine rare event and stays a count.
+    "passing_tds": StatSpec(
+        key="passing_tds",
+        label="Passing Touchdowns",
+        unit="td",
+        columns=("passing_tds",),
+        positions=("QB",),
+        kind="continuous",
+        opportunity_columns=("attempts",),
+        efficiency_denominator="attempts",
+    ),
+    "passing_attempts": StatSpec(
+        key="passing_attempts",
+        label="Pass Attempts",
+        unit="att",
+        columns=("attempts",),
+        positions=("QB",),
+        kind="continuous",
+    ),
+    "completions": StatSpec(
+        key="completions",
+        label="Completions",
+        unit="cmp",
+        columns=("completions",),
+        positions=("QB",),
+        kind="continuous",
+        opportunity_columns=("attempts",),
+        efficiency_denominator="attempts",
+    ),
+    "interceptions": StatSpec(
+        key="interceptions",
+        label="Interceptions",
+        unit="int",
+        columns=("passing_interceptions",),
+        positions=("QB",),
+        kind="count",
+    ),
 }
 
 # Convenience aliases so callers can use "pass_yds" / "rec_yds" style keys.
@@ -94,6 +141,19 @@ ALIASES: dict[str, str] = {
     "rec": "receptions",
     "anytime_td": "tds",
     "td": "tds",
+    # Passing-market aliases (DK spells these several ways).
+    "pass_tds": "passing_tds",
+    "passing_td": "passing_tds",
+    "pass_td": "passing_tds",
+    "pass_attempts": "passing_attempts",
+    "pass_att": "passing_attempts",
+    "attempts": "passing_attempts",
+    "completion": "completions",
+    "comp": "completions",
+    "cmp": "completions",
+    "ints": "interceptions",
+    "passing_ints": "interceptions",
+    "passing_interceptions": "interceptions",
 }
 
 

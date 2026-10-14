@@ -36,6 +36,11 @@ const STAT_LABELS: Record<string, { label: string; unit: string }> = {
   receiving_yards: { label: 'Receiving Yards', unit: 'yds' },
   receptions: { label: 'Receptions', unit: 'rec' },
   tds: { label: 'Touchdowns', unit: 'td' },
+  // Additional DK passing markets now modeled by propmodel/stats.py.
+  passing_tds: { label: 'Passing Touchdowns', unit: 'td' },
+  passing_attempts: { label: 'Pass Attempts', unit: 'att' },
+  completions: { label: 'Completions', unit: 'cmp' },
+  interceptions: { label: 'Interceptions', unit: 'int' },
   // NBA (propmodel/nba — minutes x rate model over ESPN box scores).
   points: { label: 'Points', unit: 'pts' },
   rebounds: { label: 'Rebounds', unit: 'reb' },

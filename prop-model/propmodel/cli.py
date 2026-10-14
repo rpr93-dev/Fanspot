@@ -107,6 +107,10 @@ def _targets_from_args(args) -> list[dict]:
                 # Optional source-native id (gsis for nflverse, ESPN athlete
                 # id for --data-source espn): beats any name heuristic.
                 "player_id": None if t.get("player_id") in (None, "") else str(t.get("player_id")),
+                # Optional role hint (named_starter | backup | unknown).
+                # Production batches usually omit it; when present it sharpens
+                # the FIRST_START wording for relief-history samples.
+                "role": None if t.get("role") in (None, "") else str(t.get("role")),
             })
         return out
     if args.player and args.stat and args.team:
@@ -193,6 +197,7 @@ def _weights(args) -> ModelWeights:
             "halflife", "opponent", "game_script", "min_games",
             "prior_strength", "opp_shrink", "sd_mult_continuous", "sd_mult_count",
             "halflife_count", "opponent_count", "prior_strength_count",
+            "factor_clamp_lo", "factor_clamp_hi",
         )
         try:
             return ModelWeights(**{k: raw[k] for k in keys if k in raw})
@@ -232,6 +237,7 @@ def _apply_factors(value: float, opp: dict, gs: dict, weights: ModelWeights) -> 
 def _prior_projection(
     player: str, stat: str, prior: float, hist: PlayerHistory | None,
     opp: dict, gs: dict, weights: ModelWeights,
+    source: str = "ESPN prior",
 ) -> FullProjection:
     """Project from an ESPN-style prior line when NFL history is missing/thin.
 
@@ -262,11 +268,11 @@ def _prior_projection(
         player_mean = float(hist.games["value"].mean())
         blended = (n * player_mean + m * prior) / (n + m)
         center = _apply_factors(blended, opp, gs, weights)
-        note = "ESPN prior — blended with thin NFL history"
+        note = f"{source} — blended with thin NFL history"
         rel = reliability_score(n, hist.ok, bool(opp.get("factor")), any(f.code == "STALE" for f in hist.flags), weights.min_games, 1, 1)
     else:
         center = _apply_factors(prior, opp, gs, weights)
-        note = "ESPN prior — no NFL history (rookie)"
+        note = f"{source} — no NFL history (rookie)"
         rel = reliability_score(0, False, bool(opp.get("factor")), False, 3, 1, 1)
     # Prior path has no empirical residuals — use a wide distribution
     pred_sd = center * 0.5 if center else None
@@ -467,12 +473,6 @@ def _project_one(
         as_of=history_cutoff,
     )
 
-    # Player exists but has fewer than min_games of usable history — blend
-    # toward the ESPN prior if we have one, so thin-history players still
-    # project (marked low confidence).
-    if not hist.ok and prior is not None:
-        return _prior_projection(player, stat, float(prior), hist, opp, gs, weights)
-
     pos_prior = None
     if priors is not None:
         key = get_stat(stat).key
@@ -487,7 +487,24 @@ def _project_one(
             priors[key] = position_prior(prior_frame, stat)
         pos_prior = priors[key]
 
-    proj = project(hist, opp, gs, weights, position_prior=pos_prior, espn_prior=_get_prior())
+    # Player exists but has fewer than min_games of usable history. Prefer an
+    # explicit ESPN-style prior; otherwise fall back to the position-level
+    # average so a thin-history player still projects (wide band, low
+    # confidence) instead of vanishing as an INSUFFICIENT_HISTORY refusal —
+    # 433/4,007 targets (10.8%) were lost this way in the season backtest.
+    if not hist.ok:
+        if prior is not None:
+            return _prior_projection(player, stat, float(prior), hist, opp, gs, weights)
+        if pos_prior is not None:
+            return _prior_projection(
+                player, stat, float(pos_prior), hist, opp, gs, weights,
+                source="position-prior fallback (thin history)",
+            )
+
+    proj = project(
+        hist, opp, gs, weights, position_prior=pos_prior, espn_prior=_get_prior(),
+        role=target.get("role"),
+    )
     if proj.player_name != player:
         # Keep the caller's display name (the dashboard built targets from full
         # names like "C.J. Stroud"; the nflverse file abbreviates to "C.Stroud",
@@ -579,29 +596,12 @@ def main(argv: list[str] | None = None) -> int:
     projections: list[FullProjection] = []
     priors: dict[str, float] = {}
     memo = RunMemo()
-    # Track ESPN prior usage per player for reliability scoring
-    # ESPN prior *passed* vs ESPN prior *used* (blended in) — the latter
-    # indicates thinner actual history and should score lower.
-    _espn_passed: dict[str, int] = {}  # player -> count of targets where ESPN prior was provided
-    _espn_used: dict[str, int] = {}   # player -> count of targets where ESPN prior was actually blended
-    _total_stats: dict[str, int] = {}  # player -> total stats modeled
     for t in targets:
-        player = t.get("player", "")
-        stat = t.get("stat", "")
-        _total_stats[player] = _total_stats.get(player, 0) + 1
-        _espn_passed.setdefault(player, 0)
-        _espn_used.setdefault(player, 0)
-        if t.get("prior") is not None:
-            _espn_passed[player] = _espn_passed.get(player, 0) + 1
         try:
             result = _project_one(
                 t, weekly, lines_provider, weights, args, priors,
                 memo=memo, known_codes=known_codes, history_cutoff=history_cutoff,
             )
-            # Track if ESPN prior was actually used (note mentions ESPN blending)
-            if result.note and "ESPN" in result.note:
-                _espn_used.setdefault(result.player_name, 0)
-                _espn_used[result.player_name] = _espn_used.get(result.player_name, 0) + 1
             projections.append(result)
         except Exception as e:  # noqa: BLE001 — keep the batch alive
             logger.error(
@@ -646,23 +646,11 @@ def main(argv: list[str] | None = None) -> int:
         write_table(projections_table(projections, data_through=data_vintage(weekly)), args.output)
         logger.info("Wrote %d projections to %s", len(projections), args.output)
     else:
-        from .model import reliability_score as _reliability
-        results = []
-        for p in projections:
-            d = p.to_dict()
-            # ESPN coverage: how many of this player's modeled stats have ESPN priors
-            total_markets = _total_stats.get(p.player_name, 1)
-            espn_lines = _espn_used.get(p.player_name, 0)
-            d["reliability"] = _reliability(
-                n_games=p.n_games,
-                history_ok=p.refused_reason is None,
-                opp_ok=bool(p.opponent_factor),
-                stale_warn=p.note is not None and "STALE" in str(p.note),
-                min_games=3,
-                espn_lines=espn_lines,
-                total_markets=total_markets,
-            )
-            results.append(d)
+        # Reliability is computed once, inside project() — FullProjection
+        # carries it and to_dict() emits it. The old stdout path recomputed it
+        # here with a hardcoded min_games=3, so the same projection could report
+        # two different reliability numbers depending on the output format.
+        results = [p.to_dict() for p in projections]
         print(json.dumps(results, indent=2))
     return 0
 

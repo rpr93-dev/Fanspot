@@ -39,6 +39,66 @@ def _last_token(name: str) -> str:
     return parts[-1] if parts else ""
 
 
+def match_key_normalized(norm: str) -> str:
+    """First-initial + last-name key from an already-normalized name.
+
+    ``"c.j. stroud"`` and ``"cj stroud"`` both key to ``"c stroud"`` — the
+    fallback that rescues a first-name the exact pass misses (book spellings
+    like "Chig Okonkwo" vs the feed's "Chigoziem Okonkwo", or a nickname).
+    """
+    tokens = norm.split()
+    if not tokens:
+        return ""
+    return f"{tokens[0][0]} {tokens[-1]}"
+
+
+def _disambiguate(
+    rows: pd.DataFrame,
+    weekly: pd.DataFrame,
+    team: str | None,
+    positions: Iterable[str] | None,
+) -> str | None:
+    """Reduce candidate rows for one name to a single player_id (or None).
+
+    Shared by the exact-name and token-overlap passes so the two paths can
+    never disagree on how namesakes/team changes resolve: positions filter
+    first, then team preference, then ambiguity refusal.
+    """
+    if rows.empty:
+        return None
+
+    if positions and "position" in rows.columns:
+        allowed = {str(p).upper() for p in positions}
+        pos_rows = rows[rows["position"].astype(str).str.upper().isin(allowed)]
+        if not pos_rows.empty:
+            rows = pos_rows
+
+    order_cols = [c for c in ("season", "week") if c in rows.columns]
+    team_col = "recent_team" if "recent_team" in weekly.columns else "team"
+    if team and team_col in rows.columns:
+        team_rows = rows[rows[team_col].astype(str).str.upper() == str(team).upper()]
+        if not team_rows.empty:
+            ids = team_rows["player_id"].astype(str).unique()
+            if len(ids) == 1:
+                return ids[0]
+            # Same name, same team, several ids: one player split across
+            # data versions. Prefer the id with the latest game.
+            if order_cols:
+                team_rows = team_rows.sort_values(order_cols)
+            return str(team_rows["player_id"].astype(str).iloc[-1])
+
+    ids = rows["player_id"].astype(str).unique()
+    if len(ids) == 1:
+        return ids[0]
+    if "season" not in rows.columns:
+        return None
+    latest = rows["season"].max()
+    active_ids = rows.loc[rows["season"] == latest, "player_id"].astype(str).unique()
+    if len(active_ids) != 1:
+        return None
+    return str(active_ids[0])
+
+
 def resolve_player_id(
     weekly: pd.DataFrame,
     player_name: str,
@@ -88,36 +148,16 @@ def resolve_player_id(
         name_index = normalized_names(weekly)
 
     rows = weekly[name_index == wanted]
-    if rows.empty:
-        return None
+    if not rows.empty:
+        return _disambiguate(rows, weekly, team, positions)
 
-    if positions and "position" in rows.columns:
-        allowed = {str(p).upper() for p in positions}
-        pos_rows = rows[rows["position"].astype(str).str.upper().isin(allowed)]
-        if not pos_rows.empty:
-            rows = pos_rows
-
-    order_cols = [c for c in ("season", "week") if c in rows.columns]
-    team_col = "recent_team" if "recent_team" in weekly.columns else "team"
-    if team and team_col in rows.columns:
-        team_rows = rows[rows[team_col].astype(str).str.upper() == str(team).upper()]
-        if not team_rows.empty:
-            ids = team_rows["player_id"].astype(str).unique()
-            if len(ids) == 1:
-                return ids[0]
-            # Same name, same team, several ids: one player split across
-            # data versions. Prefer the id with the latest game.
-            if order_cols:
-                team_rows = team_rows.sort_values(order_cols)
-            return str(team_rows["player_id"].astype(str).iloc[-1])
-
-    ids = rows["player_id"].astype(str).unique()
-    if len(ids) == 1:
-        return ids[0]
-    if "season" not in rows.columns:
+    # Fallback: first-initial + last-name overlap. The exact pass misses when
+    # a book uses a shortened/different first name than the feed (the week-6
+    # "12 props refused NO_DATA" class). Only reached when the exact name
+    # matched *nothing*, so it can never turn a resolved player ambiguous.
+    key = match_key_normalized(wanted)
+    if not key:
         return None
-    latest = rows["season"].max()
-    active_ids = rows.loc[rows["season"] == latest, "player_id"].astype(str).unique()
-    if len(active_ids) != 1:
-        return None
-    return str(active_ids[0])
+    key_index = name_index.map(lambda s: match_key_normalized(s) if isinstance(s, str) else "")
+    rows = weekly[key_index == key]
+    return _disambiguate(rows, weekly, team, positions)

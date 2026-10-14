@@ -68,7 +68,7 @@ def test_batch_survives_unknown_stat(capsys, tmp_path, weekly_csv):
     batch = tmp_path / "batch.json"
     batch.write_text(json.dumps([
         {"player": "C.J. Stroud", "stat": "passing_yards", "team": "HOU", "opponent": "LV"},
-        {"player": "C.J. Stroud", "stat": "passing_tds", "team": "HOU", "opponent": "LV"},
+        {"player": "C.J. Stroud", "stat": "field_goals", "team": "HOU", "opponent": "LV"},
         {"player": "Nico Collins", "stat": "receiving_yards", "team": "HOU", "opponent": "LV"},
     ]), encoding="utf-8")
     code = _run([
@@ -79,7 +79,7 @@ def test_batch_survives_unknown_stat(capsys, tmp_path, weekly_csv):
     rows = json.loads(capsys.readouterr().out)
     assert [r["projection"] is not None for r in rows] == [True, False, True]
     bad = rows[1]
-    assert bad["refused_reason"] and "Unknown stat 'passing_tds'" in bad["refused_reason"]
+    assert bad["refused_reason"] and "Unknown stat 'field_goals'" in bad["refused_reason"]
     assert bad["note"]
 
 
@@ -325,6 +325,44 @@ def test_position_mismatch_refuses_through_cli(capsys, tmp_path):
     assert r["projection"] is None
     assert "POSITION_MISMATCH" in r["refused_reason"]
     assert "CB" in r["refused_reason"]
+
+
+def test_thin_history_falls_back_to_position_prior(capsys, tmp_path):
+    """A player below min_games with no explicit prior still projects from the
+    position-level average (low confidence, wide band) instead of vanishing as
+    an INSUFFICIENT_HISTORY refusal."""
+    rows = []
+    for wk in range(1, 9):  # full-history QB anchors the position prior
+        rows.append(dict(
+            player_id="00-0001", player_display_name="Vet QB", player_name="Vet QB",
+            position="QB", recent_team="HOU", opponent_team="LV",
+            season=2025, week=wk, gameday=f"2025-09-{wk:02d}", games=1,
+            game_id=f"2025_0{wk}_HOU_LV", passing_yards=250.0, passing_tds=1.5,
+            attempts=34, completions=22, passing_interceptions=1,
+            rushing_yards=0.0, receiving_yards=0.0, receptions=0.0,
+            rushing_tds=0.0, receiving_tds=0.0,
+        ))
+    for wk in range(1, 3):  # rookie: only 2 games
+        rows.append(dict(
+            player_id="00-0002", player_display_name="Rookie QB", player_name="Rookie QB",
+            position="QB", recent_team="HOU", opponent_team="LV",
+            season=2025, week=wk, gameday=f"2025-09-{wk:02d}", games=1,
+            game_id=f"2025_0{wk}_HOU_LV", passing_yards=180.0, passing_tds=1.0,
+            attempts=25, completions=15, passing_interceptions=1,
+            rushing_yards=0.0, receiving_yards=0.0, receptions=0.0,
+            rushing_tds=0.0, receiving_tds=0.0,
+        ))
+    weekly = tmp_path / "weekly.csv"
+    pd.DataFrame(rows).to_csv(weekly, index=False)
+    code = main([
+        "--player", "Rookie QB", "--stat", "passing_yards", "--team", "HOU",
+        "--opponent", "LV", "--weekly", str(weekly), "--cache-dir", str(tmp_path / "cache"),
+    ])
+    assert code == 0
+    r = json.loads(capsys.readouterr().out)[0]
+    assert r["projection"] is not None
+    assert r["confidence"] == "low"
+    assert "position-prior fallback" in (r["note"] or "")
 
 
 def test_warm_cache_flag_loads_data_and_exits_zero(capsys, tmp_path, weekly_csv):

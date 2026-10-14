@@ -98,6 +98,58 @@ WINSORIZE_MAD_MULT = 3.5
 COMBINED_FACTOR_MIN = 0.80
 COMBINED_FACTOR_MAX = 1.30
 
+# The product clamp is deliberately *asymmetric* for passing: a great matchup
+# is exactly where a QB's ceiling lives, while a stacked bad matchup dragging a
+# projection down stays tightly bounded. A symmetric 1.30 cap is one of three
+# stacked conservatisms that put 320+ passing games ~124 yards out of reach.
+FACTOR_CLAMP_HI_BY_STAT: dict[str, float] = {
+    "passing_yards": 1.60,
+    "passing_tds": 1.60,
+}
+
+# Fixed seed for the Monte-Carlo percentile distribution so p10-p90 are
+# reproducible run to run (an unseeded np.random jitters them every call and
+# makes backtest deltas unmeasurable).
+DISTRIBUTION_SEED = 20261014
+
+# Game-log coefficient of variation (std/mean) at the 75th percentile of each
+# (stat, position) player distribution, measured on the cached nflverse weekly
+# frame (players with >= 5 played games). compute_confidence uses it as a
+# *predictability* term: a player whose per-game output is in the top quartile
+# of volatility for his position must not earn a high-confidence label just
+# because he has a long game log.
+GAME_LOG_CV_P75: dict[tuple[str, str], float] = {
+    ("passing_yards", "QB"): 0.94,
+    ("rushing_yards", "QB"): 1.73,
+    ("rushing_yards", "RB"): 1.40,
+    ("receiving_yards", "RB"): 2.06,
+    ("receiving_yards", "TE"): 1.28,
+    ("receiving_yards", "WR"): 1.44,
+    ("receptions", "RB"): 1.58,
+    ("receptions", "TE"): 1.06,
+    ("receptions", "WR"): 1.24,
+    ("tds", "QB"): 1.42,
+    ("tds", "RB"): 2.79,
+    ("tds", "TE"): 3.60,
+    ("tds", "WR"): 3.00,
+    ("passing_tds", "QB"): 1.38,
+    ("passing_attempts", "QB"): 0.89,
+    ("completions", "QB"): 0.92,
+    ("interceptions", "QB"): 1.67,
+}
+
+# Opportunity volume that marks a game as a *start* rather than relief duty
+# (backup/mop-up snaps). Used to flag samples that look like garbage time.
+_START_PROXY_VOLUME: dict[str, float] = {
+    "passing_yards": 15,
+    "passing_tds": 15,
+    "passing_attempts": 15,
+    "completions": 15,
+    "rushing_yards": 8,
+    "receiving_yards": 3,
+    "receptions": 3,
+}
+
 
 @dataclass(frozen=True)
 class ModelWeights:
@@ -112,13 +164,28 @@ class ModelWeights:
     opponent: float = 1.0
     game_script: float = 1.0
     min_games: int = 3
+    # prior_strength = 0.0 is deliberate, not an omission: k = ess/(ess+0) = 1,
+    # so the baseline is a *raw* recency-weighted mean with no empirical-Bayes
+    # pull toward the position prior. The 2026-08 walk-forward retune found the
+    # prior blend added error on top of the recency weighting (the prior still
+    # feeds efficiency derivation and the thin-history/rookie fallbacks).
+    # Re-tune with tune.py and let tests/test_walkforward_acceptance.py adjudicate
+    # before changing it, and update PROP_ENGINE_BRIEF.md (its 0.5 is stale).
     prior_strength: float = 0.0
+    # Empirically: shrinking opponent ratios harder (10 vs the module default 6)
+    # was measured on the 2025 walk-forward harness at pooled MAE 18.768 vs
+    # 18.744 — a ~0.13% edge for 6, consistent on every yardage stat and within
+    # noise on counts. Kept at the more conservative 10.0; re-fit with tune.py.
     opp_shrink: float = 10.0
     sd_mult_continuous: float = CALIBRATED_SD_MULT_CONTINUOUS
     sd_mult_count: float = CALIBRATED_SD_MULT_COUNT
     halflife_count: float = 8.0
     opponent_count: float = 0.5
     prior_strength_count: float = 0.0
+    # Combined-factor clamp bounds (tunable). The upper bound may be overridden
+    # per stat via FACTOR_CLAMP_HI_BY_STAT (passing ceiling).
+    factor_clamp_lo: float = COMBINED_FACTOR_MIN
+    factor_clamp_hi: float = COMBINED_FACTOR_MAX
     opp_factor_min: float = OPP_FACTOR_MIN
     opp_factor_max: float = OPP_FACTOR_MAX
     script_factor_min: float = SCRIPT_FACTOR_MIN
@@ -377,8 +444,16 @@ def compute_confidence(
     role_stable: bool = True,
     has_espn_prior: bool = False,
     espn_coverage: float = 0.0,
+    game_cv: float | None = None,
+    cv_p75: float | None = None,
 ) -> tuple[str, float]:
-    """Quantitative confidence: (label, score)."""
+    """Quantitative confidence: (label, score).
+
+    ``game_cv``/``cv_p75`` add a *predictability* term: the player's own
+    game-log coefficient of variation against the top-quartile threshold for
+    his position. The old point system rewarded only data *quantity*, so a
+    backup with a long mop-up log scored high; volatility now blocks "high".
+    """
     if not history_ok or n_games < min_games:
         return "low", 0.0
 
@@ -406,6 +481,16 @@ def compute_confidence(
     if has_espn_prior and n_games < 6:
         score = score * 0.8
 
+    # Predictability: top-quartile game-log volatility for the position caps the
+    # label below high and docks the score — many games don't help if the
+    # per-game outcomes are close to uninformative.
+    cv_high_vol = (
+        game_cv is not None and cv_p75 is not None
+        and cv_p75 > 0 and game_cv > cv_p75
+    )
+    if cv_high_vol:
+        score -= 25
+
     score = min(1.0, max(0.0, score / 100.0))
 
     # Require sufficient raw game count
@@ -413,7 +498,7 @@ def compute_confidence(
         score = min(0.29, score)  # caps at low for < 5 games
 
     # Require some raw game count for high confidence (prevents ESS-only high confidence)
-    if score >= 0.7 and n_games >= 8 and opp_ok and not stale_warn:
+    if score >= 0.7 and n_games >= 8 and opp_ok and not stale_warn and not cv_high_vol:
         return "high", score
     elif score >= 0.45 and (opp_ok or espn_coverage >= 0.6) and not stale_warn:
         return "medium", score
@@ -423,6 +508,48 @@ def compute_confidence(
         return "medium", score
     else:
         return "low", score
+
+
+def _relief_duty(history: PlayerHistory) -> tuple[bool, int, int]:
+    """(is_relief, n_starts, n_games) — was this sample all relief/mop-up duty?
+
+    A game counts as a *start proxy* when the player's opportunity volume
+    reaches the stat's threshold (QB 15+ attempts, RB 8+ carries, pass-catcher
+    3+ targets). A >=3-game window with fewer than 2 start-proxy games is a
+    backup whose yardage came in garbage time (the week-4 Bagent miss — the
+    single biggest error in the season backtest — is exactly this shape).
+
+    Returns False when the opportunity column is absent or mostly null: a
+    missing signal is not evidence of relief duty.
+    """
+    spec = history.stat
+    if not spec.opportunity_columns:
+        return False, 0, history.n_games
+    col = spec.opportunity_columns[0]
+    if col not in history.games.columns:
+        return False, 0, history.n_games
+    threshold = _START_PROXY_VOLUME.get(spec.key)
+    if threshold is None:
+        return False, 0, history.n_games
+
+    vols = pd.to_numeric(history.games[col], errors="coerce")
+    valid = int(vols.notna().sum())
+    n = history.n_games
+    if valid < 3 or valid < n * 0.5:
+        return False, 0, n
+    n_starts = int((vols.dropna() >= threshold).sum())
+    return (n >= 3 and n_starts < 2), n_starts, n
+
+
+def _game_cv(values: np.ndarray) -> float | None:
+    """Coefficient of variation (std/mean) of a game log, or None for tiny/no samples."""
+    vals = np.asarray(values, dtype=float)
+    if len(vals) < 3:
+        return None
+    mean = float(np.mean(vals))
+    if mean <= 0:
+        return None
+    return float(np.std(vals) / mean)
 
 
 def reliability_score(
@@ -473,10 +600,19 @@ def build_distribution(
     n_games: int,
     ess: float,
     historical_residuals: np.ndarray | None = None,
+    seed: int | None = None,
 ) -> dict[str, float]:
-    """Build an empirical uncertainty distribution around the projection."""
+    """Build an empirical uncertainty distribution around the projection.
+
+    The Monte-Carlo path is seeded (``DISTRIBUTION_SEED`` unless overridden) so
+    the published p10-p90 are reproducible run to run — otherwise identical
+    inputs produced jittering percentiles and backtest deltas couldn't be
+    attributed to a model change.
+    """
     if projection is None or pred_sd is None:
         return {}
+
+    rng = np.random.default_rng(DISTRIBUTION_SEED if seed is None else seed)
 
     if historical_residuals is not None and len(historical_residuals) >= 5:
         orig_sd = float(np.std(historical_residuals))
@@ -501,10 +637,10 @@ def build_distribution(
         sd = max(math.sqrt(mean), pred_sd * 0.5)
         shape = (mean / sd) ** 2 if sd > 0 else 1.0
         scale = sd ** 2 / mean if mean > 0 else 1.0
-        sim = np.random.gamma(shape, scale, size=2000)
+        sim = rng.gamma(shape, scale, size=2000)
     else:
-        sim = np.random.normal(projection, pred_sd, size=2000)
-        fat_tails = np.random.choice([0.0, 2.0], size=2000, p=[0.95, 0.05]) * pred_sd * np.random.choice([-1, 1], size=2000)
+        sim = rng.normal(projection, pred_sd, size=2000)
+        fat_tails = rng.choice([0.0, 2.0], size=2000, p=[0.95, 0.05]) * pred_sd * rng.choice([-1, 1], size=2000)
         sim += fat_tails
 
     sim = np.clip(sim, 0, None)
@@ -642,6 +778,7 @@ def project(
     espn_prior: float | None = None,
     historical_residuals: np.ndarray | None = None,
     weekly: pd.DataFrame | None = None,
+    role: str | None = None,
 ) -> FullProjection:
     """Project the next game value for history\'s player+stat."""
     weights = weights or ModelWeights()
@@ -690,6 +827,9 @@ def project(
     # Step 1: Winsorize (robust against outliers)
     values = np.asarray(history.games["value"].tolist(), dtype=float)
     values_clean = _winsorize(values, weights.winsor_mad_mult)
+
+    # Step 1b: Role sanity — does this sample look like relief/mop-up duty?
+    relief, n_starts, n_relief_games = _relief_duty(history)
 
     # Step 2: Recency-weighted mean (+ opportunity*efficiency decomposition when available)
     w = recency_weights(len(values_clean), halflife)
@@ -760,6 +900,25 @@ def project(
 
     pred_sd = core_std * math.sqrt(1.0 + 1.0 / ess) * sd_mult if ess > 0 else core_std * sd_mult
 
+    # Relief-duty history: widen the interval and (below) cap confidence. A
+    # flagged 30-yard projection with a wide band is honest; a tight band around
+    # a mop-up sample invites the exact over-trust that produced the 19% error
+    # share on benched/relief QBs.
+    relief_warning: str | None = None
+    if relief:
+        pred_sd = pred_sd * 1.5
+        vol_col = history.stat.opportunity_columns[0] if history.stat.opportunity_columns else "volume"
+        threshold = _START_PROXY_VOLUME.get(history.stat.key)
+        relief_warning = (
+            f"relief_duty_history: only {n_starts}/{n_relief_games} games reach start volume "
+            f"({threshold}+ {vol_col}) — sample looks like backup/mop-up duty, not a starter's; "
+            "treat the projection as low confidence"
+        )
+        if role == "named_starter":
+            relief_warning = "FIRST_START (role=named_starter): " + relief_warning
+        elif role == "backup":
+            relief_warning = "BACKUP_ROLE (role=backup): " + relief_warning
+
     # Step 5: Apply opponent and game-script adjustments.
     # The two factors multiply — each is shrunk toward 1.0 on its own, but
     # their product can still stack into a tail (0.86 x 0.82 = 0.71 turned a
@@ -769,11 +928,13 @@ def project(
     combined = (opp_f ** w_opp) * (gs_f ** weights.game_script)
     clamp_note: str | None = None
     if not is_count:
-        clamped = max(COMBINED_FACTOR_MIN, min(COMBINED_FACTOR_MAX, combined))
+        clamp_lo = weights.factor_clamp_lo
+        clamp_hi = FACTOR_CLAMP_HI_BY_STAT.get(history.stat.key, weights.factor_clamp_hi)
+        clamped = max(clamp_lo, min(clamp_hi, combined))
         if clamped != combined:
             clamp_note = (
                 f"combined_adjustment_clamped: opponent x script {combined:.3f} "
-                f"clamped to [{COMBINED_FACTOR_MIN}, {COMBINED_FACTOR_MAX}]"
+                f"clamped to [{clamp_lo}, {clamp_hi}]"
             )
         combined = clamped
     projection = baseline * combined
@@ -833,6 +994,10 @@ def project(
         "receiving_yards": (0, 250),
         "receptions": (0, 15),
         "tds": (0, 4),
+        "passing_tds": (0, 5),
+        "passing_attempts": (0, 70),
+        "completions": (0, 50),
+        "interceptions": (0, 5),
     }
     guardrail_warnings: list[str] = []
     if history.stat.key in stat_caps and projection is not None:
@@ -849,11 +1014,18 @@ def project(
 
     # Step 10: Confidence (with season-boundary penalty)
     role_stable = role_factor is None or abs(role_factor - 1.0) < 0.10
+    game_cv = _game_cv(values_clean)
+    cv_p75 = GAME_LOG_CV_P75.get((history.stat.key, str(history.position or "").upper()))
     confidence_label, confidence_score = compute_confidence(
         n_games=n, ess=ess, history_ok=history.ok, opp_ok=opp_ok,
         stale_warn=stale_warn, min_games=weights.min_games,
         role_stable=role_stable, has_espn_prior=has_espn_prior,
+        game_cv=game_cv, cv_p75=cv_p75,
     )
+    if relief:
+        # A relief-only sample is never a confident read on a starter's Sunday.
+        confidence_label = "low"
+        confidence_score = min(confidence_score, 0.29)
     # Phase 11: Reduce confidence when heavily reliant on prior season
     if season_warnings:
         confidence_score = confidence_score * 0.85
@@ -879,6 +1051,8 @@ def project(
 
     # Step 12: Return
     all_warnings = role_warnings + season_warnings + guardrail_warnings
+    if relief_warning:
+        all_warnings = all_warnings + [relief_warning]
     if clamp_note:
         all_warnings = all_warnings + [clamp_note]
     if espn_disagreement_warning:
