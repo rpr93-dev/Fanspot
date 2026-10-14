@@ -35,6 +35,10 @@ export default function ScoresPage() {
         <p className="text-sm text-fs-muted mb-6 max-w-2xl">
           The scoreboard strip above carries every league for the selected date — navigate
           Yesterday | Today | Tomorrow or pick any date. Tap a game to open its Game Center.
+          Want two games at once?{' '}
+          <Link href="/multiview" prefetch={false} className="underline underline-offset-2 hover:text-fs-text">
+            Open split screen →
+          </Link>{' '}
           For standings, schedules, and leaders, head to a league hub:
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">

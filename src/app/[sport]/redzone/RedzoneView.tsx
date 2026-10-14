@@ -9,6 +9,7 @@ import { relevanceSort } from '@/lib/models'
 import { ScoreCard } from '@/components/scoreboard/ScoreCard'
 import { EmptyState, ErrorState } from '@/components/feedback'
 import { StreamPlayer } from '@/components/streams/StreamPlayer'
+import { multiviewHref } from '@/lib/multiview'
 import { useRedzone } from '@/components/streams/RedzoneBoard'
 
 const RED = '#E01B2E'
@@ -93,6 +94,13 @@ export function RedzoneView({ teamColor }: { teamColor: string }) {
                   {match.title} · via Streamed (third-party — expect ads or popups)
                 </p>
                 <StreamPlayer key={match.id} match={match} />
+                <Link
+                  href={multiviewHref([{ sport: 'nfl', eventId: 'redzone' }])}
+                  prefetch={false}
+                  className="fs-meta hover:text-fs-text inline-block mt-3 underline-offset-2 hover:underline"
+                >
+                  ▦ Split screen — RedZone alongside another game →
+                </Link>
               </div>
             ) : (
               <div className="fs-panel p-6 text-center">

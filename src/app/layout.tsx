@@ -40,6 +40,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <p className="fs-meta">FANSPOT · scores, news, and fantasy edges</p>
             <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-1 fs-meta" aria-label="Footer">
               <Link href="/scores" className="hover:text-fs-text" prefetch={false}>Scores</Link>
+              <Link href="/multiview" className="hover:text-fs-text" prefetch={false}>Split screen</Link>
               <Link href="/nfl" className="hover:text-fs-text" prefetch={false}>NFL</Link>
               <Link href="/nba" className="hover:text-fs-text" prefetch={false}>NBA</Link>
               <Link href="/nhl" className="hover:text-fs-text" prefetch={false}>NHL</Link>

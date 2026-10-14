@@ -13,6 +13,7 @@ import { PlayByPlay } from '@/components/game/PlayByPlay'
 import { EmptyState, ErrorState, SkeletonRows } from '@/components/feedback'
 import { useLivePoll } from '@/hooks/useLivePoll'
 import { getEspnAbbr } from '@/lib/sports-api'
+import { multiviewHref } from '@/lib/multiview'
 import { normalizeEvent, normalizeSportKey, type NormalizedGame, type SportKey } from '@/lib/models'
 import type { NormalizedPlay } from '@/lib/plays'
 
@@ -398,7 +399,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
                 swaps tabs, so the player never remounts or reloads. */}
             <div className={supportsStream ? 'grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start' : ''}>
               {supportsStream && (
-                <div className="min-w-0 lg:sticky lg:top-20">
+                <div className="min-w-0 lg:sticky lg:top-20 space-y-2">
                   <GameStreamPanel
                     sport={sportKey.toLowerCase() as 'nfl' | 'nba' | 'nhl' | 'mlb'}
                     awayName={game.away.name}
@@ -406,6 +407,13 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
                     preselect={watchPreselect}
                     autoplay={watchAutoplay}
                   />
+                  <Link
+                    href={multiviewHref([{ sport: sportKey.toLowerCase() as 'nfl' | 'nba' | 'nhl' | 'mlb', eventId }])}
+                    prefetch={false}
+                    className="fs-meta hover:text-fs-text inline-block underline-offset-2 hover:underline"
+                  >
+                    ▦ Open in split screen — watch alongside another game →
+                  </Link>
                 </div>
               )}
 
