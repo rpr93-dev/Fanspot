@@ -192,6 +192,10 @@ Explicitly **not** touched: prop model, fantasy tools, backend routes, `NextGame
 
 ## Status — implemented (Phases 2–6)
 
+Rollout: the redesign ships behind a persisted **Old / Beta v2** toggle on the game
+hub (`ShellToggle`, `GameShell`), defaulting to `Old` so the redesign is opt-in and
+reversible. `Old` and `Beta v2` lay out the same stream/data nodes.
+
 Delivered on this branch:
 - `src/lib/gameHub.ts` + `__tests__/game-hub.test.ts` — modes, prefs parse/serialize,
   split clamp, multiview layout presets (13 tests).

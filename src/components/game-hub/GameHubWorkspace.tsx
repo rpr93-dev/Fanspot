@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useState, type ReactNode } from 'react'
-import { useGameHubPrefs } from '@/hooks/useGameHubPrefs'
 import { useMultiviewSelection } from '@/hooks/useMultiviewSelection'
+import type { GameHubPrefs } from '@/lib/gameHub'
 import { ViewModeSwitch } from './ViewModeSwitch'
 import { ResizableSplit } from './ResizableSplit'
 import { StreamDock } from './StreamDock'
@@ -25,14 +25,20 @@ export function GameHubWorkspace({
   stream,
   children,
   hasStream,
+  prefs,
+  patch,
+  reset,
 }: {
   /** The game's stream panel (kept mounted across every mode). */
   stream: ReactNode
   /** The data column: tab nav + panels for this game. */
   children: ReactNode
   hasStream: boolean
+  /** Prefs are owned by the shell host so there is a single writer. */
+  prefs: GameHubPrefs
+  patch: (p: Partial<GameHubPrefs>) => void
+  reset: () => void
 }) {
-  const { prefs, patch, reset } = useGameHubPrefs()
   const mode = prefs.mode
 
   const mv = useMultiviewSelection([])

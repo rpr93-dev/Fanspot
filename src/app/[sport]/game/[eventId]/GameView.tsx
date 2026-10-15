@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { teams, sportConfig } from '@/data/teams'
 import NextGamePanel from '@/components/NextGamePanel'
-import { GameHubWorkspace } from '@/components/game-hub/GameHubWorkspace'
+import { GameShell } from '@/components/game-hub/GameShell'
 import { GameStatsSection, LastPlayBlock } from '@/components/box-score/GameStatsSection'
 import { LiveGameSummary } from '@/components/game/GameSummary'
 import { GameStreamPanel } from '@/components/streams/GameStreamPanel'
@@ -398,11 +398,12 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
             {/* Game Hub: the stream (when the sport supports it) stays mounted
                 as a persistent companion column; only the data panel below
                 swaps tabs, so the player never remounts or reloads. */}
-            {/* Game Hub workspace: the stream and the data column are handed to
-                GameHubWorkspace, which arranges Watch / Command / Multiview
-                modes WITHOUT moving them between parents — so a mode, tab, or
-                resize change never remounts the player or drops the feed. */}
-            <GameHubWorkspace
+            {/* Game Hub shell host: renders the original layout or the Beta v2
+                Watch/Command/Multiview workspace behind the Old / Beta v2
+                toggle. Both shells lay out these same nodes, so nothing is
+                duplicated and a mode/tab/resize change never remounts the
+                player. */}
+            <GameShell
               hasStream={supportsStream}
               stream={
                 supportsStream ? (
@@ -584,7 +585,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
               </div>
             )}
               </div>
-            </GameHubWorkspace>
+            </GameShell>
           </div>
         )}
       </div>

@@ -13,6 +13,24 @@
 
 export type GameHubMode = 'watch' | 'command' | 'multiview'
 
+/**
+ * Which hub shell to render. `old` is the original two-column Game Hub;
+ * `v2` is the Watch/Command/Multiview redesign. Defaults to `old` so the
+ * toggle is an opt-in beta and nobody's existing layout changes underneath them.
+ */
+export type GameHubShell = 'old' | 'v2'
+
+export const GAME_HUB_SHELLS: readonly GameHubShell[] = ['old', 'v2']
+
+export const GAME_HUB_SHELL_LABELS: Record<GameHubShell, string> = {
+  old: 'Old',
+  v2: 'Beta v2',
+}
+
+export function isGameHubShell(value: unknown): value is GameHubShell {
+  return value === 'old' || value === 'v2'
+}
+
 export const GAME_HUB_MODES: readonly GameHubMode[] = ['watch', 'command', 'multiview']
 
 export const GAME_HUB_MODE_LABELS: Record<GameHubMode, string> = {
@@ -35,6 +53,8 @@ export const MULTIVIEW_LAYOUT_LABELS: Record<MultiviewLayout, string> = {
 export const GAME_HUB_PREFS_KEY = 'fanspot:gamehub'
 
 export interface GameHubPrefs {
+  /** Which shell renders the hub (Old vs the redesign). */
+  shell: GameHubShell
   mode: GameHubMode
   /** Fraction of the width given to the stream/video column (Command mode). */
   split: number
@@ -44,6 +64,7 @@ export interface GameHubPrefs {
 }
 
 export const DEFAULT_GAME_HUB_PREFS: GameHubPrefs = {
+  shell: 'old',
   mode: 'watch',
   split: 0.66,
   sidebarCollapsed: false,
@@ -90,6 +111,7 @@ export function parseGameHubPrefs(raw: string | null | undefined): GameHubPrefs 
   if (!data || typeof data !== 'object') return { ...DEFAULT_GAME_HUB_PREFS }
   const d = data as Record<string, unknown>
   return {
+    shell: isGameHubShell(d.shell) ? d.shell : DEFAULT_GAME_HUB_PREFS.shell,
     mode: isGameHubMode(d.mode) ? d.mode : DEFAULT_GAME_HUB_PREFS.mode,
     split: clampSplit(d.split),
     sidebarCollapsed: typeof d.sidebarCollapsed === 'boolean' ? d.sidebarCollapsed : DEFAULT_GAME_HUB_PREFS.sidebarCollapsed,
@@ -99,6 +121,7 @@ export function parseGameHubPrefs(raw: string | null | undefined): GameHubPrefs 
 
 export function serializeGameHubPrefs(prefs: GameHubPrefs): string {
   return JSON.stringify({
+    shell: isGameHubShell(prefs.shell) ? prefs.shell : 'old',
     mode: prefs.mode,
     split: clampSplit(prefs.split),
     sidebarCollapsed: !!prefs.sidebarCollapsed,

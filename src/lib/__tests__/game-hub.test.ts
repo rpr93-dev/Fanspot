@@ -6,6 +6,7 @@ import {
   activeMultiviewPreset,
   clampSplit,
   isGameHubMode,
+  isGameHubShell,
   isMultiviewLayout,
   multiviewBoardClass,
   multiviewTileClass,
@@ -35,6 +36,11 @@ describe('mode guards', () => {
     expect(isGameHubMode('theater')).toBe(false)
     expect(isMultiviewLayout('auto')).toBe(true)
     expect(isMultiviewLayout('grid')).toBe(false)
+  })
+  it('accepts only the two hub shells', () => {
+    expect(isGameHubShell('old')).toBe(true)
+    expect(isGameHubShell('v2')).toBe(true)
+    expect(isGameHubShell('v3')).toBe(false)
   })
 })
 
@@ -66,11 +72,17 @@ describe('parseGameHubPrefs', () => {
     expect(p.mode).toBe(DEFAULT_GAME_HUB_PREFS.mode)
     expect(p.multiviewLayout).toBe(DEFAULT_GAME_HUB_PREFS.multiviewLayout)
   })
+  it('defaults the shell to Old and keeps a valid v2 opt-in', () => {
+    expect(parseGameHubPrefs(JSON.stringify({ mode: 'watch' })).shell).toBe('old')
+    expect(parseGameHubPrefs(JSON.stringify({ shell: 'v2' })).shell).toBe('v2')
+    expect(parseGameHubPrefs(JSON.stringify({ shell: 'v3' })).shell).toBe('old')
+    expect(DEFAULT_GAME_HUB_PREFS.shell).toBe('old')
+  })
 })
 
 describe('serialize/parse round-trip', () => {
   it('preserves a valid prefs object', () => {
-    const prefs = { mode: 'multiview' as const, split: 0.4, sidebarCollapsed: true, multiviewLayout: 'stack' as const }
+    const prefs = { shell: 'v2' as const, mode: 'multiview' as const, split: 0.4, sidebarCollapsed: true, multiviewLayout: 'stack' as const }
     expect(parseGameHubPrefs(serializeGameHubPrefs(prefs))).toEqual(prefs)
   })
   it('clamps the split on the way out', () => {
