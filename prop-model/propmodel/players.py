@@ -11,6 +11,23 @@ import pandas as pd
 # matches "Marvin Harrison" (some feeds) and vice versa.
 _SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
+# Verified name aliases pinned to a stable nflverse/gsis player_id.
+#
+# The token-overlap fallback already rescues most book-vs-feed first-name
+# differences, but a fuzzy match is a heuristic. For players whose name the
+# books spell differently from the feed (Cameron/Cam Skattebo,
+# Chigoziem/Chig Okonkwo) we pin the *id* the alias refers to, so the match is
+# exact and a namesake can never inherit the history by accident. Entries are
+# verified against the weekly frame's player_id/player_display_name; the alias
+# is only used when that id is actually present and its last name agrees.
+KNOWN_PLAYER_ALIASES: dict[str, str] = {
+    # key = normalize_name(book spelling); value = verified nflverse player_id
+    "cameron skattebo": "00-0040715",
+    "cam skattebo": "00-0040715",
+    "chigoziem okonkwo": "00-0037809",
+    "chig okonkwo": "00-0037809",
+}
+
 
 def normalize_name(name: str) -> str:
     """Lowercase, drop punctuation and generational suffixes, collapse spaces."""
@@ -150,6 +167,18 @@ def resolve_player_id(
     rows = weekly[name_index == wanted]
     if not rows.empty:
         return _disambiguate(rows, weekly, team, positions)
+
+    # Verified alias → stable id. Checked before the fuzzy token-overlap pass:
+    # an alias names an exact player, so it is strictly safer. Only reached
+    # when the exact-name pass matched nothing.
+    alias_pid = KNOWN_PLAYER_ALIASES.get(wanted)
+    if alias_pid:
+        alias_rows = weekly[weekly["player_id"].astype(str) == str(alias_pid)]
+        if not alias_rows.empty:
+            name_col = "player_display_name" if "player_display_name" in weekly.columns else "player_name"
+            frame_last = {_last_token(v) for v in alias_rows[name_col] if isinstance(v, str)}
+            if _last_token(player_name) in frame_last:
+                return _disambiguate(alias_rows, weekly, team, positions)
 
     # Fallback: first-initial + last-name overlap. The exact pass misses when
     # a book uses a shortened/different first name than the feed (the week-6

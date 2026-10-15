@@ -46,6 +46,14 @@ from .data_pipeline import (
 from .game_script import GameLines, OddsApiLineProvider, StaticLineProvider, script_adjustment
 from .model import FullProjection, ModelWeights, Projection, position_guard_reason, project
 from .opponent import defense_allowed, opponent_factor
+from .role import (
+    STATUS_OUT,
+    RoleInfo,
+    expected_opportunities,
+    load_depth_chart,
+    resolve_role,
+    starter_volume_prior,
+)
 from .output import projections_table, write_table
 from .players import normalized_names, resolve_player_id
 from .reliability import DiskCache, cached_fetcher, setup_logging
@@ -68,6 +76,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--weekly", help="offline weekly file (csv/pkl/parquet) instead of nfl_data_py")
     p.add_argument("--data-source", choices=["nflverse", "espn"], default="nflverse", help="history source: nflverse (nfl_data_py) or espn (scoreboard+summaries, dashboard-native)")
     p.add_argument("--lines-json", help="static Vegas lines JSON {'HOU': {total, spread, favorite}}")
+    p.add_argument("--depth-chart", help="timestamped pregame depth-chart/availability file (JSON list or CSV). Only rows effective on/before --as-of are used.")
     p.add_argument("--weights-json", help="ModelWeights override JSON (halflife, opponent, game_script, min_games)")
     p.add_argument("--preseason", action="store_true", help="scale projections to preseason playing time (starters play a fraction of snaps)")
     p.add_argument("--as-of", help="project an event happening on this date (YYYY-MM-DD): uses only data played strictly before it, so same-week games never leak in. Enables walk-forward evaluation.")
@@ -111,6 +120,11 @@ def _targets_from_args(args) -> list[dict]:
                 # Production batches usually omit it; when present it sharpens
                 # the FIRST_START wording for relief-history samples.
                 "role": None if t.get("role") in (None, "") else str(t.get("role")),
+                # Optional availability hint (active | questionable | out).
+                "status": None if t.get("status") in (None, "") else str(t.get("status")),
+                # Optional posted prop line: used ONLY to raise a
+                # market_disagreement diagnostic — never to move the projection.
+                "line": None if t.get("line") in (None, "") else float(t.get("line")),
             })
         return out
     if args.player and args.stat and args.team:
@@ -234,10 +248,38 @@ def _apply_factors(value: float, opp: dict, gs: dict, weights: ModelWeights) -> 
     )
 
 
+def _out_projection(
+    player: str, stat: str, team: str, opp: dict, gs: dict,
+    role_info: RoleInfo, weights: ModelWeights, n_games: int = 0,
+) -> FullProjection:
+    """Abstention row for a player the pregame feed marks OUT.
+
+    An explicit refusal (projection null + named reason) is the honest answer
+    when availability says the player will not play — the history-based
+    projection would describe a game that isn't happening.
+    """
+    from .model import reliability_score
+    spec = get_stat(stat)
+    return FullProjection(
+        player_name=player, stat=spec,
+        projection=None, baseline=None, low=None, high=None,
+        p10=None, p25=None, p50=None, p75=None, p90=None, pred_sd=None,
+        confidence="low", confidence_score=0.0, n_games=n_games,
+        opponent_factor=round(float(opp.get("factor", 1.0)), 3),
+        script_factor=round(float(gs.get("factor", 1.0)), 3),
+        refused_reason="AVAILABILITY_OUT: pregame availability marks this player out — no projection",
+        note="abstained: availability=out (pregame)",
+        warnings=["availability_out: no projection issued for an unavailable player"],
+        role=role_info.to_dict(),
+        reliability_score=reliability_score(n_games, False, bool(opp.get("factor")), False, weights.min_games, 0, 1),
+    )
+
+
 def _prior_projection(
     player: str, stat: str, prior: float, hist: PlayerHistory | None,
     opp: dict, gs: dict, weights: ModelWeights,
     source: str = "ESPN prior",
+    role_info: RoleInfo | None = None,
 ) -> FullProjection:
     """Project from an ESPN-style prior line when NFL history is missing/thin.
 
@@ -249,7 +291,9 @@ def _prior_projection(
     from .model import build_distribution, reliability_score
     spec = get_stat(stat)
     if hist is not None:
-        guard = position_guard_reason(hist.position, spec)
+        guard = position_guard_reason(
+            hist.position, spec, history=hist, min_games=weights.min_games,
+        )
         if guard:
             n = hist.n_games
             return FullProjection(
@@ -282,13 +326,15 @@ def _prior_projection(
         projection=center, baseline=center,
         low=round(center * 0.5, 1), high=round(center * 1.5, 1),
         p10=dist.get("p10"), p25=dist.get("p25"), p50=dist.get("p50"),
-        p75=dist.get("p75"), p90=dist.get("p90"),
-        pred_sd=pred_sd, confidence="low", confidence_score=0.15,
+        p75=dist.get("p75"), p90=dist.get("p90"),    pred_sd=pred_sd, confidence="low", confidence_score=0.15,
         n_games=n,
         opponent_factor=round(float(opp.get("factor", 1.0)), 3),
         script_factor=round(float(gs.get("factor", 1.0)), 3),
         refused_reason=None,
         note=note,
+        role=role_info.to_dict() if role_info is not None else {},
+        expected_volume_source="prior",
+        inputs={"prior_source": source, "prior": round(float(prior), 2)},
         reliability_score=rel,
     )
 
@@ -333,6 +379,7 @@ class RunMemo:
     def __init__(self) -> None:
         self.pids: dict[tuple, str | None] = {}
         self.rates: dict = {}
+        self.starter_priors: dict = {}
         self._name_index = None
 
     def name_index(self, weekly: pd.DataFrame):
@@ -419,12 +466,38 @@ def _defense_rates_for(
     return filtered
 
 
+def _starter_prior_for(
+    memo: RunMemo | None,
+    weekly: pd.DataFrame,
+    stat: str | StatSpec,
+    as_of=None,
+) -> float | None:
+    """Position's typical *starter* opportunity volume, memoized per run.
+
+    Used when a pregame depth chart names a relief-history player the starter:
+    the model projects starter volume rather than a mop-up mean (the
+    Bagent-class miss). Cached keyed by (stat, cutoff) so a batch computes it
+    once.
+    """
+    spec_key = get_stat(stat).key
+    cutoff_key = str(as_of) if as_of is not None else None
+    key = (spec_key, cutoff_key)
+    if memo is None:
+        value, _ = starter_volume_prior(weekly, stat, as_of=as_of)
+        return value
+    if key not in memo.starter_priors:
+        value, _ = starter_volume_prior(weekly, stat, as_of=as_of)
+        memo.starter_priors[key] = value
+    return memo.starter_priors[key]
+
+
 def _project_one(
     target: dict, weekly: pd.DataFrame, lines_provider, weights: ModelWeights, args,
     priors: dict[str, float] | None = None,
     memo: RunMemo | None = None,
     known_codes: set[str] | None = None,
     history_cutoff=None,
+    depth_entries=None,
 ) -> FullProjection:
     player, stat = target["player"], target["stat"]
     # Normalize fantasy/broadcast spellings (LAR→LA, JAX→JAC, …) at the
@@ -452,26 +525,42 @@ def _project_one(
             return None
         return float(prior)
 
+    def _role_for(position: str, missed: int) -> RoleInfo:
+        return resolve_role(
+            depth_entries or [], player, team, position,
+            as_of=str(history_cutoff) if history_cutoff is not None else None,
+            batch_role=target.get("role"), batch_status=target.get("status"),
+            missed_games=missed,
+        )
+
     if pid is None:
         # No NFL history at all (rookie, or a name we can't match). If the
         # caller gave us an ESPN-style prior line, project that with a clear
         # note instead of refusing — a number beats a wall of refusals, and
         # the note keeps it honest.
+        role_info0 = _role_for("", 0)
+        if role_info0.status == STATUS_OUT:
+            return _out_projection(player, stat, team, opp, gs, role_info0, weights)
         p = _get_prior()
         if p is not None:
-            return _prior_projection(player, stat, p, None, opp, gs, weights)
+            return _prior_projection(player, stat, p, None, opp, gs, weights, role_info=role_info0)
         empty = pd.DataFrame(columns=["season", "week", "game_id", "date", "opponent", "value"])
         hist = PlayerHistory(
             stat=get_stat(stat), player_id="", player_name=player, position="?",
             team=team, n_requested=args.n_games, games=empty, missed_games=empty,
             flags=[QualityFlag("NO_DATA", "error", f"Player '{player}' ({team}) not found in weekly data")],
         )
-        return project(hist, opp, gs, weights)
+        return project(hist, opp, gs, weights, role_info=role_info0,
+                       market_line=target.get("line"))
 
     hist = fetch_player_history(
         pid, stat, n_games=args.n_games, seasons=seasons, fetcher=lambda s: weekly,
         as_of=history_cutoff,
     )
+
+    role_info = _role_for(getattr(hist, "position", ""), len(hist.missed_games))
+    if role_info.status == STATUS_OUT:
+        return _out_projection(player, stat, team, opp, gs, role_info, weights, n_games=hist.n_games)
 
     pos_prior = None
     if priors is not None:
@@ -492,18 +581,24 @@ def _project_one(
     # average so a thin-history player still projects (wide band, low
     # confidence) instead of vanishing as an INSUFFICIENT_HISTORY refusal —
     # 433/4,007 targets (10.8%) were lost this way in the season backtest.
+    starter_prior = _starter_prior_for(
+        memo, weekly, stat, as_of=history_cutoff,
+    )
+
     if not hist.ok:
         if prior is not None:
-            return _prior_projection(player, stat, float(prior), hist, opp, gs, weights)
+            return _prior_projection(player, stat, float(prior), hist, opp, gs, weights,
+                                     role_info=role_info)
         if pos_prior is not None:
             return _prior_projection(
                 player, stat, float(pos_prior), hist, opp, gs, weights,
-                source="position-prior fallback (thin history)",
+                source="position-prior fallback (thin history)", role_info=role_info,
             )
 
     proj = project(
         hist, opp, gs, weights, position_prior=pos_prior, espn_prior=_get_prior(),
-        role=target.get("role"),
+        role=target.get("role"), role_info=role_info,
+        starter_volume_prior=starter_prior, market_line=target.get("line"),
     )
     if proj.player_name != player:
         # Keep the caller's display name (the dashboard built targets from full
@@ -532,6 +627,9 @@ def _project_one(
             refused_reason=proj.refused_reason,
             note=(proj.note + " · " if proj.note else "") + "preseason-adjusted",
             warnings=proj.warnings, inputs=proj.inputs,
+            expected_volume=proj.expected_volume,
+            expected_volume_source=proj.expected_volume_source,
+            role=proj.role,
             reliability_score=proj.reliability_score,
         )
 
@@ -593,6 +691,17 @@ def main(argv: list[str] | None = None) -> int:
     # Per-target isolation: one bad target (unknown stat, bad prior, …) becomes
     # an explicit failure row instead of aborting the batch — the documented
     # contract of this CLI. The failure names its cause in refused_reason.
+    # Pregame depth chart / availability (timestamped). Unknown path or a
+    # missing file is not fatal — role uncertainty is surfaced per target.
+    depth_entries = None
+    if getattr(args, "depth_chart", None):
+        try:
+            depth_entries = load_depth_chart(args.depth_chart, as_of=history_cutoff)
+            logger.info("Loaded %d pregame depth-chart rows (as-of %s)", len(depth_entries), history_cutoff)
+        except Exception as e:  # noqa: BLE001 — a bad feed must not kill the batch
+            logger.warning("Could not load depth chart %s: %s", args.depth_chart, e)
+            depth_entries = None
+
     projections: list[FullProjection] = []
     priors: dict[str, float] = {}
     memo = RunMemo()
@@ -601,6 +710,7 @@ def main(argv: list[str] | None = None) -> int:
             result = _project_one(
                 t, weekly, lines_provider, weights, args, priors,
                 memo=memo, known_codes=known_codes, history_cutoff=history_cutoff,
+                depth_entries=depth_entries,
             )
             projections.append(result)
         except Exception as e:  # noqa: BLE001 — keep the batch alive

@@ -16,6 +16,10 @@ cache/
 # Game-day ledger (pre-game snapshots + live points for engine tuning)
 ledger/
 
+# Forward-test frozen snapshots + honest-eval output (regenerated, hash-stamped)
+forward/snapshots/
+eval_out/
+
 # Local config / secrets
 .env
 .env.*

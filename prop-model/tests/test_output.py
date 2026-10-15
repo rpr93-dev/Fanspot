@@ -155,7 +155,7 @@ def test_projections_table_schema():
         "reliability",
         "p10", "p25", "p50", "p75", "p90", "pred_sd",
         "effective_sample_size", "confidence_score", "role_factor", "recent_form_factor",
-        "warnings",
+        "expected_volume", "expected_volume_source", "warnings",
     ]
     row = df.iloc[0]
     assert row["my_projection"] == 232.5

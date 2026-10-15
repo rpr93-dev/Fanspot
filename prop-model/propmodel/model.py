@@ -42,6 +42,12 @@ import numpy as np
 import pandas as pd
 
 from .data_pipeline import PlayerHistory
+from .role import (
+    START_PROXY_VOLUME,
+    STATUS_OUT,
+    RoleInfo,
+    expected_opportunities,
+)
 from .stats import StatSpec
 
 
@@ -67,7 +73,7 @@ class EdgeResult:
     edge: float = 0.0
     over_prob: float = 0.5
     pick: str = "over"  # "over" or "under" — every pick takes a side, never "fair"
-    strong: bool = False  # strong pick: high edge AND high confidence
+    strong: bool = False  # strong pick: meaningful edge on the model distribution (NOT the unvalidated confidence label)
 
     def to_dict(self) -> dict:
         return {
@@ -139,16 +145,9 @@ GAME_LOG_CV_P75: dict[tuple[str, str], float] = {
 }
 
 # Opportunity volume that marks a game as a *start* rather than relief duty
-# (backup/mop-up snaps). Used to flag samples that look like garbage time.
-_START_PROXY_VOLUME: dict[str, float] = {
-    "passing_yards": 15,
-    "passing_tds": 15,
-    "passing_attempts": 15,
-    "completions": 15,
-    "rushing_yards": 8,
-    "receiving_yards": 3,
-    "receptions": 3,
-}
+# (backup/mop-up snaps). Single definition lives in role.py (shared with the
+# pregame role layer); kept under the old name for callers/tests.
+_START_PROXY_VOLUME: dict[str, float] = START_PROXY_VOLUME
 
 
 @dataclass(frozen=True)
@@ -222,6 +221,11 @@ class FullProjection:
     warnings: list[str] = field(default_factory=list)
     inputs: dict = field(default_factory=dict)
     edge: EdgeResult | None = None
+    # Opportunity-first diagnostics: the expected volume the projection was
+    # built from and where it came from (own history vs pregame role).
+    expected_volume: float | None = None
+    expected_volume_source: str | None = None
+    role: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d = {
@@ -246,6 +250,12 @@ class FullProjection:
             "confidence_score": round(self.confidence_score, 3),
             "pred_sd": round(self.pred_sd, 2) if self.pred_sd else None,
         }
+        if self.expected_volume is not None:
+            d["expected_volume"] = round(self.expected_volume, 2)
+        if self.expected_volume_source:
+            d["expected_volume_source"] = self.expected_volume_source
+        if self.role:
+            d["role"] = self.role
         for pkey, dkey in [("p10","p10"),("p25","p25"),("p50","p50"),("p75","p75"),("p90","p90")]:
             if getattr(self, pkey) is not None:
                 d[dkey] = round(getattr(self, pkey), 1)
@@ -697,13 +707,17 @@ def compute_edge(
 
     pick = "over" if edge >= 0 else "under"
 
-    # Strong: high confidence + meaningful edge (≥0.5 std dev or ≥40% probability tilt)
+    # Strong: a meaningful edge on the model's own distribution (>= 0.5 sd from
+    # the line and a >= 65%/35% probability tilt). Deliberately does NOT gate on
+    # the confidence label/score: the 2026 season backtest showed high and
+    # medium labels have nearly identical MAE within every stat, so ranking or
+    # sizing picks by the label would be trusting an unvalidated signal. The
+    # label is displayed for context only; pick strength is edge-based.
     strong = False
-    if confidence_score >= 0.5:
-        if pick == "over" and over_prob >= 0.65 and abs_z >= 0.5:
-            strong = True
-        elif pick == "under" and over_prob <= 0.35 and abs_z >= 0.5:
-            strong = True
+    if pick == "over" and over_prob >= 0.65 and abs_z >= 0.5:
+        strong = True
+    elif pick == "under" and over_prob <= 0.35 and abs_z >= 0.5:
+        strong = True
 
     return EdgeResult(
         line=line,
@@ -737,13 +751,49 @@ def _absence_note(history: PlayerHistory) -> str | None:
     return " · ".join(parts) if parts else None
 
 
-def position_guard_reason(position: str, stat: StatSpec) -> str | None:
+def _has_evaluable_sample(history: PlayerHistory | None, min_games: int) -> bool:
+    """Whether a player has enough real usage for a cross-position market.
+
+    A WR rushing-yards prop is modelable when the player actually carries the
+    ball; a receiver with no carries is not, and must be refused as an
+    unsupported market rather than projected off zeros.
+    """
+    if history is None or history.games is None or history.games.empty:
+        return False
+    vals = pd.to_numeric(history.games["value"], errors="coerce").dropna()
+    if len(vals) < min_games:
+        return False
+    spec = history.stat
+    if spec.opportunity_columns:
+        col = spec.opportunity_columns[0]
+        if col in history.games.columns:
+            opp = pd.to_numeric(history.games[col], errors="coerce").dropna()
+            if int((opp > 0).sum()) < 3:
+                return False
+    return True
+
+
+def position_guard_reason(
+    position: str,
+    stat: StatSpec,
+    history: PlayerHistory | None = None,
+    min_games: int = 3,
+) -> str | None:
+    """Refuse only markets the model genuinely cannot evaluate.
+
+    A stat that isn't registered for a position is refused *explicitly* as an
+    ``UNSUPPORTED_MARKET`` — not silently mis-projected. When the player has a
+    real, evaluable sample in the stat (e.g. a receiver who actually carries
+    the ball), the cross-position market is allowed through instead.
+    """
     pos = str(position or "").upper()
     if pos and pos != "?" and pos not in stat.positions:
         pos_list = "/".join(stat.positions)
+        if _has_evaluable_sample(history, min_games):
+            return None
         return (
-            f"POSITION_MISMATCH: {pos} cannot produce {stat.key} "
-            f"(valid positions: {pos_list})"
+            f"POSITION_MISMATCH (UNSUPPORTED_MARKET): {stat.key} is not modeled "
+            f"for {pos} (supported positions: {pos_list}); no evaluable {pos} sample"
         )
     return None
 
@@ -779,8 +829,25 @@ def project(
     historical_residuals: np.ndarray | None = None,
     weekly: pd.DataFrame | None = None,
     role: str | None = None,
+    role_info: RoleInfo | None = None,
+    starter_volume_prior: float | None = None,
+    market_line: float | None = None,
 ) -> FullProjection:
-    """Project the next game value for history\'s player+stat."""
+    """Project the next game value for history\'s player+stat.
+
+    ``role_info`` carries pregame starter/availability information (see
+    :mod:`propmodel.role`). ``starter_volume_prior`` is the position's typical
+    starter opportunity volume, used when the player is an expected starter
+    with a relief-only sample. ``market_line`` is an optional posted prop line
+    used ONLY to raise a ``market_disagreement`` diagnostic — the projection is
+    never shifted toward it.
+    """
+    if role_info is None and role is not None:
+        # Back-compat shim: the old bare role string maps onto a RoleInfo so
+        # both call styles flow through one path.
+        from .role import resolve_role as _resolve_role
+        role_info = _resolve_role([], history.player_name, getattr(history, "team", ""),
+                                  getattr(history, "position", ""), batch_role=role)
     weights = weights or ModelWeights()
     opp_f, opp_ok = _factor_value(opponent_factor)
     gs_f, gs_ok = _factor_value(script_factor)
@@ -820,9 +887,20 @@ def project(
     if not history.ok or n < weights.min_games or history.games.empty:
         return _make_refusal(_refusal_reason(history, weights.min_games))
 
-    guard = position_guard_reason(getattr(history, "position", ""), history.stat)
+    guard = position_guard_reason(
+        getattr(history, "position", ""), history.stat,
+        history=history, min_games=weights.min_games,
+    )
     if guard:
         return _make_refusal(guard)
+
+    # Availability gate: a player the pregame feed marks OUT has zero expected
+    # workload. Refuse explicitly rather than projecting his history forward —
+    # an abstention is an answer; a fabricated number is not.
+    if role_info is not None and role_info.status == STATUS_OUT:
+        return _make_refusal(
+            "AVAILABILITY_OUT: pregame availability marks this player out — no projection"
+        )
 
     # Step 1: Winsorize (robust against outliers)
     values = np.asarray(history.games["value"].tolist(), dtype=float)
@@ -830,6 +908,11 @@ def project(
 
     # Step 1b: Role sanity — does this sample look like relief/mop-up duty?
     relief, n_starts, n_relief_games = _relief_duty(history)
+
+    # Step 1c: Opportunity-first expectation from pregame role information.
+    exp = expected_opportunities(
+        history, role_info, history.stat, starter_prior=starter_volume_prior,
+    )
 
     # Step 2: Recency-weighted mean (+ opportunity*efficiency decomposition when available)
     w = recency_weights(len(values_clean), halflife)
@@ -851,6 +934,11 @@ def project(
                 # Winsorize opportunity too (cap insane carry counts)
                 opp_clean = _winsorize(opp_vals, weights.winsor_mad_mult)
                 opp_mean = _weighted_mean(opp_clean, w)
+                if exp.column == opp_col and exp.value is not None:
+                    # Opportunity-first: pregame role overrides the own-history
+                    # volume (backup→starter, returning starter, out). Efficiency
+                    # below is still estimated from the player's own games.
+                    opp_mean = float(exp.value)
                 # Efficiency: yards per target/carry/attempt
                 eff_vals = np.array([
                     float(values_clean[i]) / max(float(opp_vals_raw[i]), 1.0) if valid_mask[i] else 0.0
@@ -918,6 +1006,21 @@ def project(
             relief_warning = "FIRST_START (role=named_starter): " + relief_warning
         elif role == "backup":
             relief_warning = "BACKUP_ROLE (role=backup): " + relief_warning
+
+    # Pregame-role diagnostics (opportunity-first). An explicitly
+    # contradictory role gets a wider band as well as a warning: the model
+    # should look unsure when its inputs disagree.
+    role_warnings_list: list[str] = []
+    if role_info is not None:
+        role_warnings_list.extend(n for n in role_info.notes if n)
+        if role_info.uncertain:
+            pred_sd = pred_sd * 1.25
+            role_warnings_list.append(
+                "role_uncertain: pregame starter/availability information is missing or "
+                "contradictory — projection widened and confidence capped"
+            )
+    if exp.source == "role_starter_prior" and exp.note:
+        role_warnings_list.append(exp.note)
 
     # Step 5: Apply opponent and game-script adjustments.
     # The two factors multiply — each is shrunk toward 1.0 on its own, but
@@ -1012,6 +1115,21 @@ def project(
         if baseline is not None:
             baseline = max(lo, min(hi, baseline))
 
+    # Market-line disagreement is a DIAGNOSTIC, not an objective. When the
+    # model and a posted line differ materially, the honest surface says so —
+    # it never nudges the projection toward the line (that would replace the
+    # model's own read with the book's and erase the disagreement being
+    # studied).
+    market_warning: str | None = None
+    if market_line is not None and market_line > 0 and projection is not None and projection > 0:
+        diff = abs(projection - market_line) / max(float(market_line), 1.0)
+        if diff > 0.25:
+            market_warning = (
+                f"market_disagreement: model {projection:.1f} vs posted line {market_line:.1f} "
+                f"({diff:.0%}) — unexplained market disagreement (diagnostic only; "
+                "projection NOT forced toward the line)"
+            )
+
     # Step 10: Confidence (with season-boundary penalty)
     role_stable = role_factor is None or abs(role_factor - 1.0) < 0.10
     game_cv = _game_cv(values_clean)
@@ -1026,6 +1144,11 @@ def project(
         # A relief-only sample is never a confident read on a starter's Sunday.
         confidence_label = "low"
         confidence_score = min(confidence_score, 0.29)
+    if role_info is not None and role_info.uncertain:
+        # Contradictory pregame role info: never allow a "high" read.
+        if confidence_label == "high":
+            confidence_label = "medium"
+        confidence_score = min(confidence_score, 0.49)
     # Phase 11: Reduce confidence when heavily reliant on prior season
     if season_warnings:
         confidence_score = confidence_score * 0.85
@@ -1051,12 +1174,15 @@ def project(
 
     # Step 12: Return
     all_warnings = role_warnings + season_warnings + guardrail_warnings
+    all_warnings = all_warnings + role_warnings_list
     if relief_warning:
         all_warnings = all_warnings + [relief_warning]
     if clamp_note:
         all_warnings = all_warnings + [clamp_note]
     if espn_disagreement_warning:
         all_warnings = all_warnings + [espn_disagreement_warning]
+    if market_warning:
+        all_warnings = all_warnings + [market_warning]
     return FullProjection(
         player_name=history.player_name, stat=history.stat,
         projection=projection, baseline=baseline,
@@ -1072,10 +1198,16 @@ def project(
         refused_reason=None,
         note=" · ".join(notes_list) if notes_list else None,
         warnings=all_warnings,
+        expected_volume=exp.value,
+        expected_volume_source=exp.source,
+        role=role_info.to_dict() if role_info is not None else {},
         inputs={
             "raw_mean": round(raw_mean, 2),
             "ess": round(ess, 2),
             "halflife": halflife,
+            "expected_volume": round(exp.value, 2) if exp.value is not None else None,
+            "expected_volume_source": exp.source,
+            "n_start_games": exp.n_start_games,
             "opponent_raw": round(opp_f, 3),
             "game_script_raw": round(gs_f, 3),
             "decomposed_baseline": round(decomposed_baseline, 2) if decomposed_baseline is not None else None,

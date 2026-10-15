@@ -13,6 +13,7 @@ Built in stages — each stage is a separate, testable module:
 | 2. Opponent adjustment | `propmodel/opponent.py` | ✅ done |
 | 3. Game-script adjustment (Vegas total/spread) | `propmodel/game_script.py` | ✅ done |
 | 4. Weighted model + confidence range | `propmodel/model.py` | ✅ done |
+| 4b. Pregame role / workload awareness | `propmodel/role.py` | ✅ done |
 | 5. Reliability (retry, rate limit, cache, logging, cron) | `propmodel/reliability.py` | ✅ done |
 | 6. Output table + CLI (player, stat, projection, edge, confidence) | `propmodel/output.py`, `propmodel/cli.py` | ✅ done |
 
@@ -76,6 +77,38 @@ python -m propmodel.cli --input batch.json --lines-json lines.json --output proj
 ```
 
 Lines JSON format: `{"HOU": {"total": 40.5, "spread": 1.5, "favorite": "HOU"}}`.
+
+## Role / workload awareness (`propmodel/role.py`)
+
+The model projects **expected opportunities first**, then converts volume to
+yards/receptions through a shrunk efficiency. Opportunity expectation comes
+from the player's own games *and* timestamped pregame role information:
+
+- expected starter with a relief-only sample → the position's starter volume
+  (the promoted-backup fix, e.g. Bagent wk4: history-only 23 yds → role-aware
+  244 yds, actual 268);
+- returning from a missed game → keeps pre-absence volume (a gap is not a
+  zero);
+- availability `out` → **abstains** (`AVAILABILITY_OUT`);
+- missing/contradictory role → flagged (`role_uncertain`), interval widened,
+  confidence capped — never silently guessed.
+
+Supply a feed with `--depth-chart depth.csv` (or a JSON list) and per-target
+`role`/`status` hints; rows are filtered to `effective <= --as-of`, so a
+pre-kickoff snapshot can never see post-kickoff news. A large model-vs-line gap
+raises `market_disagreement` — a diagnostic only; the projection is never
+moved toward the line (`--input` targets may carry `line`).
+
+## Evaluation & forward test
+
+- `eval_honest.py` — model vs the **weighted 8-game baseline on identical
+  rows**, per stat, with two-way cluster-bootstrap CIs, component ablations,
+  workload-grouped coverage, and a freeze manifest. Development and forward
+  splits are reported separately. See `REPORT_honest.md`.
+- `forward/forward_test.py` — verifies the slate/week labels, refuses a cutoff
+  after `--locked-at`, and writes an immutable timestamped snapshot
+  (code hashes + weights + inputs + projections). A corrected run gets its own
+  snapshot; existing ones are never overwritten.
 
 ## Test
 

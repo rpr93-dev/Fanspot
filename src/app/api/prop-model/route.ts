@@ -171,10 +171,16 @@ export async function POST(request: Request) {
   }
   const weightsPath = await tunedWeightsPath()
   const normLines = normalizeLines(body?.lines)
+  // Optional timestamped pregame depth chart / availability feed. A client may
+  // send an array of {player, team, position, role, status, effective, source};
+  // the CLI drops rows effective after --as-of, so a pre-kickoff run can never
+  // see post-kickoff news. Per-target role/status hints ride along in `targets`.
+  const depthChart = Array.isArray(body?.depthChart) ? body.depthChart : null
   const preseason = !!body?.preseason
   const cacheKey = resultCacheKey({
     targets: normalizeTargets(targets),
     sport, asOf, dataSource, weightsPath, lines: normLines, preseason,
+    depthChart: depthChart ? JSON.stringify(depthChart) : null,
   })
 
   const cached = getFreshResult(cacheKey)
@@ -213,6 +219,11 @@ export async function POST(request: Request) {
         if (weightsPath) args.push('--weights-json', weightsPath)
       }
       if (asOf) args.push('--as-of', asOf)
+      if (depthChart) {
+        const depthPath = path.join(tmp, 'depth.json')
+        await fs.writeFile(depthPath, JSON.stringify(depthChart))
+        args.push('--depth-chart', depthPath)
+      }
       if (preseason) args.push('--preseason')
       if (normLines) {
         const linesPath = path.join(tmp, 'lines.json')
@@ -243,6 +254,10 @@ export async function POST(request: Request) {
       script_factor: r.script_factor,
       role_factor: r.role_factor ?? null,
       recent_form_factor: r.recent_form_factor ?? null,
+      // Opportunity-first diagnostics (pregame role → expected volume).
+      expected_volume: r.expected_volume ?? null,
+      expected_volume_source: r.expected_volume_source ?? null,
+      role: r.role ?? null,
       refused_reason: r.refused_reason,
       note: r.note ?? null,
       // The CLI historically emitted warnings as a JSON-encoded string;

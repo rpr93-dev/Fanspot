@@ -249,6 +249,18 @@ def test_passing_uses_asymmetric_upper_clamp():
     assert FACTOR_CLAMP_HI_BY_STAT["passing_yards"] > ModelWeights().factor_clamp_hi
 
 
+# ── item 4: confidence label does not rank picks ───────────────────────────
+
+def test_pick_strength_ignores_confidence_label():
+    from propmodel.model import compute_edge
+
+    # Same projection/line; only the (unvalidated) confidence score differs.
+    low_conf = compute_edge(260.0, 20.0, 0.0, 230.0, "continuous")
+    high_conf = compute_edge(260.0, 20.0, 1.0, 230.0, "continuous")
+    assert low_conf.strong == high_conf.strong
+    assert low_conf.pick == high_conf.pick == "over"
+
+
 def test_clamp_bounds_are_tunable_via_weights():
     hist = _qb_history(attempts=[34] * 8, yds=[250.0] * 8)
     w = ModelWeights(factor_clamp_lo=0.80, factor_clamp_hi=1.05)

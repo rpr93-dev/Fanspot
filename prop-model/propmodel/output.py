@@ -23,7 +23,7 @@ TABLE_COLUMNS = [
     # Canonical extension (Phase 2): distribution + diagnostics
     "p10", "p25", "p50", "p75", "p90", "pred_sd",
     "effective_sample_size", "confidence_score", "role_factor", "recent_form_factor",
-    "warnings",
+    "expected_volume", "expected_volume_source", "warnings",
 ]
 
 
@@ -71,6 +71,8 @@ def projections_table(
             "confidence_score": d.get("confidence_score"),
             "role_factor": d.get("role_factor"),
             "recent_form_factor": d.get("recent_form_factor"),
+            "expected_volume": d.get("expected_volume"),
+            "expected_volume_source": d.get("expected_volume_source"),
             # Native list: the JSON writer serializes it as an array for the
             # dashboard. The CSV branch stringifies it (see write_table).
             "warnings": d.get("warnings") or None,
