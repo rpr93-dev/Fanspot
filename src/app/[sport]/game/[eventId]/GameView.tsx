@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { teams, sportConfig } from '@/data/teams'
 import NextGamePanel from '@/components/NextGamePanel'
+import { GameHubWorkspace } from '@/components/game-hub/GameHubWorkspace'
 import { GameStatsSection, LastPlayBlock } from '@/components/box-score/GameStatsSection'
 import { LiveGameSummary } from '@/components/game/GameSummary'
 import { GameStreamPanel } from '@/components/streams/GameStreamPanel'
@@ -397,26 +398,33 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
             {/* Game Hub: the stream (when the sport supports it) stays mounted
                 as a persistent companion column; only the data panel below
                 swaps tabs, so the player never remounts or reloads. */}
-            <div className={supportsStream ? 'grid gap-5 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)] lg:items-start' : ''}>
-              {supportsStream && (
-                <div className="min-w-0 lg:sticky lg:top-20 space-y-2">
-                  <GameStreamPanel
-                    sport={sportKey.toLowerCase() as 'nfl' | 'nba' | 'nhl' | 'mlb'}
-                    awayName={game.away.name}
-                    homeName={game.home.name}
-                    preselect={watchPreselect}
-                    autoplay={watchAutoplay}
-                  />
-                  <Link
-                    href={multiviewHref([{ sport: sportKey.toLowerCase() as 'nfl' | 'nba' | 'nhl' | 'mlb', eventId }])}
-                    prefetch={false}
-                    className="fs-meta hover:text-fs-text inline-block underline-offset-2 hover:underline"
-                  >
-                    ▦ Open in split screen — watch alongside another game →
-                  </Link>
-                </div>
-              )}
-
+            {/* Game Hub workspace: the stream and the data column are handed to
+                GameHubWorkspace, which arranges Watch / Command / Multiview
+                modes WITHOUT moving them between parents — so a mode, tab, or
+                resize change never remounts the player or drops the feed. */}
+            <GameHubWorkspace
+              hasStream={supportsStream}
+              stream={
+                supportsStream ? (
+                  <div className="space-y-2">
+                    <GameStreamPanel
+                      sport={sportKey.toLowerCase() as 'nfl' | 'nba' | 'nhl' | 'mlb'}
+                      awayName={game.away.name}
+                      homeName={game.home.name}
+                      preselect={watchPreselect}
+                      autoplay={watchAutoplay}
+                    />
+                    <Link
+                      href={multiviewHref([{ sport: sportKey.toLowerCase() as 'nfl' | 'nba' | 'nhl' | 'mlb', eventId }])}
+                      prefetch={false}
+                      className="fs-meta hover:text-fs-text inline-block underline-offset-2 hover:underline"
+                    >
+                      ▦ Open in split screen — watch alongside another game →
+                    </Link>
+                  </div>
+                ) : null
+              }
+            >
               <div className="min-w-0 space-y-4">
                 <div className="flex flex-wrap gap-1 p-1 rounded-full border border-fs-line bg-fs-panel/60 w-fit max-w-full" role="tablist" aria-label="Game sections">
               {availableTabs.map((t, i) => (
@@ -576,7 +584,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
               </div>
             )}
               </div>
-            </div>
+            </GameHubWorkspace>
           </div>
         )}
       </div>

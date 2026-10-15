@@ -29,6 +29,8 @@ export function MultiviewTile({
   paused,
   spotlighted,
   canSpotlight,
+  active,
+  onSelectActive,
   onTogglePause,
   onToggleSpotlight,
   onRemove,
@@ -38,6 +40,9 @@ export function MultiviewTile({
   paused: boolean
   spotlighted: boolean
   canSpotlight: boolean
+  /** This tile supplies the statistics shown beside the board. */
+  active?: boolean
+  onSelectActive?: () => void
   onTogglePause: () => void
   onToggleSpotlight: () => void
   onRemove: () => void
@@ -49,6 +54,8 @@ export function MultiviewTile({
         spotlighted={spotlighted}
         canSpotlight={canSpotlight}
         autoplay={autoplay}
+        active={active}
+        onSelectActive={onSelectActive}
         onTogglePause={onTogglePause}
         onToggleSpotlight={onToggleSpotlight}
         onRemove={onRemove}
@@ -62,6 +69,8 @@ export function MultiviewTile({
       spotlighted={spotlighted}
       canSpotlight={canSpotlight}
       autoplay={autoplay}
+      active={active}
+      onSelectActive={onSelectActive}
       onTogglePause={onTogglePause}
       onToggleSpotlight={onToggleSpotlight}
       onRemove={onRemove}
@@ -75,15 +84,20 @@ function TileShell({
   header,
   controls,
   children,
+  active,
 }: {
   label: string
   hubHref: string | null
   header: React.ReactNode
   controls: React.ReactNode
   children: React.ReactNode
+  active?: boolean
 }) {
   return (
-    <article aria-label={label} className="fs-panel min-w-0 overflow-hidden flex flex-col">
+    <article
+      aria-label={label}
+      className={`fs-panel min-w-0 overflow-hidden flex flex-col ${active ? 'ring-1 ring-fs-turf/50' : ''}`}
+    >
       <div className="p-3 sm:p-4 border-b border-fs-line space-y-2.5">
         {header}
         <div className="flex flex-wrap items-center gap-1.5">
@@ -105,6 +119,8 @@ function TileControls({
   paused,
   spotlighted,
   canSpotlight,
+  active,
+  onSelectActive,
   onTogglePause,
   onToggleSpotlight,
   onRemove,
@@ -113,6 +129,8 @@ function TileControls({
   paused: boolean
   spotlighted: boolean
   canSpotlight: boolean
+  active?: boolean
+  onSelectActive?: () => void
   onTogglePause: () => void
   onToggleSpotlight: () => void
   onRemove: () => void
@@ -121,6 +139,17 @@ function TileControls({
   const btn = 'fs-meta px-2 py-1 rounded-md hover:text-fs-text hover:bg-white/5'
   return (
     <>
+      {onSelectActive && (
+        <button
+          type="button"
+          className={`${btn} ${active ? '!text-fs-turf' : ''}`}
+          aria-pressed={!!active}
+          onClick={onSelectActive}
+          title={active ? 'Showing this game’s statistics' : 'Show this game’s statistics'}
+        >
+          {active ? '◉ Stats' : '◎ Stats'}
+        </button>
+      )}
       {canSpotlight && (
         <button type="button" className={btn} aria-pressed={spotlighted} onClick={onToggleSpotlight} title={spotlighted ? 'Back to grid' : 'Spotlight this game'}>
           {spotlighted ? '◧ Grid' : '◧ Spotlight'}
@@ -142,6 +171,8 @@ function GameTile({
   paused,
   spotlighted,
   canSpotlight,
+  active,
+  onSelectActive,
   onTogglePause,
   onToggleSpotlight,
   onRemove,
@@ -151,6 +182,8 @@ function GameTile({
   paused: boolean
   spotlighted: boolean
   canSpotlight: boolean
+  active?: boolean
+  onSelectActive?: () => void
   onTogglePause: () => void
   onToggleSpotlight: () => void
   onRemove: () => void
@@ -193,6 +226,7 @@ function GameTile({
     <TileShell
       label={label}
       hubHref={hubHref}
+      active={active}
       header={
         failed ? null : !game ? (
           <div className="fs-skeleton h-10" aria-hidden="true" />
@@ -216,6 +250,8 @@ function GameTile({
           paused={paused}
           spotlighted={spotlighted}
           canSpotlight={canSpotlight}
+          active={active}
+          onSelectActive={onSelectActive}
           onTogglePause={onTogglePause}
           onToggleSpotlight={onToggleSpotlight}
           onRemove={onRemove}
@@ -252,6 +288,8 @@ function RedzoneTile({
   spotlighted,
   canSpotlight,
   autoplay,
+  active,
+  onSelectActive,
   onTogglePause,
   onToggleSpotlight,
   onRemove,
@@ -260,6 +298,8 @@ function RedzoneTile({
   spotlighted: boolean
   canSpotlight: boolean
   autoplay: boolean
+  active?: boolean
+  onSelectActive?: () => void
   onTogglePause: () => void
   onToggleSpotlight: () => void
   onRemove: () => void
@@ -272,6 +312,7 @@ function RedzoneTile({
     <TileShell
       label="NFL RedZone"
       hubHref="/nfl/redzone"
+      active={active}
       header={
         <div className="flex items-center gap-2 min-w-0">
           <span
@@ -295,6 +336,8 @@ function RedzoneTile({
           paused={paused}
           spotlighted={spotlighted}
           canSpotlight={canSpotlight}
+          active={active}
+          onSelectActive={onSelectActive}
           onTogglePause={onTogglePause}
           onToggleSpotlight={onToggleSpotlight}
           onRemove={onRemove}
