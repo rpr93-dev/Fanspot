@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { eventDateToAsOf, extractLiveStats, quartersPlayed, isGameComplete, namesMatch, periodLabel } from '@/lib/propLedger'
-import { closingLineMap, scorePicks } from '@/lib/propGrades'
+import { closingLineMap, scorePicks, statLabel } from '@/lib/propGrades'
 import { isOutTier, parseRosterInjuries, teamQbs } from '@/lib/injury'
 import { computeOverUnderEdge, EDGE_STYLES, formatPrice, normalizePlayerName, pickConfidencePct } from '@/lib/propEdge'
 import { PlayerProjections, type BookPlayer, type ProjectionRow } from '@/components/PlayerProjections'
@@ -246,26 +246,49 @@ export default function NextGamePanel({
   // final they drive position labels + the effective-lineup filter. (A final
   // without starters used to blank the whole Model-vs-Final table even when a
   // pre-game snapshot was saved, because the empty lineup filtered every row.)
+  // Settled flags: a side is "settled" once its outlook request has finished
+  // (success or error). The model may only run — and the pre-game snapshot may
+  // only be recorded — after BOTH sides have settled, so a transient failure or
+  // a slow opponent feed can never lock in a one-team snapshot. (That exact
+  // race silently dropped one team from the PIT@TB snapshot.)
+  const [ourLineupSettled, setOurLineupSettled] = useState(false)
+  const [oppLineupSettled, setOppLineupSettled] = useState(false)
+
   useEffect(() => {
     if (!isModelSport) return
     let cancelled = false
+    setOurLineupSettled(false)
+    setOppLineupSettled(false)
 
-    async function load(abbr: string | undefined, setter: (s: Starter[] | null) => void) {
-      if (!abbr) return
-      try {
-        const res = await fetch(`/api/fantasy/team-outlook/${sport.toLowerCase()}/${abbr.toLowerCase()}`, {
-          signal: AbortSignal.timeout(30000),
-        })
-        const body = await res.json().catch(() => ({}))
-        if (res.ok && !cancelled) setter(body.starters ?? null)
-        else if (!cancelled) setFantasyError(body.message ?? `Could not load ${abbr} outlook`)
-      } catch {
-        if (!cancelled) setFantasyError(`Could not load ${abbr} outlook`)
+    async function load(
+      abbr: string | undefined,
+      setter: (s: Starter[] | null) => void,
+      setSettled: (v: boolean) => void,
+    ) {
+      // No abbr to load: settled with an empty lineup, so the run gate sees it.
+      if (!abbr) { setSettled(true); return }
+      const backoff = [0, 2000, 5000, 10000]
+      for (let attempt = 0; attempt < backoff.length; attempt++) {
+        if (cancelled) return
+        if (backoff[attempt]) await new Promise((r) => setTimeout(r, backoff[attempt]))
+        if (cancelled) return
+        try {
+          const res = await fetch(`/api/fantasy/team-outlook/${sport.toLowerCase()}/${abbr.toLowerCase()}`, {
+            signal: AbortSignal.timeout(30000),
+          })
+          const body = await res.json().catch(() => ({}))
+          if (cancelled) return
+          if (res.ok) { setter(body.starters ?? null); setSettled(true); return }
+          setFantasyError(body.message ?? `Could not load ${abbr} outlook`)
+        } catch {
+          if (!cancelled) setFantasyError(`Could not load ${abbr} outlook`)
+        }
       }
+      if (!cancelled) setSettled(true)
     }
 
-    load(teamFantasyAbbr, setOurStarters)
-    load(opponentFantasyAbbr, setOppStarters)
+    load(teamFantasyAbbr, setOurStarters, setOurLineupSettled)
+    load(opponentFantasyAbbr, setOppStarters, setOppLineupSettled)
     return () => { cancelled = true }
   }, [sport, phase, teamFantasyAbbr, opponentFantasyAbbr])
 
@@ -463,6 +486,26 @@ export default function NextGamePanel({
   const [ledgerChecked, setLedgerChecked] = useState(false)
   const autoRanRef = useRef(false)
 
+  // Both outlook feeds have answered (success or error).
+  const lineupsSettled = ourLineupSettled && oppLineupSettled
+  // ...AND each side returned a real starter list. The model run and the
+  // pre-game snapshot wait for this so a slow or failed feed can never lock in
+  // a one-team snapshot.
+  const lineupsReady = lineupsSettled
+    && ourStarterNames.size > 0 && oppStarterNames.size > 0
+
+  // A stored snapshot that omits players the current lineup would project is
+  // partial (a previous run raced a failed/slow outlook). Treat it as
+  // repairable rather than frozen truth: skip hydration and re-run to add the
+  // missing team back.
+  const snapshotPlayers = new Set(
+    ((ledger?.pre?.rows ?? []) as any[]).map((r) => r?.player).filter(Boolean),
+  )
+  const snapshotIncomplete = phase !== 'final'
+    && snapshotPlayers.size > 0
+    && lineupsReady
+    && Array.from(effectiveNames).some((n) => !snapshotPlayers.has(n))
+
   // Canonical game key: sorted team pair so both teams' pages share one record.
   // NFL uses fantasy abbreviations; every other sport uses the ESPN codes both
   // the team page and the game page already pass as teamAbbr/opponentAbbr.
@@ -523,7 +566,10 @@ export default function NextGamePanel({
 
   // Save the pre-game projection snapshot (skipped when one already exists).
   const recordPreSnapshot = (projs: ModelProjection[]) => {
-    if (!eventDate || !projs.length || ledger?.pre) return
+    if (!eventDate || !projs.length) return
+    // Write-once per game — except a partial snapshot (missing a team) may be
+    // replaced by a fuller one; the server only accepts a strict player superset.
+    if (ledger?.pre && !snapshotIncomplete) return
     try {
       const [t1, t2] = ledgerPair()
       const slotFor = (name: string) => effectiveLineup.find((s) => s.effectiveName === name)
@@ -702,14 +748,21 @@ export default function NextGamePanel({
   useEffect(() => {
     if (!isModelSport) return
     if (autoRanRef.current || modelResults || modelLoading || !ledgerChecked) return
+    // Until BOTH lineup feeds answer we can't tell a complete snapshot from a
+    // partial one — hydrating early is exactly how the stale one-team snapshot
+    // got locked in. Wait for the feeds, then decide. (After the final the
+    // snapshot is frozen truth and there is nothing to repair, so show it now.)
+    if (phase !== 'final' && !lineupsSettled) return
     if (!ledger?.pre?.rows?.length) return
+    // A partial snapshot is not frozen truth — let the run effect repair it.
+    if (snapshotIncomplete) return
     autoRanRef.current = true
     setModelResults(ledger.pre.rows)
     try {
       setModelRunDate(new Date(ledger.pre.recordedAt).toISOString().slice(5, 16))
     } catch { setModelRunDate(null) }
     if (ledger.pre.meta?.dataThrough) setPrevModelDataThrough(ledger.pre.meta.dataThrough)
-  }, [isModelSport, ledgerChecked, ledger, modelResults, modelLoading])
+  }, [isModelSport, ledgerChecked, ledger, modelResults, modelLoading, lineupsSettled, snapshotIncomplete])
 
   // 2. Fresh run as soon as the lineup is known and /api/props has settled.
   //    ESPN priors are optional (espnLineFor returns null when absent), so an
@@ -718,7 +771,11 @@ export default function NextGamePanel({
   useEffect(() => {
     if (!isModelSport) return
     if (autoRanRef.current || modelResults || modelLoading || !ledgerChecked) return
-    if (ledger?.pre?.rows?.length) return // hydrate effect owns this case
+    // A complete snapshot is the hydrate effect's case; a partial one is ours.
+    if (ledger?.pre?.rows?.length && !snapshotIncomplete) return
+    // Wait for BOTH teams' lineups before running, so the snapshot covers the
+    // whole game. Without this a slow/failed feed locked in a one-team snapshot.
+    if (!lineupsReady) return
     // After the final whistle a fresh run would be graded against a result it
     // was never blind to — only a snapshot locked before/during the game counts.
     if (phase === 'final') return
@@ -726,7 +783,7 @@ export default function NextGamePanel({
     if (effectiveLineup.length === 0) return
     autoRanRef.current = true
     void runModel()
-  }, [isModelSport, phase, ledgerChecked, ledger, modelResults, modelLoading, props, effectiveLineup])
+  }, [isModelSport, phase, ledgerChecked, ledger, modelResults, modelLoading, props, effectiveLineup, lineupsReady, snapshotIncomplete])
 
   // ---- Live comparison: frozen snapshot vs ESPN box score (every sport) ----
   const liveStats = useMemo(() => {
@@ -991,6 +1048,30 @@ export default function NextGamePanel({
   // DraftKings entry wins within it, else the median.
   const DK_RE = /draftkings|(^|\s)dk(\s|$)/i
   const displayBook = (book: string): string => (DK_RE.test(book) ? 'DraftKings' : book)
+  // Scheduled kickoff (ms). Line captures at or after it are in-play and must
+  // never be presented as a pre-game line (the server enforces the same rule
+  // when freezing the graded closing line).
+  const kickoffMs = (() => {
+    const raw = (ledger as any)?.kickoff
+    if (!raw) return null
+    const t = Date.parse(raw)
+    return Number.isFinite(t) ? t : null
+  })()
+
+  // Board stat keys a model stat may be published under (DK spells the same
+  // market several ways across sportsseasons; the model "tds" is total TDs,
+  // whose only standard O/U market is passing TDs).
+  const modelStatKeys = (name: string, stat: string): string[] => {
+    if (stat === 'tds') {
+      const pos = props?.projections?.find((x) => x.name === name)?.position ?? ''
+      return pos === 'QB' ? ['passing_tds'] : []
+    }
+    if (stat === 'passing_yards') return ['passing_yards', 'pass_yds', 'pass_yards']
+    if (stat === 'rushing_yards') return ['rushing_yards', 'rush_yds', 'rush_yards']
+    if (stat === 'receiving_yards') return ['receiving_yards', 'rec_yds', 'rec_yards']
+    if (stat === 'receptions') return ['receptions']
+    return [stat]
+  }
   const scrapedLineFor = (name: string, stat: string): { line: number; book: string; over: number | null; under: number | null; books: number } | null => {
     const norm = (n: string) => n.toLowerCase().replace(/[^a-z0-9 ]/g, '').replace(/\s+/g, ' ').trim()
     const want = norm(name)
@@ -1000,15 +1081,7 @@ export default function NextGamePanel({
     // Model "tds" is total TDs. The only standard O/U TD market is passing TDs
     // (QBs); for RB/WR/TE there is no O/U total-TD line — anytime/first/last TD
     // are odds-only (line 0.0, no over/under). Map QB tds → passing_tds.
-    const pos = props?.projections?.find((x) => x.name === name)?.position ?? ''
-    const wantStats: string[] = (() => {
-      if (stat === 'tds') return pos === 'QB' ? ['passing_tds'] : []
-      if (stat === 'passing_yards') return ['passing_yards', 'pass_yds', 'pass_yards']
-      if (stat === 'rushing_yards') return ['rushing_yards', 'rush_yds', 'rush_yards']
-      if (stat === 'receiving_yards') return ['receiving_yards', 'rec_yds', 'rec_yards']
-      if (stat === 'receptions') return ['receptions']
-      return [stat]
-    })()
+    const wantStats: string[] = modelStatKeys(name, stat)
     if (!wantStats.length) return oddsApiLineFor(name, stat)
     for (const [bookKey, b] of Object.entries(results) as [string, any][]) {
       const list = (b as any)?.props
@@ -1147,6 +1220,29 @@ export default function NextGamePanel({
 
   // Data-vintage stamp from the model (max gameday in its input frame) — the
   // honest freshness signal, not when the run happened.
+  // Per-player line movement across the banked hourly snapshots: each modeled
+  // row's line in capture order. Only rows captured at least twice are shown
+  // (one snapshot is not movement). Post-kickoff captures are excluded — the
+  // hourly refresh stops banking them, but a late page open could add one.
+  const lineHistoryFor = (name: string, stat: string): { at: string; line: number }[] => {
+    const snaps = Array.isArray((ledger as any)?.lines) ? (ledger as any).lines : []
+    if (snaps.length < 2) return []
+    const stats = modelStatKeys(name, stat)
+    if (!stats.length) return []
+    const cut = kickoffMs
+    const out: { at: string; line: number }[] = []
+    for (const snap of snaps) {
+      const at = Date.parse(snap?.recordedAt ?? '')
+      if (cut != null && Number.isFinite(at) && at >= cut) continue
+      const hit = (snap?.lines ?? []).find((r: any) =>
+        r && stats.includes(String(r.stat).toLowerCase())
+        && typeof r.line === 'number' && r.line > 0
+        && typeof r.player === 'string' && namesMatch(r.player, name))
+      if (hit) out.push({ at: snap.recordedAt, line: hit.line })
+    }
+    return out
+  }
+
   const modelDataThrough = (() => {
     const stamps = (modelResults ?? [])
       .map((r) => r.last_updated)
@@ -1203,6 +1299,19 @@ export default function NextGamePanel({
     .filter((x): x is { r: ModelProjection; p: NonNullable<ReturnType<typeof pickFor>> } => !!x.p)
     .sort((a, b) => pickConfidencePct(b.p.edge) - pickConfidencePct(a.p.edge))
     .slice(0, 3)
+
+  // Rows whose line actually moved across the banked captures.
+  const lineMovements = (() => {
+    if (phase !== 'pre') return []
+    const out: { player: string; stat: string; hist: { at: string; line: number }[] }[] = []
+    for (const g of groupedModel) {
+      for (const r of g.rows) {
+        const hist = lineHistoryFor(r.player, r.stat)
+        if (hist.length >= 2) out.push({ player: r.player, stat: r.stat, hist })
+      }
+    }
+    return out.slice(0, 12)
+  })()
 
   // Final scorecard: frozen picks graded against the final box score.
   const scorecard = (() => {
@@ -1478,8 +1587,43 @@ export default function NextGamePanel({
           ) : null}
           {!scorecard && phase === 'pre' && Array.isArray((ledger as any)?.lines) && (ledger as any).lines.length > 0 ? (
             <p className="text-[11px] text-fs-muted-2 mb-2">
-              Lines refresh hourly before kickoff · {(ledger as any).lines.length} snapshot{(ledger as any).lines.length === 1 ? '' : 's'} banked — the latest pre-game snapshot freezes as the closing lines for grading.
+              Lines refresh hourly before kickoff · {(ledger as any).lines.length} snapshot{(ledger as any).lines.length === 1 ? '' : 's'} banked — the latest pre-game snapshot before kickoff freezes as the closing lines for grading.
             </p>
+          ) : null}
+
+          {lineMovements.length > 0 ? (
+            <div
+              className="mb-3 rounded-lg px-3 py-2"
+              style={{ backgroundColor: `${teamColor}0c`, border: `1px solid ${teamColor}1c` }}
+            >
+              <p className="text-[11px] font-semibold text-fs-text mb-1">
+                Line movement · {(ledger as any).lines.length} captures
+              </p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1">
+                {lineMovements.map(({ player, stat, hist }) => {
+                  const first = hist[0].line
+                  const last = hist[hist.length - 1].line
+                  const delta = Math.round((last - first) * 100) / 100
+                  const moved = delta !== 0
+                  const vals = hist.map((h) => h.line)
+                  return (
+                    <span key={`${player}-${stat}`} className="text-[11px] text-fs-muted">
+                      {player} {statLabel(stat)}{' '}
+                      <span className="font-mono text-fs-text">
+                        {vals.length > 4 ? `${first} → … → ${last}` : vals.join(' → ')}
+                      </span>
+                      {moved ? (
+                        <span className={delta > 0 ? 'text-fs-gold' : 'text-fs-turf'}>
+                          {' '}({delta > 0 ? '+' : ''}{delta})
+                        </span>
+                      ) : (
+                        <span className="text-fs-muted-2"> (no change)</span>
+                      )}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
           ) : null}
 
           {showLive && !gameFinal ? (

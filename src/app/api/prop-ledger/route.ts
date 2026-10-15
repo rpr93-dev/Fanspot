@@ -21,8 +21,11 @@ import { gradeGame } from '@/lib/propGrades'
  *   -> { ok, recordedAt, ... } — shells out to prop-model-ledger.py
  *      which validates and atomically appends to prop-model/ledger/ledger.json.
  *   `lines` record: { lines: [{ player, stat, line, book?, over?, under? }...],
- *                     source? } — one hourly book-line snapshot (append-only).
- *   `finalize` takes no record: freezes the most recent pre-final snapshot
+ *                     source?, kickoff? } — one hourly book-line snapshot
+ *                     (append-only). `kickoff` (ISO) is persisted once so only
+ *                     captures taken strictly before it can become the graded
+ *                     closing line.
+ *   `finalize` takes no record: freezes the latest pre-kickoff snapshot
  *      as the closing lines the running grade is scored on.
  */
 
@@ -157,11 +160,28 @@ export async function POST(request: Request) {
   // overwrite the frozen pre-game projection the live comparison relies on.
   if (action === 'pre') {
     const existing = await readLedger()
-    if (existing.games[key]?.pre) {
-      return NextResponse.json(
-        { error: 'SNAPSHOT_EXISTS', message: 'A pre-game snapshot already exists for this game' },
-        { status: 409 },
+    const prev = existing.games[key]?.pre
+    if (prev) {
+      // Write-once, with one exception: a partial snapshot — one locked while
+      // a team's outlook feed was slow or down — may be repaired by a snapshot
+      // that is a strict player superset. Any other second write (same or
+      // shorter player set) is still refused, so a stale tab can never clobber
+      // or shrink the frozen pre-game projection.
+      const prevPlayers = new Set<string>(
+        ((prev.rows ?? []) as any[]).map((r) => r?.player).filter(Boolean),
       )
+      const newPlayers = new Set<string>(
+        ((body.record?.rows ?? []) as any[]).map((r: any) => r?.player).filter(Boolean),
+      )
+      const grows = newPlayers.size > prevPlayers.size
+        && [...prevPlayers].every((p) => newPlayers.has(p))
+      if (!grows) {
+        return NextResponse.json(
+          { error: 'SNAPSHOT_EXISTS', message: 'A pre-game snapshot already exists for this game' },
+          { status: 409 },
+        )
+      }
+      console.warn(`[prop-ledger] repairing partial pre snapshot ${key}: ${prevPlayers.size} -> ${newPlayers.size} players`)
     }
   }
 

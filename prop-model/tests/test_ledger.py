@@ -212,6 +212,82 @@ def test_grade_ledger_running_totals(path):
     assert summary["byGame"][0]["key"] == "20260909|NE|NYJ"
 
 
+def _timed_lines(recorded_at, kickoff=None, line=230.5):
+    rec = {"source": "hourly-refresh", "recordedAt": recorded_at,
+           "lines": [{"player": "Drake Maye", "stat": "passing_yards",
+                      "line": line, "book": "DK NJ"}]}
+    if kickoff:
+        rec["kickoff"] = kickoff
+    return rec
+
+
+KICKOFF = "2026-09-09T17:00:00+00:00"
+
+
+def test_kickoff_is_persisted_once(path):
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _timed_lines("2026-09-09T10:00:00+00:00", KICKOFF), path)
+    # A later capture with a different kickoff (bad caller) must not rewrite it.
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _timed_lines("2026-09-09T11:00:00+00:00", "2026-09-09T23:00:00Z"), path)
+    assert ledger.load_game("NE", "NYJ", "20260909", path)["kickoff"] == KICKOFF
+
+
+def test_post_kickoff_capture_never_becomes_closing_line(path):
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _timed_lines("2026-09-09T10:00:00+00:00", KICKOFF, line=230.5), path)
+    # In-play refresh: after kickoff, so it must never be graded against.
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _timed_lines("2026-09-09T18:00:00+00:00", KICKOFF, line=245.5), path)
+    game = ledger.load_game("NE", "NYJ", "20260909", path)
+    assert len(game["lines"]) == 2  # append-only history keeps both
+    assert game["finalLines"]["lines"][0]["line"] == 230.5
+    frozen = ledger.freeze_final_lines("NE", "NYJ", "20260909", path)
+    assert frozen["frozen"] is True
+    assert frozen["lines"][0]["line"] == 230.5
+    assert frozen["recordedAt"] == "2026-09-09T10:00:00+00:00"
+
+
+def test_kickoff_boundary_is_strict(path):
+    # A capture stamped exactly at kickoff is not "strictly before" it.
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _timed_lines("2026-09-09T09:00:00+00:00", KICKOFF, line=229.5), path)
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _timed_lines(KICKOFF, KICKOFF, line=231.5), path)
+    assert ledger.freeze_final_lines("NE", "NYJ", "20260909", path)["lines"][0]["line"] == 229.5
+
+
+def test_freeze_without_pre_kickoff_capture_falls_back_to_pre_rows(path):
+    ledger.record_pre("NE", "NYJ", "20260909", _pre_record(), path)
+    # Only a post-kickoff capture exists: grading must fall back to the panel's
+    # pre-snapshot line rather than a live number.
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _timed_lines("2026-09-09T18:00:00+00:00", KICKOFF, line=245.5), path)
+    frozen = ledger.freeze_final_lines("NE", "NYJ", "20260909", path)
+    assert frozen["source"] == "pre-snapshot"
+    assert frozen["lines"][0]["line"] == 232.5  # from _pre_record()
+
+
+def test_no_kickoff_keeps_legacy_latest_snapshot(path):
+    # Games captured before kickoff tracking existed must still grade.
+    ledger.record_lines("NE", "NYJ", "20260909", _timed_lines("2026-09-09T10:00:00+00:00", line=230.5), path)
+    ledger.record_lines("NE", "NYJ", "20260909", _timed_lines("2026-09-09T18:00:00+00:00", line=245.5), path)
+    assert ledger.freeze_final_lines("NE", "NYJ", "20260909", path)["lines"][0]["line"] == 245.5
+
+
+def test_final_live_point_respects_kickoff(path):
+    ledger.record_pre("NE", "NYJ", "20260909", _pre_record(), path)
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _timed_lines("2026-09-09T10:00:00+00:00", KICKOFF, line=230.5), path)
+    ledger.record_lines("NE", "NYJ", "20260909",
+                       _timed_lines("2026-09-09T18:00:00+00:00", KICKOFF, line=245.5), path)
+    ledger.record_live("NE", "NYJ", "20260909",
+                       {**_live_point(4, 250), "final": True, "state": "post"}, path)
+    game = ledger.load_game("NE", "NYJ", "20260909", path)
+    assert game["finalLines"]["frozen"] is True
+    assert game["finalLines"]["lines"][0]["line"] == 230.5
+
+
 def test_record_live_replay_is_idempotent(path):
     # Two views record the same period seconds apart (different clocks) —
     # the second write must not duplicate the point.

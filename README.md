@@ -193,7 +193,7 @@ sportsbook lines and the final box score.
 2. `GET /api/fantasy/team-outlook/[sport]/[team]` × 2 — both teams' starters (the model lineup).
 3. `GET /api/prop-ledger` — saved pre-game snapshot, if the game was viewed before kickoff.
 4. `POST /api/prop-model` — Python CLI over the batch; ~0.4–1s warm (2–24 targets).
-5. `POST /api/scraper` — DraftKings lines via the Docker scraper (Playwright; tens of seconds, often blocked) — fills in the Line/Pick columns when it answers and is never on the model's critical path.
+5. `POST /api/scraper` — DraftKings lines via the Docker scraper (DK's own sportsbook API, keyless, Chrome TLS impersonation via `curl_cffi`; ~1s) — fills in the Line/Pick columns and is never on the model's critical path.
 
 **Snapshot ledger.** The first pre-game run locks its rows + lines into the ledger
 (`recordPreSnapshot`); later views hydrate from the snapshot instead of re-running.
@@ -227,6 +227,38 @@ Changes (commit `b6ea476`):
 Measured on prod after deploy: `team-outlook` 500 → 200 in ~2.7s, `/api/props`
 `[]` → real lines in ~0.01s (warm DB), model POST ~0.66s fresh / ~0.003s cached.
 Full suite: 528 tests across 47 files, `tsc --noEmit` clean.
+
+### Live line pipeline (storage, movement, grading)
+
+DraftKings lines are banked **append-only** in the game ledger
+(`prop-model/ledger/ledger.json`, via `propmodel/ledger.py`). There is one line
+path — the scraper feeds `POST /api/prop-ledger` with `action: 'lines'`; the
+site never keeps a second copy.
+
+- **Capture**: `prop-model/line_refresh.py` sweeps every pre-game slate within
+  `--hours 168` (NFL via `/api/schedule-week`, NBA/NHL/MLB via ESPN's
+  scoreboard), scrapes each game, and appends one snapshot per game. Cron:
+  `0 * * * * /home/kc-llm/Fanspot/prop-model/line-refresh.sh` (installed in the
+  `kc-llm` crontab). The game page also banks at most one snapshot per hour for
+  the game on screen (`panel-hourly`). Captures are capped at 200 per game.
+- **Storage / queries**: `game.lines[]` is the full capture history
+  (`{recordedAt, source, lines[]}`); each snapshot row is
+  `{player, stat, line, book, over, under}`. Latest pre-kickoff line per
+  (game, player, market), full history per (player, market), and per-game
+  lookup all read straight off that array — `latest_pre_kickoff(game)` for the
+  closing line, `game.lines` for movement.
+- **Deterministic closing line**: the scheduled kickoff is persisted on the game
+  on the first capture. The closing line is the **latest capture taken strictly
+  before kickoff**, via `_closing_candidate()`; in-play and post-game captures
+  are still stored (append-only) but can never be graded against. When a game
+  has no pre-kickoff capture, grading falls back to the pre-snapshot rows.
+- **Movement UI**: the game page's Prop Model section shows each modeled
+  player's line in capture order (`220.5 → 222.5 → …`), derived from the same
+  pre-kickoff filter.
+- **Grading**: after the final, the panel posts `action: 'finalize'` (idempotent)
+  which freezes `finalLines`; `propmodel/ledger.py::grade_game` and its TS mirror
+  `src/lib/propGrades.ts::gradeGame` then score each pick HIT/MISS/PUSH against
+  the frozen lines and the final box score.
 
 ### Operating notes
 

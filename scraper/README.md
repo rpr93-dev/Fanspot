@@ -1,6 +1,20 @@
 # Player Prop Scraper Docker Service
 
-Serves DraftKings player prop lines (via Action Network's free web API, with The Odds API as an optional second source) and exposes them via a REST API. Results persist to disk and keep a per-game hourly refresh history.
+Serves DraftKings player prop lines and exposes them via a REST API. Results
+persist to disk and keep a per-game hourly refresh history.
+
+Sources, in order (all keyless except the last):
+
+1. **DraftKings direct** — DK's own sportsbook API
+   (`sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1`). Plain
+   `requests`/urllib gets a 403 bot wall, so this uses `curl_cffi` Chrome TLS
+   impersonation. League ids: NFL 88808, NBA 42648, NHL 42133, MLB 84240.
+   One league feed lists the events; each prop category is a separate board
+   keyed by event id + category id. NFL boards are named explicitly (Passing /
+   Rushing / Receiving Props, TD Scorers); other sports are discovered by name.
+2. **Action Network** — their free web API, fronting the same book. Kept as a
+   fallback for when DK's bot wall rejects a datacenter IP.
+3. **The Odds API** — only when `ODDS_API_KEY` is set.
 
 ## Quick Start
 
@@ -36,10 +50,11 @@ The Next.js app will automatically call the scraper when you click "Scrape Lines
 
 ## Sportsbooks
 
-DraftKings only (`DK NJ` via Action Network, `draftkings` via The Odds API).
-Every other book is dropped at the source so the hourly refresh and the model
-grade track one consistent board. (Per-book page rendering via Playwright was
-removed — the books bot-block datacenter IPs, so it never returned lines.)
+DraftKings only — the book is labelled `DK NJ` on every source (the label the
+ledger and the panel have always graded against), `draftkings` via The Odds
+API. Every other book is dropped at the source so the hourly refresh and the
+model grade track one consistent board. (Per-book page rendering via Playwright
+was removed — the books bot-block datacenter IPs, so it never returned lines.)
 
 ## Environment Variables
 

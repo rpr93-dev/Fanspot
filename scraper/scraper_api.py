@@ -480,6 +480,259 @@ def fetch_action_props(team: str, opponent: str, game_date: str,
     return results
 
 
+# ---------------------------------------------------------------------------
+# DraftKings direct (keyless)
+#
+# DK's own sportsbook API is the primary source: no key, no aggregator in the
+# middle. Plain requests/urllib gets a 403 (bot wall), so we use curl_cffi's
+# Chrome TLS impersonation. One league feed gives the event slate; each prop
+# category is a separate board keyed by event id + category id. The book label
+# stays "DK NJ" so the ledger/panel keep grading against the same board name
+# historical snapshots already use.
+# ---------------------------------------------------------------------------
+DK_API_BASE = "https://sportsbook-nash.draftkings.com/api/sportscontent/dkusoh/v1"
+DK_IMPRESONATE = "chrome"
+DK_BOOK_LABEL = "DK NJ"
+
+# League ids as served by the dkusoh (Ohio) sportscontent API.
+DK_LEAGUE_IDS: Dict[str, str] = {
+    "NFL": "88808",
+    "NBA": "42648",
+    "NHL": "42133",
+    "MLB": "84240",
+}
+
+# NFL prop boards are named explicitly (the league feed has no "prop" naming
+# convention to discover them by). Other sports are auto-discovered.
+DK_NFL_PROP_CATEGORIES = ("Passing Props", "Rushing Props", "Receiving Props", "TD Scorers")
+
+# Market-name -> model stat. Checked before the shared action_keywords because
+# DK spells touchdowns out ("Passing Touchdowns") where Action Network uses
+# short names ("passing_tds"). Ordered most-specific first.
+DK_KEYWORDS: Dict[str, List[tuple]] = {
+    "NFL": [
+        ("passing_yards", "passing_yards"),
+        ("rushing_yards", "rushing_yards"),
+        ("receiving_yards", "receiving_yards"),
+        ("receptions", "receptions"),
+        ("passing_touchdown", "passing_tds"),
+        ("passing_tds", "passing_tds"),
+        ("rushing_touchdown", "tds"),
+        ("receiving_touchdown", "tds"),
+        ("anytime_touchdown", "tds"),
+        ("anytime_td", "tds"),
+        ("passing_attempts", "passing_attempts"),
+        ("rushing_attempts", "rushing_attempts"),
+        ("interceptions", "interceptions"),
+    ],
+    "NBA": [
+        ("three_pointers", "threes"),
+        ("points", "points"),
+        ("rebounds", "rebounds"),
+        ("assists", "assists"),
+    ],
+    "NHL": [
+        ("shots_on_goal", "shots"),
+        ("saves", "saves"),
+        ("goals", "goals"),
+        ("assists", "assists"),
+        ("points", "points"),
+    ],
+    "MLB": [
+        ("total_bases", "total_bases"),
+        ("home_runs", "home_runs"),
+        ("strikeouts", "strikeouts"),
+        ("hits", "hits"),
+        ("rbis", "rbis"),
+    ],
+}
+
+# Markets that are not the full-game single-stat O/U line the model grades
+# against: same-game combos, milestone ladders, "most" props, and period-scoped
+# boards (1st half / 1st quarter …) which would otherwise post a second,
+# conflicting "line" for the same (player, stat).
+_DK_SKIP_RE = re.compile(
+    r"\+|\bmost\b|milestone|first_|last_|to_record"
+    r"|\bhalf\b|\bquarter\b|\bqtr\b|\bperiod\b|\bovertime\b|\bregulation\b",
+    re.IGNORECASE,
+)
+
+
+def _dk_get(path: str) -> Any:
+    """GET a DraftKings sportscontent path with Chrome TLS impersonation."""
+    from curl_cffi import requests as ccr
+    resp = ccr.get(DK_API_BASE + path, impersonate=DK_IMPRESONATE, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"DK HTTP {resp.status_code} for {path}")
+    return resp.json()
+
+
+def _dk_american(sel: Dict[str, Any]) -> Optional[int]:
+    """American price as int. DK renders the minus sign as U+2212."""
+    raw = ((sel.get("displayOdds") or {}).get("american"))
+    if raw is None:
+        return None
+    try:
+        return int(str(raw).replace("\u2212", "-").replace("+", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _dk_stat_key(market_name: str, sport: str, league: Dict[str, Any]) -> Optional[str]:
+    """DK market name -> model stat key (None when it isn't a modelled stat)."""
+    if _DK_SKIP_RE.search(market_name or ""):
+        return None
+    t = re.sub(r"[^a-z0-9]+", "_", (market_name or "").lower()).strip("_")
+    for kw, stat in DK_KEYWORDS.get(sport.upper(), []):
+        if kw in t:
+            return stat
+    for kw, stat in league.get("action_keywords", []):
+        if kw in t:
+            return stat
+    return None
+
+
+def _dk_event_teams(event: Dict[str, Any], league: Dict[str, Any]) -> Dict[str, str]:
+    """{abbr: 'Home'|'Away'} for a DK event's team participants."""
+    out: Dict[str, str] = {}
+    for p in event.get("participants") or []:
+        role = p.get("venueRole") or ""
+        if role not in ("Home", "Away"):
+            continue
+        short = ((p.get("metadata") or {}).get("shortName")) or ""
+        abbr = canon_abbr(short, league)
+        if abbr:
+            out[abbr] = role
+    return out
+
+
+def _dk_find_event(team: str, opponent: str, game_date: str,
+                   sport: str, league: Dict[str, Any]) -> Dict[str, Any]:
+    """Match a DK event by team pair + start date, open for betting."""
+    league_id = DK_LEAGUE_IDS.get(sport.upper())
+    if not league_id:
+        raise RuntimeError(f"no DraftKings league id for {sport}")
+    feed = _dk_get(f"/leagues/{league_id}")
+    want = {canon_abbr(team, league), canon_abbr(opponent, league)}
+    day = re.sub(r"\D", "", game_date or "")[:8]
+    for e in feed.get("events", []) or []:
+        if set(_dk_event_teams(e, league)) != want:
+            continue
+        status = str(e.get("status") or "").upper()
+        if status not in ("NOT_STARTED", "OPEN", "SCHEDULED"):
+            continue
+        start = re.sub(r"\D", "", str(e.get("startEventDate") or ""))[:8]
+        if day and start != day:
+            continue
+        return e
+    raise RuntimeError(f"no open DraftKings event for {team} vs {opponent} on {day or 'any date'}")
+
+
+def _dk_prop_categories(feed: Dict[str, Any], sport: str) -> List[Dict[str, Any]]:
+    """Prop boards to pull: NFL by name, everything else by discovery."""
+    cats = feed.get("categories") or []
+    if sport.upper() == "NFL":
+        want = {n.strip().lower() for n in DK_NFL_PROP_CATEGORIES}
+        return [c for c in cats if str(c.get("name") or "").strip().lower() in want]
+    out = []
+    for c in cats:
+        name = str(c.get("name") or "").lower()
+        if "prop" not in name:
+            continue
+        if "game" in name or "team" in name:
+            continue
+        out.append(c)
+    return out
+
+
+def _dk_board_rows(board: Dict[str, Any], sport: str, league: Dict[str, Any],
+                   teams: Dict[str, str]) -> List[Dict[str, Any]]:
+    """One category board -> O/U line rows (both sides priced)."""
+    markets = {str(m.get("id")): m for m in (board.get("markets") or [])}
+    by_market: Dict[str, list] = {}
+    for s in board.get("selections") or []:
+        by_market.setdefault(str(s.get("marketId")), []).append(s)
+
+    rows: List[Dict[str, Any]] = []
+    for market_id, sels in by_market.items():
+        m = markets.get(market_id)
+        if not m:
+            continue
+        mname = str((m.get("marketType") or {}).get("name") or m.get("name") or "")
+        stat = _dk_stat_key(mname, sport, league)
+        if not stat:
+            continue
+        grouped: Dict[tuple, Dict[str, Any]] = {}
+        for s in sels:
+            label = str(s.get("label") or "").strip().lower()
+            if label not in ("over", "under"):
+                continue
+            try:
+                points = float(s.get("points"))
+            except (TypeError, ValueError):
+                continue
+            part = (s.get("participants") or [{}])[0]
+            pname = part.get("name")
+            if not pname:
+                continue
+            role = part.get("venueRole") or ""
+            team_abbr = next((a for a, r in teams.items() if r in role), None)
+            g = grouped.setdefault((str(pname), points), {"over": None, "under": None, "team": None})
+            g[label] = _dk_american(s)
+            if team_abbr:
+                g["team"] = team_abbr
+        for (pname, points), pr in grouped.items():
+            # A usable line needs both sides' prices and a positive number.
+            if pr["over"] is None or pr["under"] is None or not (points > 0):
+                continue
+            rows.append({
+                "player": pname,
+                "stat": stat,
+                "market": mname,
+                "line": points,
+                "over": pr["over"],
+                "under": pr["under"],
+                "sportsbook": DK_BOOK_LABEL,
+                "team": pr["team"],
+                "timestamp": datetime.now().isoformat(),
+            })
+    return rows
+
+
+def fetch_draftkings_props(team: str, opponent: str, game_date: str,
+                           sport: str = "NFL", game_time: Optional[str] = None) -> Dict[str, Any]:
+    """DraftKings player-prop slate straight from DK's sportsbook API (keyless)."""
+    sport = (sport or "NFL").upper()
+    league = league_of(sport)
+    league_id = DK_LEAGUE_IDS.get(sport)
+    if not league_id:
+        raise RuntimeError(f"no DraftKings league id for {sport}")
+
+    feed = _dk_get(f"/leagues/{league_id}")
+    event = _dk_find_event(team, opponent, game_date, sport, league)
+    event_id = str(event["id"])
+    teams = _dk_event_teams(event, league)
+
+    rows: List[Dict[str, Any]] = []
+    for cat in _dk_prop_categories(feed, sport):
+        cat_id = cat.get("id")
+        if cat_id is None:
+            continue
+        try:
+            board = _dk_get(f"/events/{event_id}/categories/{cat_id}")
+        except Exception as e:
+            logger.warning(f"DK category {cat.get('name')} failed: {str(e)[:120]}")
+            continue
+        rows.extend(_dk_board_rows(board, sport, league, teams))
+
+    if not rows:
+        raise RuntimeError(f"DraftKings returned no O/U player props for {team} vs {opponent}")
+    now = datetime.now().isoformat()
+    logger.info(f"draftkings-direct event {event_id}: {len(rows)} prop rows")
+    return {DK_BOOK_LABEL: {"props": rows, "count": len(rows),
+                            "timestamp": now, "source": "draftkings-direct"}}
+
+
 async def fetch_odds_api_props(team: str, opponent: str, game_date: str,
                                sport: str = "NFL") -> Dict[str, Any]:
     """DraftKings player prop lines from The Odds API (requires ODDS_API_KEY)."""
@@ -584,14 +837,19 @@ async def scrape_all_sportsbooks(team: str, opponent: str, game_date: str,
     try:
         logger.info(f"Starting {sport} scrape for {team} vs {opponent} on {game_date}")
 
-        # Primary: Action Network (free web API, DraftKings lines, no key).
-        # Then The Odds API when keyed (DraftKings bookmaker only). The old
-        # Playwright per-book page rendering was removed: the books bot-block
-        # datacenter IPs, so it never returned lines.
+        # Primary: DraftKings' own sportsbook API (keyless, Chrome TLS
+        # impersonation — plain requests gets 403). Fallback: Action Network's
+        # free web API, which fronts the same book. Then The Odds API when
+        # keyed. The old Playwright per-book page rendering was removed: the
+        # books bot-block datacenter IPs, so it never returned lines.
+        sources = (
+            ("draftkings-direct", fetch_draftkings_props),
+            ("action-network", fetch_action_props),
+        )
         results = {}
-        for source in ("action-network",):
+        for source, fetcher in sources:
             try:
-                results = await asyncio.to_thread(fetch_action_props, team, opponent,
+                results = await asyncio.to_thread(fetcher, team, opponent,
                                                   game_date, sport, game_time)
                 logger.info(f"{source} returned {sum(r.get('count', 0) for r in results.values())} props")
                 break

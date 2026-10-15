@@ -8,6 +8,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 let ledgerFile: { version: number; games: Record<string, any> } = { version: 1, games: {} }
 const cliCalls: string[][] = []
+// Rows of the most recently posted body, so the mocked CLI can persist exactly
+// what the route validated (the write-once guard compares stored vs incoming
+// players, so an empty mock write would defeat it).
+let lastPostRows: any[] = []
 
 vi.mock('@/lib/propModel', () => ({
   MODEL_DIR: '/fake/prop-model',
@@ -20,7 +24,7 @@ vi.mock('@/lib/propModel', () => ({
       const di = args.indexOf('--event-date')
       const ti = args.indexOf('--team')
       const oi = args.indexOf('--opponent')
-      ledgerFile.games[`${args[di + 1]}|${args[ti + 1]}|${args[oi + 1]}`] = { pre: { rows: [] } }
+      ledgerFile.games[`${args[di + 1]}|${args[ti + 1]}|${args[oi + 1]}`] = { pre: { rows: lastPostRows } }
     }
     return { stdout: JSON.stringify({ ok: true, recordedAt: new Date().toISOString() }) }
   },
@@ -39,6 +43,7 @@ vi.mock('fs/promises', () => ({
 import { POST } from '@/app/api/prop-ledger/route'
 
 function postJson(body: unknown, raw?: string) {
+  lastPostRows = ((body as any)?.record?.rows as any[]) ?? []
   return new Request('http://localhost/api/prop-ledger', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -57,6 +62,7 @@ const preBody = {
 beforeEach(() => {
   ledgerFile = { version: 1, games: {} }
   cliCalls.length = 0
+  lastPostRows = []
 })
 
 describe('413 body cap', () => {
@@ -117,6 +123,55 @@ describe('write-once pre snapshots', () => {
     expect((await second.json()).error).toBe('SNAPSHOT_EXISTS')
     // The CLI is never invoked a second time.
     expect(cliCalls.filter((a) => a.includes('pre'))).toHaveLength(1)
+  })
+
+  it('repairs a partial snapshot with a strict player superset (200)', async () => {
+    // The PIT@TB class: a snapshot locked while one team's outlook feed was
+    // down must be replaceable by one that covers the missing team, or the
+    // dropped team is stuck missing forever.
+    const partial = {
+      ...preBody,
+      record: { asOf: '2026-09-12', rows: [
+        { player: 'Drake Maye', stat: 'passing_yards', projection: 241.5 },
+      ] },
+    }
+    expect((await POST(postJson(partial))).status).toBe(200)
+    const full = {
+      ...preBody,
+      record: { asOf: '2026-09-12', rows: [
+        { player: 'Drake Maye', stat: 'passing_yards', projection: 241.5 },
+        { player: 'Breece Hall', stat: 'rushing_yards', projection: 71 },
+      ] },
+    }
+    const repair = await POST(postJson(full))
+    expect(repair.status).toBe(200)
+    expect(cliCalls.filter((a) => a.includes('pre'))).toHaveLength(2)
+  })
+
+  it('refuses a non-superset second snapshot (shrinking or swapping players)', async () => {
+    const wide = {
+      ...preBody,
+      record: { asOf: '2026-09-12', rows: [
+        { player: 'Drake Maye', stat: 'passing_yards', projection: 241.5 },
+        { player: 'Breece Hall', stat: 'rushing_yards', projection: 71 },
+      ] },
+    }
+    expect((await POST(postJson(wide))).status).toBe(200)
+    // Dropping a player is not a repair.
+    const shrink = await POST(postJson({
+      ...preBody,
+      record: { asOf: '2026-09-12', rows: [{ player: 'Drake Maye', stat: 'passing_yards', projection: 241.5 }] },
+    }))
+    expect(shrink.status).toBe(409)
+    // Same size but a different player is not a superset either.
+    const swap = await POST(postJson({
+      ...preBody,
+      record: { asOf: '2026-09-12', rows: [
+        { player: 'Drake Maye', stat: 'passing_yards', projection: 241.5 },
+        { player: 'Garrett Wilson', stat: 'receiving_yards', projection: 68 },
+      ] },
+    }))
+    expect(swap.status).toBe(409)
   })
 
   it('live records still append after a pre snapshot exists', async () => {

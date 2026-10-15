@@ -1,4 +1,6 @@
 playwright>=1.40.0
+# DraftKings-direct source: Chrome TLS impersonation (plain requests gets 403).
+curl_cffi>=0.7.0
 uvicorn>=0.27.0
 fastapi>=0.109.0
 httpx>=0.27.0

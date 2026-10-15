@@ -3,8 +3,8 @@
  *
  * A game grades when it has pre-game model rows AND final actuals (a live
  * point with `final: true` or `state: 'post'`). Picks are scored against the
- * frozen closing lines — the most recent book-line snapshot before the game
- * ended — so post-game line movement can't rewrite the scorecard.
+ * frozen closing lines — the latest capture taken strictly before kickoff — so
+ * in-play and post-game line movement can't rewrite the scorecard.
  *
  * Mirrors propmodel/ledger.py::grade_game (same pick/outcome semantics).
  */
@@ -40,7 +40,8 @@ export function finalActuals(game: any): Record<string, any> {
   return rows && typeof rows === 'object' ? rows : {}
 }
 
-/** (player|stat) -> closing line from frozen finalLines, else latest snapshot. */
+/** (player|stat) -> closing line from frozen finalLines (latest capture taken
+ *  strictly before kickoff, resolved server-side), else the latest snapshot. */
 export function closingLineMap(game: any): Map<string, number> {
   const map = new Map<string, number>()
   const final = game?.finalLines ?? (Array.isArray(game?.lines) && game.lines.length ? game.lines[game.lines.length - 1] : null)

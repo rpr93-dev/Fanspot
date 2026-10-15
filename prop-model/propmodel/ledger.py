@@ -63,6 +63,51 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
+def parse_iso(value: Any) -> Optional[datetime]:
+    """Parse an ISO timestamp (optional trailing Z) into an aware UTC datetime."""
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def normalize_kickoff(value: Any) -> Optional[str]:
+    """Canonical UTC ISO kickoff for storage (None when unparseable)."""
+    parsed = parse_iso(value)
+    return parsed.isoformat() if parsed else None
+
+
+def pre_kickoff_snapshots(game: dict) -> list:
+    """Line snapshots captured strictly before kickoff.
+
+    The graded closing line must never come from a capture taken after the
+    game started: in-play refreshes would otherwise rewrite the number the
+    model is scored against. When kickoff is unknown (games stored before this
+    field existed) every snapshot is eligible, preserving old behaviour.
+    """
+    snaps = game.get("lines") or []
+    kickoff = parse_iso(game.get("kickoff"))
+    if kickoff is None:
+        return list(snaps)
+    out = []
+    for snap in snaps:
+        ts = parse_iso(snap.get("recordedAt")) if isinstance(snap, dict) else None
+        if ts is not None and ts < kickoff:
+            out.append(snap)
+    return out
+
+
+def latest_pre_kickoff(game: dict) -> Optional[dict]:
+    """The most recent snapshot taken strictly before kickoff, or None."""
+    snaps = pre_kickoff_snapshots(game)
+    return snaps[-1] if snaps else None
+
+
 def read_ledger(path: Optional[Path] = None) -> dict:
     path = Path(path) if path else ledger_path()
     try:
@@ -113,6 +158,9 @@ def _blank_game(team: str, opponent: str, event_date: str) -> dict:
         # keys — every reader must .get() with a default.
         "lines": [],
         "finalLines": None,
+        # Scheduled kickoff (UTC ISO). Lets the closing-line resolution pick
+        # only captures taken strictly before the game started.
+        "kickoff": None,
     }
 
 
@@ -193,15 +241,37 @@ def _coerce_line_row(row: Any) -> Optional[dict]:
     return out
 
 
+def _closing_candidate(game: dict) -> Optional[dict]:
+    """The frozen closing-line snapshot for a game.
+
+    Deterministic: the latest capture taken strictly before kickoff. Falls back
+    to the pre-snapshot's embedded lines for games that never recorded hourly
+    captures (or whose only captures post-date kickoff) so grading still gets a
+    number instead of silently skipping the game. Never returns a post-kickoff
+    capture.
+    """
+    latest = latest_pre_kickoff(game)
+    if latest is not None:
+        return {**latest, "frozen": True}
+    pre = game.get("pre") or {}
+    fallback = [r for r in (_coerce_line_row(r) for r in (pre.get("rows") or [])) if r and r.get("line")]
+    if not fallback:
+        return None
+    return {"recordedAt": pre.get("recordedAt") or utcnow_iso(),
+            "source": "pre-snapshot", "lines": fallback, "frozen": True}
+
+
 def record_lines(team: str, opponent: str, event_date: str, record: dict,
                  path: Optional[Path] = None) -> dict:
     """Append one timestamped book-line snapshot (hourly pre-game refresh).
 
     ``record``: {"lines": [{player, stat, line, book?, over?, under?}, ...],
-                 "source"?: str, "recordedAt"?: iso}.
+                 "source"?: str, "recordedAt"?: iso, "kickoff"?: iso}.
     Snapshots are append-only and capped at MAX_LINE_SNAPSHOTS; once
     ``finalLines`` is frozen (see freeze_final_lines) new snapshots are still
-    stored but no longer move the frozen closing lines.
+    stored but no longer move the frozen closing lines. ``kickoff`` (when
+    supplied) is persisted so only captures strictly before it can become the
+    graded closing line.
     """
     if not isinstance(record, dict) or not isinstance(record.get("lines"), list):
         raise ValueError("lines record must be an object with a 'lines' list")
@@ -211,6 +281,7 @@ def record_lines(team: str, opponent: str, event_date: str, record: dict,
         if coerced is None:
             raise ValueError(f"bad line row: {r!r}")
         rows.append(coerced)
+    kickoff = normalize_kickoff(record.get("kickoff"))
     key = make_key(team, opponent, event_date)
     snapshot = {
         "recordedAt": record.get("recordedAt") or utcnow_iso(),
@@ -225,12 +296,15 @@ def record_lines(team: str, opponent: str, event_date: str, record: dict,
             snaps = snaps[-(MAX_LINE_SNAPSHOTS - 1):]
         snaps.append(snapshot)
         game["lines"] = snaps
-        # Pre-final: the latest snapshot doubles as the closing-line
-        # candidate. Once frozen, finalLines stays put.
-        if not game.get("finalLines"):
-            game["finalLines"] = snapshot
-        elif not (game.get("finalLines") or {}).get("frozen"):
-            game["finalLines"] = snapshot
+        # Persist kickoff once (first writer wins; it never changes).
+        if kickoff and not game.get("kickoff"):
+            game["kickoff"] = kickoff
+        # Pre-final: the newest capture strictly before kickoff doubles as the
+        # closing-line candidate. Once frozen, finalLines stays put.
+        if not (game.get("finalLines") or {}).get("frozen"):
+            candidate = latest_pre_kickoff(game)
+            if candidate is not None:
+                game["finalLines"] = candidate
         data["games"][key] = game
     write_ledger(data, path)
     return snapshot
@@ -250,22 +324,9 @@ def freeze_final_lines(team: str, opponent: str, event_date: str,
         current = game.get("finalLines")
         if current and current.get("frozen"):
             return current
-        snaps = game.get("lines") or []
-        # Fall back to the pre-snapshot's embedded lines (older games that
-        # never recorded hourly snapshots still get a gradeable closing line).
-        if not snaps:
-            pre_rows = ((game.get("pre") or {}).get("rows")) or []
-            fallback = [r for r in (_coerce_line_row(r) for r in pre_rows) if r and r.get("line")]
-            if not fallback:
-                return None
-            frozen = {"recordedAt": (game.get("pre") or {}).get("recordedAt") or utcnow_iso(),
-                      "source": "pre-snapshot", "lines": fallback, "frozen": True}
-            game["finalLines"] = frozen
-            data["games"][key] = game
-            write_ledger(data, path)
-            return frozen
-        latest = snaps[-1]
-        frozen = {**latest, "frozen": True}
+        frozen = _closing_candidate(game)
+        if frozen is None:
+            return None
         game["finalLines"] = frozen
         data["games"][key] = game
     write_ledger(data, path)
@@ -305,20 +366,13 @@ def record_live(team: str, opponent: str, event_date: str, record: dict,
             live = live[-(MAX_LIVE_RECORDS - 1):]
         live.append(point)
         game["live"] = live
-        if is_final:
-            # Lock the closing lines to the most recent pre-final snapshot so
-            # post-game refreshes can't rewrite what the model is graded on.
-            snaps = game.get("lines") or []
-            if snaps and not ((game.get("finalLines") or {}).get("frozen")):
-                game["finalLines"] = {**snaps[-1], "frozen": True}
-            elif not game.get("finalLines"):
-                pre_rows = ((game.get("pre") or {}).get("rows")) or []
-                fallback = [r for r in (_coerce_line_row(r) for r in pre_rows) if r and r.get("line")]
-                if fallback:
-                    game["finalLines"] = {
-                        "recordedAt": (game.get("pre") or {}).get("recordedAt") or utcnow_iso(),
-                        "source": "pre-snapshot", "lines": fallback, "frozen": True,
-                    }
+        if is_final and not (game.get("finalLines") or {}).get("frozen"):
+            # Lock the closing lines to the latest pre-kickoff snapshot so
+            # in-play and post-game refreshes can't rewrite what the model is
+            # graded on.
+            frozen = _closing_candidate(game)
+            if frozen is not None:
+                game["finalLines"] = frozen
         data["games"][key] = game
     write_ledger(data, path)
     return point

@@ -23,10 +23,19 @@ import argparse
 import datetime as dt
 import json
 import sys
+import time
+import urllib.error
 import urllib.request
 
 SCRAPE_TIMEOUT = 180
 GET_TIMEOUT = 60
+
+# The site's /api/scraper is token-bucketed (30/min + burst) so one abusive
+# client can't monopolise the scraper. An hourly sweep of a whole week's slate
+# legitimately exceeds that, so pace the loop and honour Retry-After instead of
+# dropping games.
+MAX_RETRIES = 8
+PACING_SECONDS = 0.4
 
 # ESPN scoreboard league paths for the non-NFL sports (schedule-week is NFL-only).
 SCOREBOARD_SPORTS = {
@@ -47,14 +56,34 @@ def get_json(url, timeout=GET_TIMEOUT):
         return json.load(r)
 
 
+def _retry_after(err, default):
+    try:
+        raw = err.headers.get("Retry-After")
+        if raw is not None:
+            return max(1.0, float(raw))
+    except (TypeError, ValueError, AttributeError):
+        pass
+    return default
+
+
 def post(base, path, body, timeout=SCRAPE_TIMEOUT):
-    req = urllib.request.Request(
-        base + path,
-        data=json.dumps(body).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        return json.load(r)
+    """POST JSON, backing off (honouring Retry-After) while rate-limited."""
+    data = json.dumps(body).encode()
+    for attempt in range(MAX_RETRIES + 1):
+        req = urllib.request.Request(
+            base + path, data=data,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt < MAX_RETRIES:
+                wait = _retry_after(e, default=2.0 * (attempt + 1))
+                print(f"[lines] rate limited on {path}; waiting {wait:.0f}s", flush=True)
+                time.sleep(wait)
+                continue
+            raise
 
 
 def _flatten_scrape(results):
@@ -167,8 +196,12 @@ def main() -> int:
     print(f"[lines] {len(pre_games)} pre-game, {len(final_games)} recent finals", flush=True)
 
     ok = fail = 0
-    for g in pre_games:
+    for i, g in enumerate(pre_games):
         tag = f"{g['sport']} {g['away']}@{g['home']} {g['date']}"
+        # Pace the sweep so the site's token bucket keeps up (it refills at the
+        # sustained rate; a tight loop would just queue on Retry-After anyway).
+        if i:
+            time.sleep(PACING_SECONDS)
         try:
             sc = post(args.base, "/api/scraper",
                       {"team": g["away"], "opponent": g["home"],
@@ -185,7 +218,8 @@ def main() -> int:
             led = post(args.base, "/api/prop-ledger",
                        {"action": "lines", "team": t1, "opponent": t2,
                         "eventDate": g["date"],
-                        "record": {"lines": rows, "source": "hourly-refresh"}},
+                        "record": {"lines": rows, "source": "hourly-refresh",
+                                   "kickoff": g.get("kickoff")}},
                        timeout=60)
             if not led.get("ok"):
                 raise RuntimeError(f"ledger rejected: {led}")
