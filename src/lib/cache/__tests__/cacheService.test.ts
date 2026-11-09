@@ -120,10 +120,14 @@ describe('bounded cache + key hashing', () => {
     const long = 'x'.repeat(5000)
     setCachedChecked(`news:long:${long}`, { articles: [1] })
     expect(getCached(`news:long:${long}`)).not.toBe(null)
-    expect(memoryKeyFor(long)).toMatch(/^sha256:[0-9a-f]{64}$/)
+    expect(memoryKeyFor(long)).toMatch(/^fnv:[0-9a-f]{8}:5000$/)
     expect(memoryKeyFor('short:key')).toBe('short:key')
     // Boundary: 200 chars stays raw, 201 gets hashed.
     expect(memoryKeyFor('y'.repeat(200))).toHaveLength(200)
-    expect(memoryKeyFor('y'.repeat(201))).toMatch(/^sha256:/)
+    expect(memoryKeyFor('y'.repeat(201))).toMatch(/^fnv:/)
+    // Deterministic and length-aware: same text hashes equal, different
+    // lengths can't collapse onto each other.
+    expect(memoryKeyFor('z'.repeat(300))).toBe(memoryKeyFor('z'.repeat(300)))
+    expect(memoryKeyFor('z'.repeat(300))).not.toBe(memoryKeyFor('z'.repeat(301)))
   })
 })

@@ -1,5 +1,3 @@
-import { createHash } from 'crypto'
-
 export interface CacheEntry<T = unknown> {
   data: T
   ts: number
@@ -19,18 +17,35 @@ interface CacheProvider {
   size(): number
 }
 
-/** Max live entries; oldest-used evicted first (LRU via Map insertion order). */
+/**
+ * Max live entries; oldest-used evicted first (LRU via Map insertion order).
+ */
 export const MAX_CACHE_ENTRIES = 500
 /** How long a failure/empty result may be reused before a retry is forced. */
 export const NEGATIVE_TTL_MS = 15_000
 /** Keys longer than this (raw user input can be arbitrarily long) are hashed. */
 const HASH_KEY_THRESHOLD = 200
 
-/** Stable internal Map key: over-long keys collapse to a SHA-256 digest. */
+/**
+ * Portable FNV-1a for over-long keys. `crypto.createHash` is a Node-only
+ * import, and this module is traced into the Edge runtime via
+ * instrumentation (`sleeper-master`/`unified-db`), where `import 'crypto'`
+ * makes Turbopack warn and can break the compile. These keys are pure Map
+ * interning — stability across a process, not cryptography — so a deterministic
+ * non-crypto digest with the length folded in is safe here.
+ */
+export function hashKeyFor(key: string): string {
+  let hash = 0x811c9dc5
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193)
+  }
+  return `fnv:${(hash >>> 0).toString(16).padStart(8, '0')}:${key.length}`
+}
+
+/** Stable internal Map key: over-long keys collapse to a portable digest. */
 export function memoryKeyFor(key: string): string {
-  return key.length > HASH_KEY_THRESHOLD
-    ? `sha256:${createHash('sha256').update(key).digest('hex')}`
-    : key
+  return key.length > HASH_KEY_THRESHOLD ? hashKeyFor(key) : key
 }
 
 const memoryCache = new Map<string, CacheEntry>()
