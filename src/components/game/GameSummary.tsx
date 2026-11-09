@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import { PlayByPlay } from './PlayByPlay'
@@ -9,6 +10,9 @@ import {
   type BoxScoreTeam,
 } from '@/components/box-score/GameStatsSection'
 import { EmptyState, SkeletonRows } from '@/components/feedback'
+import { GameLeaders } from '@/components/game-hub/GameLeaders'
+import type { LeaderTeam } from '@/lib/gameLeaders'
+import type { SportKey } from '@/lib/models'
 import type { NormalizedPlay } from '@/lib/plays'
 import type { FeedStory } from '@/components/NewsFeed'
 
@@ -25,6 +29,25 @@ export interface SummaryTeam {
 export function selectBigPlays(plays: NormalizedPlay[] | null, limit = 6): NormalizedPlay[] {
   if (!plays || plays.length === 0) return []
   return plays.filter((p) => p.scoring || p.highlight).slice(-limit)
+}
+
+export function isBigPlay(play: Pick<NormalizedPlay, 'scoring' | 'highlight'>): boolean {
+  return Boolean(play.scoring || play.highlight)
+}
+
+/**
+ * The overview's "recent plays" strip: the newest `limit` plays, chronological
+ * (PlayByPlay reverses them for display). When that window happens to contain
+ * no scoring or highlight play, the latest big moment takes the oldest slot so
+ * a quiet stretch never hides the play that actually mattered.
+ */
+export function selectRecentPlays(plays: NormalizedPlay[] | null, limit = 6): NormalizedPlay[] {
+  if (!plays || plays.length === 0 || limit <= 0) return []
+  const recent = plays.slice(-limit)
+  if (recent.some(isBigPlay)) return recent
+  const big = selectBigPlays(plays, 1)
+  if (big.length === 0) return recent
+  return [...recent.slice(1), big[big.length - 1]]
 }
 
 export interface ConciseStatRow {
@@ -87,7 +110,7 @@ function GameNews({ league, teams }: { league: string; teams: SummaryTeam[] }) {
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/top-stories?leagues=${league.toLowerCase()}&limit=24&ranking=balanced`, {
+    apiFetch(`/api/top-stories?leagues=${league.toLowerCase()}&limit=24&ranking=balanced`, {
       signal: AbortSignal.timeout(30000),
     })
       .then((r) => {
@@ -157,6 +180,7 @@ export function LiveGameSummary({
   boxScore: {
     teams?: BoxScoreTeam[]
     status?: { state?: string; completed?: boolean; detail?: string; shortDetail?: string } | null
+    playerStats?: LeaderTeam[] | null
   } | null
   plays: NormalizedPlay[] | null
   playsChecked: boolean
@@ -169,14 +193,14 @@ export function LiveGameSummary({
   const awayBs = bsTeams.find((t) => t.homeAway === 'away') ?? bsTeams[0] ?? null
   const homeBs = bsTeams.find((t) => t.homeAway === 'home') ?? bsTeams[1] ?? null
   const concise =
-    awayBs && homeBs ? selectConciseStats(awayBs.statistics, homeBs.statistics) : []
-  const bigPlays = selectBigPlays(plays)
+    awayBs && homeBs ? selectConciseStats(awayBs.statistics, homeBs.statistics, 8) : []
+  const recentPlays = selectRecentPlays(plays)
   const { awayColor, homeColor } =
     awayBs && homeBs
       ? resolveBarColors(sport, awayBs.abbreviation, homeBs.abbreviation)
       : { awayColor: '#8a9990', homeColor: '#5e6c63' }
 
-  const showBigPlays = playsChecked && bigPlays.length > 0
+  const showBigPlays = playsChecked && recentPlays.length > 0
   const showPlaysLoading = !playsChecked
   const showPlaysEmpty = playsChecked && !playsError && (plays ?? []).length === 0
   const showConciseStats = concise.length > 0
@@ -185,9 +209,9 @@ export function LiveGameSummary({
     <div className="space-y-4">
       {lastPlayBlock}
 
-      <section aria-label="Big plays" className="fs-panel p-4 sm:p-5">
-        <h2 className="fs-title text-lg mb-1">Big Plays</h2>
-        <p className="fs-meta mb-3">Scores &amp; key moments</p>
+      <section aria-label="Recent plays" className="fs-panel p-4 sm:p-5">
+        <h2 className="fs-title text-lg mb-1">Recent Plays</h2>
+        <p className="fs-meta mb-3">Latest plays &amp; key moments</p>
         {showPlaysLoading ? (
           <SkeletonRows count={4} height="h-14" />
         ) : playsError && !plays ? (
@@ -197,7 +221,7 @@ export function LiveGameSummary({
           />
         ) : showBigPlays ? (
           <>
-            <PlayByPlay plays={bigPlays} loading={false} error={null} />
+            <PlayByPlay plays={recentPlays} loading={false} error={null} />
             <button
               type="button"
               onClick={onRetryPlays}
@@ -212,6 +236,15 @@ export function LiveGameSummary({
           <p className="text-sm text-fs-muted">No big moments yet — check back as the game unfolds.</p>
         )}
       </section>
+
+      {awayBs && homeBs ? (
+        <GameLeaders
+          sport={sport as SportKey}
+          playerStats={boxScore?.playerStats ?? null}
+          awayAbbr={awayBs.abbreviation}
+          homeAbbr={homeBs.abbreviation}
+        />
+      ) : null}
 
       {showConciseStats && awayBs && homeBs ? (
         <section aria-label="Team stats at a glance" className="fs-panel p-4 sm:p-5">

@@ -43,6 +43,10 @@ export function LinescoreTable({ sport, away, home }: { sport: SportKey; away: B
   const maxPeriods = Math.max(away?.linescores?.length ?? 0, home?.linescores?.length ?? 0)
   if (maxPeriods === 0) return null
   const labels = getPeriodLabels(sport, maxPeriods)
+  // A single played period (NBA Q1 tip-off) renders "Q1 33 T 33" fine, but the
+  // tiny stacked letters read as broken alignment in narrow columns — drop
+  // them until two or more periods are on the board.
+  const showLetters = maxPeriods > 1
   const sum = (arr: number[] = []) => arr.reduce((a, b) => a + b, 0)
 
   const row = (team: BoxTeam | null, fallback: string) => (
@@ -50,7 +54,9 @@ export function LinescoreTable({ sport, away, home }: { sport: SportKey; away: B
       <span role="rowheader" className="w-8 text-right font-semibold text-fs-muted">{team?.abbreviation ?? fallback}</span>
       {Array.from({ length: maxPeriods }, (_, i) => (
         <span key={i} role="cell" className="flex flex-col items-center min-w-6">
-          <span aria-hidden="true" className="text-[9px] uppercase tracking-wider opacity-70">{labels[i] ?? ''}</span>
+          {showLetters && (
+            <span aria-hidden="true" className="text-[9px] uppercase tracking-wider opacity-70">{labels[i] ?? ''}</span>
+          )}
           <span className="font-mono">{team?.linescores?.[i] ?? '–'}</span>
         </span>
       ))}
@@ -91,8 +97,11 @@ interface PlayerTeam {
 }
 
 /**
- * Sport-specific player box scores. Desktop renders side-by-side tables;
- * mobile scrolls horizontally. Player names link to player pages.
+ * Sport-specific player box scores. The two team tables go side-by-side only
+ * when there is real room for them — container queries, so inside narrow
+ * sidebars (game-hub watch companion, multiview stats column) they stack one
+ * team's table above the other and every stat column stays in view. Phones
+ * scroll horizontally; names link to player pages.
  */
 export function PlayerBoxScore({
   sport,
@@ -110,7 +119,8 @@ export function PlayerBoxScore({
   }
 
   return (
-    <div className="grid md:grid-cols-2 gap-4 min-w-0 items-start">
+    <div className="@container min-w-0">
+      <div className="grid gap-4 items-start @3xl:grid-cols-2 min-w-0">
       {(playerStats ?? []).map((team, ti) => {
         const athleteCount = team.categories.reduce((n, c) => n + (c.athletes?.length ?? 0), 0)
         return (
@@ -170,6 +180,7 @@ export function PlayerBoxScore({
           </div>
         )
       })}
+      </div>
     </div>
   )
 }

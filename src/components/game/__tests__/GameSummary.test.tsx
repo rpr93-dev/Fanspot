@@ -5,6 +5,7 @@ import {
   selectBigPlays,
   selectConciseStats,
   selectGameStories,
+  selectRecentPlays,
   storyMentionsTeam,
 } from '../GameSummary'
 import { sportForPathname } from '@/components/SportScopedScoreboard'
@@ -54,6 +55,40 @@ describe('selectBigPlays', () => {
   it('returns [] for null/empty', () => {
     expect(selectBigPlays(null)).toEqual([])
     expect(selectBigPlays([])).toEqual([])
+  })
+})
+
+describe('selectRecentPlays', () => {
+  const plays = ['1', '2', '3', '4', '5', '6', '7'].map((id) =>
+    play({ id, text: `Play ${id}` }),
+  )
+
+  it('returns the newest plays, chronological (PlayByPlay reverses them)', () => {
+    expect(selectRecentPlays(plays, 3).map((p) => p.id)).toEqual(['5', '6', '7'])
+  })
+
+  it('keeps the latest big moment in the window when the tail is quiet', () => {
+    const withBig = [
+      play({ id: 'b1', text: 'TOUCHDOWN Chiefs!', scoring: true }),
+      ...['2', '3', '4', '5'].map((id) => play({ id, text: `Play ${id}` })),
+    ]
+    // Newest plays kept, the big play takes the oldest slot, newest last.
+    const out = selectRecentPlays(withBig, 3)
+    expect(out.map((p) => p.id)).toEqual(['4', '5', 'b1'])
+  })
+
+  it('leaves a window that already contains a big play untouched', () => {
+    const withBig = [
+      ...['1', '2'].map((id) => play({ id, text: `Play ${id}` })),
+      play({ id: 'b', text: 'INTERCEPTED', highlight: true }),
+    ]
+    expect(selectRecentPlays(withBig, 3).map((p) => p.id)).toEqual(['1', '2', 'b'])
+  })
+
+  it('returns [] for null/empty or a zero limit', () => {
+    expect(selectRecentPlays(null)).toEqual([])
+    expect(selectRecentPlays([])).toEqual([])
+    expect(selectRecentPlays(plays, 0)).toEqual([])
   })
 })
 
@@ -203,10 +238,56 @@ describe('LiveGameSummary', () => {
         onViewTeamStats={() => {}}
       />,
     )
-    expect(html).toContain('Big Plays')
+    expect(html).toContain('Recent Plays')
     expect(html).toContain('TOUCHDOWN Chiefs!')
     expect(html).toContain('Team Stats')
     expect(html).toContain('300')
+    // No player stats in this payload → the leaders block stays out entirely.
+    expect(html).not.toContain('Game Leaders')
+  })
+
+  it('renders game leaders from the box score player stats', () => {
+    const html = renderToStaticMarkup(
+      <LiveGameSummary
+        sport="NFL"
+        away={{ abbr: 'KC', name: 'Kansas City Chiefs' }}
+        home={{ abbr: 'BUF', name: 'Buffalo Bills' }}
+        boxScore={{
+          teams: [
+            { abbreviation: 'KC', homeAway: 'away', score: { displayValue: '24' }, statistics: [] },
+            { abbreviation: 'BUF', homeAway: 'home', score: { displayValue: '21' }, statistics: [] },
+          ],
+          playerStats: [
+            {
+              teamAbbr: 'KC',
+              categories: [
+                {
+                  label: 'Passing',
+                  statNames: ['YDS'],
+                  athletes: [
+                    { id: '3139477', displayName: 'Patrick Mahomes', position: 'QB', stats: { YDS: '305' } },
+                  ],
+                },
+              ],
+            },
+            { teamAbbr: 'BUF', categories: [] },
+          ],
+        }}
+        plays={[]}
+        playsChecked
+        playsError={null}
+        onRetryPlays={() => {}}
+        lastPlayBlock={null}
+        onViewTeamStats={() => {}}
+      />,
+    )
+    expect(html).toContain('Game Leaders')
+    expect(html).toContain('Patrick Mahomes')
+    expect(html).toContain('Pass Yds')
+    expect(html).toContain('305')
+    expect(html).toContain('/nfl/player/3139477')
+    // The other team has no stats → no zero rows are fabricated.
+    expect(html).toContain('No player stats yet.')
   })
 
   it('shows a gentle note when the game has no data yet', () => {

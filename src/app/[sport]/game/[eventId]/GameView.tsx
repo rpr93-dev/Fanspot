@@ -1,11 +1,13 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { teams, sportConfig } from '@/data/teams'
 import NextGamePanel from '@/components/NextGamePanel'
 import { GameShell } from '@/components/game-hub/GameShell'
-import { GameStatsSection, LastPlayBlock } from '@/components/box-score/GameStatsSection'
+import { readGameHubShell } from '@/hooks/useGameHubPrefs'
+import { GameStatsSection, LastPlayBlock, StatComparisonTable } from '@/components/box-score/GameStatsSection'
 import { LiveGameSummary } from '@/components/game/GameSummary'
 import { GameStreamPanel } from '@/components/streams/GameStreamPanel'
 import { GameHeader } from '@/components/game/GameHeader'
@@ -99,22 +101,39 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
   const [scraperError, setScraperError] = useState<string | null>(null)
   const [boxScoreGaveUp, setBoxScoreGaveUp] = useState(false)
   const tabDefaultedRef = useRef(false)
+  // Once the reader picks a tab themselves, no automatic rule moves it again.
+  const tabPickedRef = useRef(false)
+
+  /**
+   * Switching into the v2 Watch companion shows the game overview
+   * (recent plays, leaders, team comparisons) unless a tab was already chosen.
+   */
+  const onShellMode = useCallback(({ shell, mode }: { shell: string; mode: string }) => {
+    if (shell === 'v2' && mode === 'watch' && !tabPickedRef.current) {
+      setTab((t) => (t === 'summary' ? t : 'summary'))
+    }
+  }, [])
 
   const isLive = game?.status.phase === 'live'
   const isFinal = game?.status.phase === 'final'
 
   // Default tab follows game state: finals open on the box score — but only
   // once, so a game going final mid-read doesn't yank the user's tab away.
+  // The exception is the v2 Watch companion, which is specified to open on the
+  // game overview (recent plays, leaders, team comparisons) — the box score is
+  // one click away in its tab strip.
   useEffect(() => {
     if (isFinal && !tabDefaultedRef.current) {
       tabDefaultedRef.current = true
-      setTab((t) => (t === 'summary' ? 'box' : t))
+      const { shell, mode } = readGameHubShell()
+      const watchCompanion = shell === 'v2' && mode === 'watch'
+      setTab((t) => (t === 'summary' && !watchCompanion ? 'box' : t))
     }
   }, [isFinal])
 
   const loadGame = useCallback(async () => {
     if (!sport || !eventId) return
-    const res = await fetch(`/api/game?sport=${sport}&eventId=${eventId}`, { cache: 'no-store' })
+    const res = await apiFetch(`/api/game?sport=${sport}&eventId=${eventId}`, { cache: 'no-store' })
     if (!res.ok) throw new Error(`Game API returned ${res.status}`)
     const json = await res.json()
     const normalized = normalizeEvent(sport, json?.game)
@@ -125,7 +144,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
 
   const loadBoxScore = useCallback(async () => {
     if (!sport || !eventId) return
-    const res = await fetch(`/api/box-score?sport=${sport}&eventId=${eventId}`, { cache: 'no-store' })
+    const res = await apiFetch(`/api/box-score?sport=${sport}&eventId=${eventId}`, { cache: 'no-store' })
     if (!res.ok) return
     const json = await res.json()
     if (json?.boxScore) {
@@ -172,7 +191,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
   const loadPlays = useCallback(async () => {
     if (!sport || !eventId) return
     try {
-      const res = await fetch(`/api/plays?sport=${sport}&eventId=${eventId}`, { cache: 'no-store' })
+      const res = await apiFetch(`/api/plays?sport=${sport}&eventId=${eventId}`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`Plays API returned ${res.status}`)
       const json = await res.json()
       setPlays(Array.isArray(json?.plays) ? json.plays : [])
@@ -275,7 +294,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
     const loadForTeam = async (teamAbbr: string, opponentAbbr: string) => {
       setOddsStatus((prev) => ({ ...prev, [teamAbbr]: 'loading' }))
       try {
-        const oddsRes = await fetch(`/api/odds?sport=${sport}&team=${teamAbbr}&eventId=${eventId}&date=${gameDate}`)
+        const oddsRes = await apiFetch(`/api/odds?sport=${sport}&team=${teamAbbr}&eventId=${eventId}&date=${gameDate}`)
         if (oddsRes.ok) {
           const oddsData = await oddsRes.json()
           setOdds((prev) => ({ ...prev, [teamAbbr]: oddsData.odds }))
@@ -296,7 +315,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
         scraperFiredRef.current = eventId
         setScraperLoading((prev) => ({ ...prev, [teamAbbr]: true }))
         try {
-          const scraperRes = await fetch('/api/scraper', {
+          const scraperRes = await apiFetch('/api/scraper', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ team: teamAbbr, opponent: opponentAbbr, gameDate, sport: sport.toLowerCase() }),
@@ -354,6 +373,22 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
   const eventDate = game?.date?.slice(0, 10).replace(/-/g, '')
   const isPreseason = game?.seasonType === 1
 
+  // Command workspace slots. These reuse the exact components the tabs render
+  // (no new data path, no duplicate fetch) and are kept mounted across modes so
+  // switching Watch ⇄ Command is instant and never refetches.
+  const playsPanel = (
+    <PlayByPlay plays={plays} loading={!playsChecked} error={playsError} onRetry={loadPlays} />
+  )
+  const boxPanel = (
+    <PlayerBoxScore sport={sportKey} playerStats={boxScore?.playerStats ?? null} loading={!boxScore} />
+  )
+  const comparisonPanel =
+    awayBs && homeBs ? (
+      <StatComparisonTable away={awayBs} home={homeBs} sport={sport} />
+    ) : (
+      <p className="text-sm text-fs-muted">Team stats will appear here once the game begins.</p>
+    )
+
   return (
     <div className="min-h-screen fs-page" style={{ '--glow': `${config.color}1c` } as React.CSSProperties}>
       <div className="fs-shell px-4 sm:px-6 py-6 sm:py-10">
@@ -398,13 +433,18 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
             {/* Game Hub: the stream (when the sport supports it) stays mounted
                 as a persistent companion column; only the data panel below
                 swaps tabs, so the player never remounts or reloads. */}
-            {/* Game Hub shell host: renders the original layout or the Beta v2
-                Watch/Command/Multiview workspace behind the Old / Beta v2
+            {/* Game Hub shell host: renders the original layout or the
+                Watch/Command/Multiview workspace behind the New / Classic
                 toggle. Both shells lay out these same nodes, so nothing is
                 duplicated and a mode/tab/resize change never remounts the
                 player. */}
             <GameShell
               hasStream={supportsStream}
+              live={isLive}
+              onShellMode={onShellMode}
+              commandPlays={playsPanel}
+              commandBox={boxPanel}
+              commandStats={comparisonPanel}
               stream={
                 supportsStream ? (
                   <div className="space-y-2">
@@ -437,7 +477,10 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
                   aria-controls={`game-panel-${t}`}
                   aria-selected={activeTab === t}
                   tabIndex={activeTab === t ? 0 : -1}
-                  onClick={() => setTab(t)}
+                  onClick={() => {
+                    tabPickedRef.current = true
+                    setTab(t)
+                  }}
                   onKeyDown={(e) => {
                     const last = availableTabs.length - 1
                     let next = -1
@@ -447,6 +490,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
                     else if (e.key === 'End') next = last
                     if (next >= 0) {
                       e.preventDefault()
+                      tabPickedRef.current = true
                       setTab(availableTabs[next])
                       requestAnimationFrame(() => document.getElementById(`game-tab-${availableTabs[next]}`)?.focus())
                     }
@@ -518,7 +562,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
                       away={awayBs ? { abbreviation: awayBs.abbreviation, linescores: awayBs.linescores, homeAway: 'away' } : null}
                       home={homeBs ? { abbreviation: homeBs.abbreviation, linescores: homeBs.linescores, homeAway: 'home' } : null}
                     />
-                    <PlayerBoxScore sport={sportKey} playerStats={boxScore?.playerStats ?? null} loading={!boxScore} />
+                    {boxPanel}
                   </>
                 )}
               </div>
@@ -526,7 +570,7 @@ export function GameView({ sportParam, eventId }: { sportParam: string; eventId:
 
             {activeTab === 'plays' && (
               <div role="tabpanel" id="game-panel-plays" aria-labelledby="game-tab-plays">
-                <PlayByPlay plays={plays} loading={!playsChecked} error={playsError} onRetry={loadPlays} />
+                {playsPanel}
               </div>
             )}
 

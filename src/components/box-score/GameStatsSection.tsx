@@ -1,5 +1,6 @@
 'use client'
 
+import { Fragment } from 'react'
 import { teams } from '@/data/teams'
 import { teamStatLabels } from '@/lib/roster-stats'
 import { adjustForDarkTheme } from '@/lib/fantasy/team-theme'
@@ -128,6 +129,82 @@ export function statLabel(name: string): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* Sport-aware shaping: order, short labels, clean compound values     */
+/* ------------------------------------------------------------------ */
+
+/**
+ * ESPN compound team-stat keys whose "A-B" display should read as "A–B"
+ * (shooting splits, sacks+yards, penalties+yards). `part` also decides
+ * which side of the compound sizes the comparison bar.
+ */
+const COMPOUND_META: Record<string, { label: string; part: 'first' | 'second' }> = {
+  'fieldGoalsMade-fieldGoalsAttempted': { label: 'FG', part: 'first' },
+  'threePointFieldGoalsMade-threePointFieldGoalsAttempted': { label: '3PT', part: 'first' },
+  'freeThrowsMade-freeThrowsAttempted': { label: 'FT', part: 'first' },
+  completionAttempts: { label: 'C/ATT', part: 'first' },
+  sacksYardsLost: { label: 'Sacks-Yds', part: 'first' },
+  totalPenaltiesYards: { label: 'Pen-Yds', part: 'second' },
+  penaltyYards: { label: 'Pen Yds', part: 'second' },
+}
+
+/** Short label for a team-stat key when one is known; null falls through. */
+function compoundLabel(name: string): string | null {
+  return COMPOUND_META[name]?.label ?? null
+}
+
+/**
+ * Short, lowercase-friendly stat labels for the compact head-to-head table.
+ * Basketball compound keys resolve here; the rest use teamStatLabels.
+ */
+function shortStatLabel(name: string): string {
+  return compoundLabel(name) ?? teamStatLabels[name] ?? prettifyName(name)
+}
+
+/** "13-16" -> "13–16" (en dash) for compound shooting/penalty displays. */
+function compoundDisplay(name: string, display: string): string {
+  if (!COMPOUND_META[name]) return display
+  return display.includes('–') ? display : display.replace(/(\d+)\s*-\s*(\d+)/, '$1–$2')
+}
+
+/** Basketball-first row order for the compact comparison table. */
+const BASKETBALL_PRIORITY = [
+  'fieldGoalsMade-fieldGoalsAttempted',
+  'fieldGoalPct',
+  'threePointFieldGoalsMade-threePointFieldGoalsAttempted',
+  'threePointFieldGoalPct',
+  'freeThrowsMade-freeThrowsAttempted',
+  'freeThrowPct',
+  'totalRebounds',
+  'offensiveRebounds',
+  'defensiveRebounds',
+  'assists',
+  'steals',
+  'blocks',
+  'turnovers',
+  'fouls',
+  'pointsInPaint',
+  'fastBreakPoints',
+  'secondChancePoints',
+  'largestLead',
+]
+
+/**
+ * Team-turnover/technical bookkeeping the per-sport rows already cover (TO,
+ * Fouls) — ESPN reports both raw and "total" variants for basketball, and
+ * listing both only pads the compact table with 0-vs-0 noise.
+ */
+const BASKETBALL_SKIP = new Set([
+  'teamTurnovers',
+  'totalTurnovers',
+  'technicalFouls',
+  'totalTechnicalFouls',
+  'flagrantFouls',
+  'leadChanges',
+  'leadPercentage',
+  'turnoverPoints',
+])
+
+/* ------------------------------------------------------------------ */
 /* Stat ordering: football-first priority, everything else passthrough */
 /* ------------------------------------------------------------------ */
 
@@ -203,30 +280,40 @@ export function numericForStat(name: string, display: string | null): number | n
 /**
  * Builds ordered head-to-head rows from the two teams' ESPN `statistics`
  * arrays. Only stats actually present in the data are returned — nothing is
- * fabricated. For football the priority list above leads; for other sports
- * (or leftover stats) ESPN order is preserved after the prioritized ones.
+ * fabricated. For football the priority list above leads; basketball gets its
+ * own order with short labels (FG, 3PT, FT, REB …); compound shooting values
+ * are formatted en-dash ("13–16"). For other sports (or leftover stats) ESPN
+ * order is preserved after the prioritized ones.
  */
 export function buildComparisonRows(
   awayStats: { name: string; displayValue: string }[] | undefined,
   homeStats: { name: string; displayValue: string }[] | undefined,
+  sport?: string,
 ): StatComparisonInput[] {
-  const awayByName = new Map((awayStats ?? []).map((s) => [s.name, s.displayValue]))
-  const homeByName = new Map((homeStats ?? []).map((s) => [s.name, s.displayValue]))
+  const shaped = (name: string, display: string | null) =>
+    display == null ? null : compoundDisplay(name, display)
+  const awayByName = new Map((awayStats ?? []).map((s) => [s.name, shaped(s.name, s.displayValue)]))
+  const homeByName = new Map((homeStats ?? []).map((s) => [s.name, shaped(s.name, s.displayValue)]))
+  const priority =
+    sport?.toUpperCase() === 'NBA' || sport?.toUpperCase() === 'NCAAMB' ? BASKETBALL_PRIORITY : FOOTBALL_PRIORITY
+  const basketball = priority !== FOOTBALL_PRIORITY
   const orderedNames: string[] = []
   const seen = new Set<string>()
-  for (const name of FOOTBALL_PRIORITY) {
+  for (const name of priority) {
     if ((awayByName.has(name) || homeByName.has(name)) && !seen.has(name)) {
       seen.add(name)
       orderedNames.push(name)
     }
   }
   for (const s of awayStats ?? []) {
+    if (basketball && BASKETBALL_SKIP.has(s.name)) continue
     if (!seen.has(s.name)) {
       seen.add(s.name)
       orderedNames.push(s.name)
     }
   }
   for (const s of homeStats ?? []) {
+    if (basketball && BASKETBALL_SKIP.has(s.name)) continue
     if (!seen.has(s.name)) {
       seen.add(s.name)
       orderedNames.push(s.name)
@@ -235,14 +322,105 @@ export function buildComparisonRows(
   return orderedNames.map((name) => {
     const awayValue = awayByName.get(name) ?? null
     const homeValue = homeByName.get(name) ?? null
+    // Compound magnitudes come from the configured side (FG "13–16" -> makes;
+    // penalties "5-60" -> yards); everything else uses the generic parser.
+    const part = COMPOUND_META[name]?.part
+    const numeric = (v: string | null) =>
+      part ? parseCompoundPart(v ?? '', part) : parseStatNumeric(v)
     return {
-      label: statLabel(name),
+      label: shortStatLabel(name),
       awayValue,
       homeValue,
-      awayNumericValue: numericForStat(name, awayValue),
-      homeNumericValue: numericForStat(name, homeValue),
+      awayNumericValue: numeric(awayValue),
+      homeNumericValue: numeric(homeValue),
     }
   })
+}
+
+/* ------------------------------------------------------------------ */
+/* HeadToHeadTable — compact away | label | home table for narrow sides */
+/* ------------------------------------------------------------------ */
+
+/**
+ * One statistic per row in a real 3-column table: away value (right-aligned,
+ * hugging the label), centered short label, home value (left-aligned). A thin
+ * comparison bar sits under each row. Everything is sized for narrow sidebars
+ * (multiview stats column ~22rem) — no truncation, no horizontal clipping:
+ * values never wrap and stay compact, labels may wrap within their middle
+ * column. Reuses buildComparisonRows for ordering/labels/compound shaping.
+ */
+export function HeadToHeadTable({
+  away,
+  home,
+  sport,
+  className = '',
+  maxRows,
+}: {
+  away: BoxScoreTeam
+  home: BoxScoreTeam
+  sport: string
+  className?: string
+  /** Compact displays may cap visible rows; priority rows lead. */
+  maxRows?: number
+}) {
+  const rows = buildComparisonRows(away.statistics, home.statistics, sport).filter(
+    (r) => !isMissingRow(r.awayValue, r.homeValue),
+  )
+  const visible = maxRows ? rows.slice(0, maxRows) : rows
+  if (visible.length === 0) {
+    return <p className="text-sm text-fs-muted">Team stats not yet available.</p>
+  }
+  const { awayColor, homeColor } = resolveBarColors(sport, away.abbreviation, home.abbreviation)
+  return (
+    <div data-testid="head-to-head-table" className={`min-w-0 ${className}`}>
+      <table className="w-full table-fixed border-collapse text-[13px]">
+        {/* fixed shares: values stay identical width, label flexes mildly */}
+        <colgroup>
+          <col className="w-[30%]" />
+          <col className="w-[40%]" />
+          <col className="w-[30%]" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col" className="pb-1 text-right text-xs font-bold uppercase tracking-wider whitespace-nowrap" style={{ color: awayColor }}>
+              {away.abbreviation}
+            </th>
+            <th scope="col" aria-hidden="true" className="pb-1" />
+            <th scope="col" className="pb-1 text-left text-xs font-bold uppercase tracking-wider whitespace-nowrap" style={{ color: homeColor }}>
+              {home.abbreviation}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {visible.map((row) => (
+            <Fragment key={row.label}>
+              <tr className="border-t border-[rgba(242,245,241,0.07)]">
+                <td className="py-1.5 pl-1 text-right font-mono font-semibold tabular-nums text-fs-text whitespace-nowrap">
+                  {row.awayValue ?? '–'}
+                </td>
+                <td className="px-1.5 py-1.5 text-center text-[10px] font-medium uppercase leading-tight tracking-wider text-fs-muted hyphens-auto">
+                  {row.label}
+                </td>
+                <td className="py-1.5 pr-1 text-left font-mono font-semibold tabular-nums text-fs-text whitespace-nowrap">
+                  {row.homeValue ?? '–'}
+                </td>
+              </tr>
+              <tr aria-hidden="true">
+                <td colSpan={3} className="px-1 pb-1.5">
+                  <StatComparisonBar
+                    awayNumericValue={row.awayNumericValue}
+                    homeNumericValue={row.homeNumericValue}
+                    awayColor={awayColor}
+                    homeColor={homeColor}
+                  />
+                </td>
+              </tr>
+            </Fragment>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 }
 
 /* ------------------------------------------------------------------ */
@@ -264,7 +442,7 @@ export function StatComparisonBar({
   const awayPct = Math.max(0, Math.min(100, awayShare * 100))
   return (
     <div
-      className="relative h-1 w-full overflow-hidden rounded-full"
+      className="relative h-1.5 w-full overflow-hidden rounded-full"
       style={{ backgroundColor: 'rgba(242,245,241,0.08)' }}
       role="presentation"
     >
@@ -289,6 +467,15 @@ export function StatComparisonBar({
 /* StatComparisonRow — value / label / value + shared bar              */
 /* ------------------------------------------------------------------ */
 
+/**
+ * One head-to-head stat: away value, label, home value, comparison bar.
+ *
+ * No value or label is ever truncated (the earlier `truncate` + `max-w-*`
+ * clipped real numbers like "12-19" on narrow sidebars). Instead the layout
+ * reflows: phones stack the label on its own full-width line above the two
+ * values, and from `sm` up the label sits between them, wrapping within a
+ * bounded middle column so the two values always keep their space.
+ */
 export function StatComparisonRow({
   row,
   awayColor,
@@ -300,25 +487,19 @@ export function StatComparisonRow({
 }) {
   if (isMissingRow(row.awayValue, row.homeValue)) return null
   return (
-    <div className="border-t border-[rgba(242,245,241,0.06)] py-2">
-      <div className="grid grid-cols-[1fr_auto_1fr] items-baseline gap-2 sm:gap-3">
-        <span
-          className="min-w-0 truncate text-left text-lg font-bold tabular-nums text-fs-text sm:text-xl"
-          title={row.awayValue ?? ''}
-        >
+    <div className="group border-t border-[rgba(242,245,241,0.06)] px-1 py-2.5 first:border-t-0 hover:bg-[rgba(242,245,241,0.03)]">
+      <div className="grid grid-cols-2 items-center gap-x-3 gap-y-0.5 sm:grid-cols-[minmax(0,1fr)_minmax(0,12rem)_minmax(0,1fr)] sm:gap-x-4">
+        <span className="order-2 whitespace-nowrap text-left text-lg font-bold leading-tight tabular-nums text-fs-text sm:order-1 sm:text-xl">
           {row.awayValue ?? '–'}
         </span>
-        <span className="max-w-36 truncate px-1 text-center text-[11px] font-medium uppercase tracking-wider text-fs-muted sm:max-w-48 sm:text-xs">
+        <span className="order-1 col-span-2 min-w-0 break-words text-center text-[11px] font-medium uppercase leading-tight tracking-wider text-fs-muted sm:order-2 sm:col-span-1 sm:px-2 sm:text-xs">
           {row.label}
         </span>
-        <span
-          className="min-w-0 truncate text-right text-lg font-bold tabular-nums text-fs-text sm:text-xl"
-          title={row.homeValue ?? ''}
-        >
+        <span className="order-3 whitespace-nowrap text-right text-lg font-bold leading-tight tabular-nums text-fs-text sm:text-xl">
           {row.homeValue ?? '–'}
         </span>
       </div>
-      <div className="mt-1.5">
+      <div className="mt-2">
         <StatComparisonBar
           awayNumericValue={row.awayNumericValue}
           homeNumericValue={row.homeNumericValue}
@@ -326,6 +507,46 @@ export function StatComparisonRow({
           homeColor={homeColor}
         />
       </div>
+    </div>
+  )
+}
+
+/**
+ * A bare head-to-head table (no score header / last-play block), reused by
+ * GameStatsSection and by the Command workspace's statistics strip. Values,
+ * ordering, colours and the comparison bars all come from the same helpers as
+ * the classic Team Stats tab, so nothing is duplicated or re-implemented.
+ */
+export function StatComparisonTable({
+  away,
+  home,
+  sport,
+  columns = 2,
+  className = '',
+  testId = 'stat-comparison-table',
+}: {
+  away: BoxScoreTeam
+  home: BoxScoreTeam
+  sport: string
+  columns?: 1 | 2
+  className?: string
+  testId?: string
+}) {
+  const rows = buildComparisonRows(away.statistics, home.statistics, sport).filter(
+    (r) => !isMissingRow(r.awayValue, r.homeValue),
+  )
+  if (rows.length === 0) {
+    return <p className="text-sm text-fs-muted">Team stats not yet available.</p>
+  }
+  const { awayColor, homeColor } = resolveBarColors(sport, away.abbreviation, home.abbreviation)
+  return (
+    <div
+      data-testid={testId}
+      className={`grid gap-x-8 ${columns === 2 ? 'md:grid-cols-2' : ''} ${className}`}
+    >
+      {rows.map((row) => (
+        <StatComparisonRow key={row.label} row={row} awayColor={awayColor} homeColor={homeColor} />
+      ))}
     </div>
   )
 }
@@ -595,7 +816,7 @@ export function GameStatsSection({
   const state = gameState(status)
   const awayScore = scoreText(away.score)
   const homeScore = scoreText(home.score)
-  const rows = buildComparisonRows(away.statistics, home.statistics)
+  const rows = buildComparisonRows(away.statistics, home.statistics, sport)
   const hasStats = rows.some((r) => !isMissingRow(r.awayValue, r.homeValue))
 
   const { awayColor, homeColor } = resolveBarColors(sport, away.abbreviation, home.abbreviation)
@@ -641,16 +862,13 @@ export function GameStatsSection({
       />
 
       {hasStats ? (
-        <div data-testid="boxscore-stats" className="mt-5 md:grid md:grid-cols-2 md:gap-x-10">
-          {rows.map((row) => (
-            <StatComparisonRow
-              key={row.label}
-              row={row}
-              awayColor={awayColor}
-              homeColor={homeColor}
-            />
-          ))}
-        </div>
+        <StatComparisonTable
+          away={away}
+          home={home}
+          sport={sport}
+          className="mt-5"
+          testId="boxscore-stats"
+        />
       ) : (
         <p className="mt-6 text-center text-sm text-fs-muted">Team stats not yet available</p>
       )}
