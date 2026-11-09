@@ -74,6 +74,15 @@ class EdgeResult:
     over_prob: float = 0.5
     pick: str = "over"  # "over" or "under" — every pick takes a side, never "fair"
     strong: bool = False  # strong pick: meaningful edge on the model distribution (NOT the unvalidated confidence label)
+    # Standardized edge: raw edge divided by the model's predictive sd. Raw-yard
+    # edges are not comparable across stats (a 15-yard "huge" receptions edge is
+    # a much bigger z than a 15-yard passing edge on a 200-yard sd), so ranking
+    # / sizing by these quartiles mixes distributions; z is the comparable unit.
+    edge_z: float = 0.0
+    # Whether the pick-side probability clears the de-vig break-even for a
+    # standard -110 two-way market (52.4%). A 50.9% OVER hit rate — the Week-7
+    # graded record — is a coin flip plus vig, not a bet.
+    beats_vig: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -82,6 +91,8 @@ class EdgeResult:
             "over_prob": round(self.over_prob, 3),
             "pick": self.pick,
             "strong": self.strong,
+            "edge_z": round(self.edge_z, 2),
+            "beats_vig": self.beats_vig,
         }
 
 # ── Interval calibration multipliers ────────────────────────────────────────
@@ -707,6 +718,11 @@ def compute_edge(
 
     pick = "over" if edge >= 0 else "under"
 
+    # De-vig break-even: a standard -110 two-way market pays out at ~52.4%.
+    # Recorded for reporting only; every pick still takes a side.
+    vig_break_even = 0.524
+    beats_vig = over_prob >= vig_break_even if pick == "over" else over_prob <= (1.0 - vig_break_even)
+
     # Strong: a meaningful edge on the model's own distribution (>= 0.5 sd from
     # the line and a >= 65%/35% probability tilt). Deliberately does NOT gate on
     # the confidence label/score: the 2026 season backtest showed high and
@@ -725,6 +741,8 @@ def compute_edge(
         over_prob=over_prob,
         pick=pick,
         strong=strong,
+        edge_z=z_score,
+        beats_vig=beats_vig,
     )
 
 
@@ -969,7 +987,13 @@ def project(
         # Blend raw and decomposed: decomposed captures role/efficiency changes
         # but raw is more stable for small samples. Weight decomposed by ESS
         # and stat type — receiving is most opportunity-driven, passing least.
-        stat_decomp_cap = {"receiving_yards": 0.60, "receptions": 0.60, "rushing_yards": 0.45, "passing_yards": 0.30}.get(history.stat.key, 0.40)
+        # 0.45 (down from 0.60) for the receiving stats — 2026 walk-forward
+        # (wks 2-6, n=649 receiver-weeks): the heavy receiving decomp weight
+        # amplifies a low recent per-target efficiency into a long volume
+        # under-projection (bias −10.3 on RB receiving, e.g. a pass-catching RB
+        # with 3-5 check-down targets priced 5 y/target), and dropping the cap
+        # to 0.45 cut both MAE and the bias magnitude on RBs and WR/TEs alike.
+        stat_decomp_cap = {"receiving_yards": 0.45, "receptions": 0.45, "rushing_yards": 0.45, "passing_yards": 0.30}.get(history.stat.key, 0.40)
         decomp_weight = min(stat_decomp_cap, ess / 8.0 * stat_decomp_cap / 0.6)
         blended_raw = _shrunk_baseline(raw_mean, ess, position_prior, prior_k)
         baseline = blended_raw * (1 - decomp_weight) + decomposed_baseline * decomp_weight
@@ -1175,6 +1199,13 @@ def project(
     # Step 12: Return
     all_warnings = role_warnings + season_warnings + guardrail_warnings
     all_warnings = all_warnings + role_warnings_list
+    # Data-quality warnings that are not refusals: a stale *frame* (the cached
+    # weekly file missing the most recent week) is not per-player stale — every
+    # row in the batch is quietly projected off an older window than the lines
+    # it is being compared to. Say so on every affected row.
+    for f in history.flags:
+        if f.code == "STALE_DATA_WINDOW" and f.severity in ("warn", "error"):
+            all_warnings = all_warnings + [f"{f.code}: {f.message}"]
     if relief_warning:
         all_warnings = all_warnings + [relief_warning]
     if clamp_note:

@@ -21,8 +21,15 @@ export interface OverUnderEdge {
   prob: number
   /** projection − line, in stat units. */
   edge: number
+  /** edge standardized by the predictive sd — the cross-stat comparable unit. */
+  edgeZ: number
+  /** true when the pick-side probability clears the de-vig −110 break-even (52.4%). */
+  beatsVig: boolean
   strong: boolean
 }
+
+/** De-vig break-even for a standard two-way −110 market. */
+export const VIG_BREAK_EVEN = 0.524
 
 /** P(over) and a lean from a projection with spread `sd` against a book line. */
 export function computeOverUnderEdge(projection: number | null, sd: number | null, lineArg: unknown): OverUnderEdge | null {
@@ -30,14 +37,16 @@ export function computeOverUnderEdge(projection: number | null, sd: number | nul
   if (isNaN(line) || line <= 0) return null
   // Every pick is Over or Under — there is no "fair". A missing projection
   // sits exactly on the line (P(over) = 0.5), which breaks toward OVER.
-  if (projection == null || sd == null || sd <= 0) return { pick: 'over', prob: 0.5, edge: 0, strong: false }
+  if (projection == null || sd == null || sd <= 0) return { pick: 'over', prob: 0.5, edge: 0, edgeZ: 0, beatsVig: false, strong: false }
   const s = Math.max(sd, 0.01)
   const edge = projection - line
+  const z = edge / s
   const overProb = 1.0 - normalCdf((line - projection) / s)
-  const absZ = Math.abs(edge / s)
+  const absZ = Math.abs(z)
   const pick: EdgePick = edge >= 0 ? 'over' : 'under'
+  const beatsVig = pick === 'over' ? overProb >= VIG_BREAK_EVEN : overProb <= 1 - VIG_BREAK_EVEN
   const strong = absZ >= 0.5 && ((pick === 'over' && overProb >= 0.65) || (pick === 'under' && overProb <= 0.35))
-  return { pick, prob: overProb, edge, strong }
+  return { pick, prob: overProb, edge, edgeZ: z, beatsVig, strong }
 }
 
 /** Confidence shown on the badge: the picked side's probability. */

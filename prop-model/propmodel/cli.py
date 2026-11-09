@@ -381,6 +381,8 @@ class RunMemo:
         self.rates: dict = {}
         self.starter_priors: dict = {}
         self._name_index = None
+        self.frame_max_gameday: pd.Timestamp | None = None
+        self._frame_stale_checked = False
 
     def name_index(self, weekly: pd.DataFrame):
         if self._name_index is None:
@@ -471,22 +473,30 @@ def _starter_prior_for(
     weekly: pd.DataFrame,
     stat: str | StatSpec,
     as_of=None,
+    player_position: str | None = None,
 ) -> float | None:
     """Position's typical *starter* opportunity volume, memoized per run.
 
     Used when a pregame depth chart names a relief-history player the starter:
     the model projects starter volume rather than a mop-up mean (the
-    Bagent-class miss). Cached keyed by (stat, cutoff) so a batch computes it
-    once.
+    Bagent-class miss). Cached keyed by (stat, cutoff, position) so a batch
+    computes it once. For stats spanning multiple positions (receiving: WR/TE/RB)
+    the prior is filtered to the *player's* position when that slice is fully
+    populated — a promoted RB is taking a pass-catching RB role, not WR1 volume —
+    and falls back to the all-positions prior otherwise.
     """
     spec_key = get_stat(stat).key
     cutoff_key = str(as_of) if as_of is not None else None
-    key = (spec_key, cutoff_key)
+    key = (spec_key, cutoff_key, player_position)
     if memo is None:
-        value, _ = starter_volume_prior(weekly, stat, as_of=as_of)
+        value, n = starter_volume_prior(weekly, stat, as_of=as_of, position=player_position)
+        if value is None or n < 30:  # thin position slice: fall back to the stat-wide prior
+            value, _ = starter_volume_prior(weekly, stat, as_of=as_of)
         return value
     if key not in memo.starter_priors:
-        value, _ = starter_volume_prior(weekly, stat, as_of=as_of)
+        value, n = starter_volume_prior(weekly, stat, as_of=as_of, position=player_position)
+        if value is None or n < 30:
+            value, _ = starter_volume_prior(weekly, stat, as_of=as_of)
         memo.starter_priors[key] = value
     return memo.starter_priors[key]
 
@@ -558,6 +568,31 @@ def _project_one(
         as_of=history_cutoff,
     )
 
+    # Frame-freshness diagnostic: an as-of cutoff for THIS event whose cached
+    # frame ends many days earlier means the most recent completed week(s) are
+    # missing from the data — the model then silently prices every player off
+    # an older sample while the sportsbook has already moved its lines to last
+    # week's results (the stale-board failure mode). Surface it per row, loudly,
+    # instead of letting projections and lines disagree by a silent week.
+    if history_cutoff is not None and COL_GAMEDAY in weekly.columns:
+        if memo is not None and memo._frame_stale_checked:
+            frame_max = memo.frame_max_gameday
+        else:
+            gd = pd.to_datetime(weekly[COL_GAMEDAY], errors="coerce")
+            frame_max = gd.max() if gd.notna().any() else None
+            if memo is not None:
+                memo.frame_max_gameday = frame_max
+                memo._frame_stale_checked = True
+        if frame_max is None or (pd.Timestamp(history_cutoff) - frame_max).days > 8:
+            days_lag = "unknown" if frame_max is None else f"{(pd.Timestamp(history_cutoff) - frame_max).days} day(s)"
+            hist.flags.append(QualityFlag(
+                "STALE_DATA_WINDOW", "warn",
+                "cached weekly frame ends before the projection cutoff — "
+                f"most recent gameday {frame_max} vs cutoff {history_cutoff} "
+                f"({days_lag} of missing weeks); projections are priced off an "
+                "older sample than the lines",
+            ))
+
     role_info = _role_for(getattr(hist, "position", ""), len(hist.missed_games))
     if role_info.status == STATUS_OUT:
         return _out_projection(player, stat, team, opp, gs, role_info, weights, n_games=hist.n_games)
@@ -583,6 +618,7 @@ def _project_one(
     # 433/4,007 targets (10.8%) were lost this way in the season backtest.
     starter_prior = _starter_prior_for(
         memo, weekly, stat, as_of=history_cutoff,
+        player_position=getattr(hist, "position", None),
     )
 
     if not hist.ok:

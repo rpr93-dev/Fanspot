@@ -52,8 +52,8 @@ Only confirmed starters are modeled (filtered against fantasy depth-chart starte
 **STAGE 4 — Projection** (`model.py::project`), in order:
 1. **Winsorize** game values (MAD-based cap) so one monster game can't dominate.
 2. **Recency-weighted mean** (exponential decay, `halflife` default 4.0 games; separate `halflife_count` for TDs) + effective sample size (ESS).
-3. **Opportunity decomposition** (when targets/carries/attempts available in ≥50% of games, ≥3 valid): models volume and efficiency separately — efficiency gets ~2× shrinkage because one 80-yard TD shouldn't double a projection. Blended with the raw mean, capped per stat (`receiving_yards`/`receptions` 0.60, `rushing_yards` 0.45, `passing_yards` 0.30), weight scaled by ESS.
-4. **Empirical-Bayes shrinkage** toward the position prior: `k = ess/(ess + prior_strength)`, `prior_strength` default 0.5 (0.0 for counts).
+3. **Opportunity decomposition** (when targets/carries/attempts available in ≥50% of games, ≥3 valid): models volume and efficiency separately — efficiency gets ~2× shrinkage because one 80-yard TD shouldn't double a projection. Blended with the raw mean, capped per stat (`receiving_yards`/`receptions` 0.45, `rushing_yards` 0.45, `passing_yards` 0.30), weight scaled by ESS.
+4. **Empirical-Bayes shrinkage** toward the position prior: `k = ess/(ess + prior_strength)`, `prior_strength` default 0.5 (0.0 for counts). Blended with the opportunity decomposition, capped per stat (`receiving_yards`/`receptions` 0.45 — lowered from 0.60 after the 2026 walk-forward showed the heavy receiving decomp weight amplifies low recent per-target efficiency into a volume under-projection — `rushing_yards` 0.45, `passing_yards` 0.30), weight scaled by ESS.
 5. **Multiply** by opponent factor × game-script factor (each with its own count-variant weight).
 6. **Role-change detection** (diagnostic + applied factor): compares recent-half vs older-half means, preferring opportunity columns (targets/carries/attempts) over raw yards. Fires a `role_change_detected: {col} changed ±X% (recent A vs older B)` warning when |change| > 20%; applies `role_factor = 1 + 0.5×pct_change` clamped to [0.70, 1.30]. Shown in UI as `role ±x%`.
 7. **Recent-form signal** (diagnostic only): last-3 vs rest; surfaced as `recent_form_factor`, not applied.
@@ -64,7 +64,7 @@ Only confirmed starters are modeled (filtered against fantasy depth-chart starte
 
 **STAGE 5 — Infra** (`reliability.py`): retry with exponential backoff + jitter for fetches; `DiskCache` (pickle for frames, JSON otherwise); idempotent logging.
 
-**Edge computation** (`model.py::compute_edge`, also mirrored in TS for the UI): given projection mean μ, `pred_sd` σ, and book line L: `P(over) = 1 − Φ((L−μ)/σ)` (A&S normal-CDF approximation), `edge = μ − L`, z = edge/σ. Pick `over`/`under` when |z| ≥ 0.3 else `fair`. `strong` when |z| ≥ 0.5 and P(over) ≥ 0.65 (over) or ≤ 0.35 (under). Note: normal approximation on a count stat (TDs) — known coarseness.
+**Edge computation** (`model.py::compute_edge`, also mirrored in TS for the UI): given projection mean μ, `pred_sd` σ, and book line L: `P(over) = 1 − Φ((L−μ)/σ)` (A&S normal-CDF approximation), `edge = μ − L`, `edge_z = edge/σ`. The pick is `over` when edge ≥ 0, else `under` — every pick takes a side, never "fair"; edge size must be compared in `edge_z`, not raw yards (a 15-yard receptions edge is a far bigger z than a 15-yard passing edge). `beats_vig` records whether the pick-side probability clears the de-vig −110 break-even (52.4%) — a 50.9% Sunday hit rate is a coin flip plus vig, not a bet. `strong` when |z| ≥ 0.5 and P(over) ≥ 0.65 (over) or ≤ 0.35 (under). Note: normal approximation on a count stat (TDs) — known coarseness.
 
 ### Tunable knobs (`ModelWeights` defaults)
 

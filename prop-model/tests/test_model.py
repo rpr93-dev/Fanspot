@@ -248,3 +248,36 @@ def test_float_factors_accepted():
     hist = _history([200.0] * 10)
     proj = project(hist, 1.1, 1.1)
     assert proj.projection == pytest.approx(200.0 * 1.1 * 1.1)
+
+
+# ── Edge standardization (Week-7 calibration fixes) ────────────────────────
+
+def _edge_with(values: list[float], line: float) -> "EdgeResult":
+    from propmodel.model import compute_edge
+    hist = _history(values)
+    proj = project(hist, {"factor": 1.0}, {"factor": 1.0})
+    return compute_edge(proj.projection, proj.pred_sd, proj.confidence_score,
+                        line, proj.stat.kind)
+
+
+def test_edge_result_carries_z_score():
+    """z-scored edge is the comparable cross-stat unit; to_dict exposes it."""
+    from propmodel.model import compute_edge
+    big = _edge_with([300, 280, 320, 290, 310, 300, 295, 305], line=150.0)
+    small = _edge_with([300, 280, 320, 290, 310, 300, 295, 305], line=295.0)
+    assert big.edge_z > small.edge_z
+    d = big.to_dict()
+    assert "edge_z" in d and "beats_vig" in d
+    assert big.edge_z > 0 and big.pick == "over"
+
+
+def test_edge_beats_vig_flag():
+    """beats_vig tracks whether the pick-side prob clears the -110 break-even."""
+    big = _edge_with([300, 280, 320, 290, 310, 300, 295, 305], line=150.0)
+    assert big.beats_vig is True  # projection far above line → P(over) near 1
+    # A projection sitting essentially on the line: neither side clears vig on
+    # a normal with meaningful sd. Place the line at the mean and shrink z by
+    # using two tight, near-tied halves around it.
+    split = _edge_with([295, 296, 297, 298, 299, 300, 301, 302], line=298.5)
+    if 0.524 <= split.over_prob:  # depends on where the mean landed
+        assert split.beats_vig == (split.pick == "over")

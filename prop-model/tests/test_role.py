@@ -192,3 +192,24 @@ def test_market_disagreement_is_diagnostic_not_a_target():
     without_line = project(hist, {"factor": 1.0}, {"factor": 1.0})
     assert proj.projection == pytest.approx(without_line.projection)
     assert any("market_disagreement" in w for w in proj.warnings)
+
+
+def test_starter_volume_prior_position_filter():
+    """When a position is given, the prior comes from that position's games:
+    a promoted RB should be priced on RB pass-catching volume, not the WR/TE mix."""
+    import pandas as pd
+
+    # WR rows carry higher starter target volume than RB rows.
+    heavy = pd.DataFrame([_row(w, targets=19, receiving_yards=95) for w in range(1, 9)]).assign(position="WR")
+    light = pd.DataFrame([_row(100 + w, targets=4, receiving_yards=24) for w in range(1, 5)]).assign(position="RB")
+    f = pd.concat([heavy, light], ignore_index=True)
+
+    wr_prior, n_wr = starter_volume_prior(f, "receiving_yards", position="WR")
+    rb_prior, n_rb = starter_volume_prior(f, "receiving_yards", position="RB")
+    all_prior, _ = starter_volume_prior(f, "receiving_yards")
+    assert wr_prior is not None and wr_prior == 19.0
+    assert rb_prior is not None and rb_prior == 4.0
+    assert n_wr == 8 and n_rb == 4
+    # A thin position slice returns its own rows rather than silently blending,
+    # so the caller decides whether to fall back to the stat-wide prior.
+    assert rb_prior != all_prior

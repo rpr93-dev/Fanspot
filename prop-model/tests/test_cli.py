@@ -435,3 +435,55 @@ def test_live_stale_cached_frame_triggers_refetch(tmp_path, monkeypatch, weekly_
     argv = _live_argv(cache)
     assert main(argv) == 0
     assert fetched["n"] == 1  # stale entry was replaced by a real fetch
+
+
+def test_stale_data_window_flag_when_frame_lags_cutoff(tmp_path, capsys):
+    """A cached frame ending >8 days before the projection cutoff is missing
+    the most recent week(s): every row must warn loudly instead of silently
+    pricing off an older sample than the sportsbook lines."""
+    rows = []
+    for wk in range(1, 7):  # last game 2025-10-04
+        gameday = f"2025-09-{wk:02d}" if wk <= 4 else f"2025-10-{wk - 4:02d}"
+        rows.append(dict(
+            player_id="00-0077001", player_display_name="Late Bloomer", player_name="Late Bloomer",
+            position="QB", recent_team="HOU", opponent_team="LV",
+            season=2025, week=wk, gameday=gameday, games=1,
+            game_id=f"2025_{wk:02d}_HOU_LV",
+            passing_yards=250.0, rushing_yards=5.0, receiving_yards=0.0,
+            receptions=0.0, passing_tds=1.0, rushing_tds=0.0, receiving_tds=0.0,
+        ))
+    weekly_csv = tmp_path / "weekly.csv"
+    pd.DataFrame(rows).to_csv(weekly_csv, index=False)
+    argv = [
+        "--player", "Late Bloomer", "--stat", "passing_yards", "--team", "HOU",
+        "--opponent", "LV", "--as-of", "2025-10-20",  # 16 days past the last game
+        "--weekly", str(weekly_csv), "--cache-dir", str(tmp_path / "c1"),
+    ]
+    assert _run(argv) == 0
+    r = json.loads(capsys.readouterr().out)[0]
+    assert any(w.startswith("STALE_DATA_WINDOW") for w in r.get("warnings", []))
+
+
+def test_no_stale_data_window_when_fresh(tmp_path, capsys):
+    """A frame up to date within a few days of the cutoff stays quiet."""
+    rows = []
+    for wk in range(1, 9):
+        gameday = f"2025-09-{wk:02d}" if wk <= 4 else f"2025-10-{wk - 4:02d}"
+        rows.append(dict(
+            player_id="00-0077001", player_display_name="Late Bloomer", player_name="Late Bloomer",
+            position="QB", recent_team="HOU", opponent_team="LV",
+            season=2025, week=wk, gameday=gameday, games=1,
+            game_id=f"2025_{wk:02d}_HOU_LV",
+            passing_yards=250.0, rushing_yards=5.0, receiving_yards=0.0,
+            receptions=0.0, passing_tds=1.0, rushing_tds=0.0, receiving_tds=0.0,
+        ))
+    weekly_csv = tmp_path / "weekly.csv"
+    pd.DataFrame(rows).to_csv(weekly_csv, index=False)
+    argv = [
+        "--player", "Late Bloomer", "--stat", "passing_yards", "--team", "HOU",
+        "--opponent", "LV", "--as-of", "2025-10-10",  # ~4 days past the last game
+        "--weekly", str(weekly_csv), "--cache-dir", str(tmp_path / "c1"),
+    ]
+    assert _run(argv) == 0
+    r = json.loads(capsys.readouterr().out)[0]
+    assert not any(w.startswith("STALE_DATA_WINDOW") for w in r.get("warnings", []))

@@ -317,6 +317,7 @@ def starter_volume_prior(
     weekly: pd.DataFrame,
     stat: str | StatSpec,
     as_of: str | None = None,
+    position: str | None = None,
 ) -> tuple[float | None, int]:
     """Median per-game opportunity volume of *starter-like* games at this stat's
     positions — the level a promoted backup is expected to reach.
@@ -324,7 +325,13 @@ def starter_volume_prior(
     "Starter-like" reuses :data:`START_PROXY_VOLUME` (QB 15+ attempts, RB 8+
     carries, pass-catcher 3+ targets), then takes the median of those games so
     a few gadget snaps can't drag it. Filtered to games on/before ``as_of``
-    when a cutoff is given. Returns ``(prior, n_rows)``.
+    when a cutoff is given. When ``position`` is given, only games at that
+    position count: the receiving stats span WR/TE *and* RB, and a promoted
+    backup RB is taking a pass-catching role, not a WR1 volume (the median
+    WR/TE target mix inflates the expected RB target count — the promoted-role
+    receiving artifact). Returns ``(prior, n_rows)``; ``position``-filtered
+    samples are allowed to fall back to the unfiltered prior at the call site
+    when they are too thin.
     """
     spec = get_stat(stat)
     if not spec.opportunity_columns or COL_POSITION not in weekly.columns:
@@ -335,13 +342,17 @@ def starter_volume_prior(
     threshold = START_PROXY_VOLUME.get(spec.key)
     if threshold is None:
         return None, 0
-
     rows = weekly
     if as_of is not None and COL_GAMEDAY in weekly.columns:
         gd = pd.to_datetime(weekly[COL_GAMEDAY], errors="coerce")
         rows = weekly[gd.isna() | (gd <= pd.Timestamp(as_of))]
 
     rows = rows[rows[COL_POSITION].astype(str).str.upper().isin(spec.positions)]
+    if position:
+        pos_hi = position.upper()
+        pos_rows = rows[rows[COL_POSITION].astype(str).str.upper() == pos_hi]
+        if not pos_rows.empty:
+            rows = pos_rows
     if rows.empty:
         return None, 0
     # Prefer rows that actually played (games >= 1) when the column exists.
