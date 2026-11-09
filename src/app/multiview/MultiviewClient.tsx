@@ -59,6 +59,8 @@ export function MultiviewClient() {
           onTogglePause={mv.togglePause}
           autoplay={mv.autoplay}
           onAutoplay={mv.setAutoplay}
+          audioKey={mv.audioKey}
+          onAudioKey={mv.setAudioKey}
           layout={prefs.multiviewLayout}
           onLayout={(l) => patch({ multiviewLayout: l })}
           activeKey={activeKey}
