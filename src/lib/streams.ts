@@ -1,26 +1,28 @@
 /**
- * Streamed (streamed.pk) integration: free, keyless directory of live sports
- * streams. Fanspot never proxies video — the API only lists matches and
- * resolves embed URLs, and the watch page loads the chosen embed in an
- * iframe on click. If Streamed is down, every route 502s with a message and
- * the UI shows a retry state instead of a player.
+ * StreamFree (streamfree.top) integration: free, keyless directory of live
+ * sports streams. Fanspot never proxies video — the API only lists matches and
+ * resolves the provider's embed URLs, and the watch page loads the chosen
+ * embed in an iframe on click. If StreamFree is down, every route 502s with a
+ * message and the UI shows a retry state instead of a player.
  */
 
 export type WatchSport = 'nfl' | 'nba' | 'nhl' | 'mlb' | 'f1'
 
-/** Fanspot sport -> Streamed category. */
+/** Fanspot sport -> StreamFree category. */
 export const STREAM_CATEGORY: Record<WatchSport, string> = {
-  nfl: 'american-football',
+  nfl: 'football',
   nba: 'basketball',
   nhl: 'hockey',
   mlb: 'baseball',
-  f1: 'motor-sports',
+  f1: 'racing',
 }
 
 export const WATCH_SPORTS: WatchSport[] = ['nfl', 'nba', 'nhl', 'mlb', 'f1']
 
 export interface StreamSource {
+  /** Lowercased provider quality label (fhd, sd, hd, 4k). */
   source: string
+  /** StreamFree stream_key, shared by every quality variant. */
   id: string
 }
 
@@ -28,11 +30,62 @@ export interface StreamMatch {
   id: string
   title: string
   category: string
+  /** Unix seconds (StreamFree's match_timestamp). */
   date: number
   popular: boolean
+  /** True when StreamFree reports at least one live source. */
+  live?: boolean
+  league?: string | null
   poster?: string | null
   teams?: { home?: { name?: string }; away?: { name?: string } } | null
   sources: StreamSource[]
+}
+
+/** Keep only https embed sources, de-duped by quality, all bound to the key. */
+function shapeStreamFreeSources(raw: unknown, key: string): StreamSource[] {
+  if (!Array.isArray(raw)) return []
+  const seen = new Set<string>()
+  const out: StreamSource[] = []
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const { quality, url } = item as { quality?: unknown; url?: unknown }
+    if (typeof quality !== 'string' || typeof url !== 'string') continue
+    if (!url.startsWith('https://')) continue
+    const source = quality.trim().toLowerCase()
+    if (!source || seen.has(source)) continue
+    seen.add(source)
+    out.push({ source, id: key })
+  }
+  return out
+}
+
+/**
+ * Normalize one StreamFree `/api/v1/streams` entry into the shape the rest of
+ * Fanspot uses. Every quality variant points at the same `stream_key`; the
+ * embed route resolves that key to the actual https embed URLs.
+ */
+export function shapeStreamFreeMatch(m: unknown): StreamMatch | null {
+  if (!m || typeof m !== 'object') return null
+  const data = m as Record<string, unknown>
+  const key = typeof data.stream_key === 'string' ? data.stream_key : ''
+  const title = typeof data.name === 'string' ? data.name : ''
+  if (!key || !title) return null
+  const sources = shapeStreamFreeSources(data.sources, key)
+  if (sources.length === 0) return null
+  const liveSources = shapeStreamFreeSources(data.live_sources, key)
+  return {
+    id: key,
+    title,
+    category: typeof data.category === 'string' ? data.category : '',
+    // StreamFree reports match_timestamp in Unix seconds.
+    date: typeof data.match_timestamp === 'number' ? data.match_timestamp : 0,
+    popular: liveSources.length > 0,
+    live: liveSources.length > 0,
+    league: typeof data.league === 'string' ? data.league : null,
+    poster: typeof data.thumbnail_url === 'string' ? data.thumbnail_url : null,
+    teams: null,
+    sources,
+  }
 }
 
 export interface StreamOption {
@@ -142,10 +195,10 @@ export function findGameStreams(
 }
 
 /* ------------------------------------------------------------------ */
-/* NFL RedZone: Streamed carries a single "Redzone - Week N" listing   */
-/* in the american-football category. RedZone is only useful while      */
-/* Sunday games are actually being played, so the option is gated by    */
-/* the broadcast window (Sunday, ~noon to 7:30pm ET) AND a live game.   */
+/* NFL RedZone: StreamFree carries a single "RedZone" listing in the   */
+/* football category. RedZone is only useful while Sunday games are    */
+/* actually being played, so the option is gated by the broadcast      */
+/* window (Sunday, ~noon to 7:30pm ET) AND a live game.                */
 /* ------------------------------------------------------------------ */
 
 /** RedZone opens around noon ET and runs through the late-afternoon slate. */
@@ -191,10 +244,10 @@ export function isRedzoneWindow(now: Date = new Date()): boolean {
 }
 
 /**
- * Is this Streamed listing the RedZone channel (not a single game)? Streamed
- * also carries matchup-shaped entries that merely mention RedZone (e.g.
- * "NFL vs RedZone") — those are excluded so we never embed a game feed as the
- * channel.
+ * Is this StreamFree listing the RedZone channel (not a single game)? The
+ * directory also carries matchup-shaped entries that merely mention RedZone
+ * (e.g. "NFL vs RedZone") — those are excluded so we never embed a game feed
+ * as the channel.
  */
 export function isRedzoneListing(title: string): boolean {
   const hay = ` ${normalize(title)} `
@@ -203,7 +256,7 @@ export function isRedzoneListing(title: string): boolean {
 }
 
 /**
- * Pick the best RedZone listing from a set of Streamed matches. Prefers the
+ * Pick the best RedZone listing from a set of StreamFree matches. Prefers the
  * entry with the most sources (more playback fallbacks), then the popular one,
  * then the most recent.
  */
@@ -220,9 +273,11 @@ export function findRedzoneStream<
   )[0]
 }
 
-const SOURCE_RE = /^[a-z]{2,12}$/
-const SOURCE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9\-_]{0,127}$/
+const SOURCE_RE = /^[a-z0-9]{1,12}$/
+// StreamFree keys are slugs but can carry accented letters (e.g. "san-josé").
+const SOURCE_ID_RE = /^[\p{L}\p{N}][\p{L}\p{N}\-_]{0,127}$/u
 
+/** Quality labels (fhd, sd, hd, 4k) double as the source identifier. */
 export function isValidStreamSource(source: string): boolean {
   return SOURCE_RE.test(source)
 }
@@ -238,7 +293,7 @@ export function isValidWatchSport(sport: string): sport is WatchSport {
 /* ------------------------------------------------------------------ */
 /* Coverage gating: the watch page only links matches Fanspot actually */
 /* covers — two of our teams for ball sports (college/CFL/Euro games   */
-/* share the same categories), F1 sessions by title for motor-sports   */
+/* share the same categories), F1 sessions by title for racing         */
 /* (NASCAR, WRC, MotoGP and dirt tracks share that category too).      */
 /* ------------------------------------------------------------------ */
 
@@ -298,7 +353,7 @@ const F1_EXCLUDE_WORDS = new Set([
   'donington',
 ])
 
-/** Is this motor-sports listing an F1 session (not NASCAR/WRC/MotoGP/dirt)? */
+/** Is this racing listing an F1 session (not NASCAR/WRC/MotoGP/dirt)? */
 export function isF1Session(title: string): boolean {
   const norm = ` ${normalize(title)} `
   if (norm.includes('formula 1') || norm.includes('formula1')) return true
@@ -306,6 +361,9 @@ export function isF1Session(title: string): boolean {
   for (const w of words) {
     if (F1_EXCLUDE_WORDS.has(w)) return false
   }
+  // StreamFree carries the always-on "Sky Sports F1" channel as well as
+  // per-session listings, so a standalone F1 token is enough.
+  if (words.has('f1')) return true
   if (F1_STRONG.some((p) => norm.includes(p))) return true
   for (const w of words) {
     if (F1_SESSION_WORDS.has(w)) return true
@@ -314,10 +372,12 @@ export function isF1Session(title: string): boolean {
 }
 
 /* ------------------------------------------------------------------ */
-/* F1 weekend streams: Streamed's motor-sports category mixes the whole */
-/* calendar (plus NASCAR/WRC/MotoGP). A race-weekend hub narrows it to  */
-/* listings that mention THIS Grand Prix (name / circuit / locality) and */
-/* ranks the active session's stream (race / quali / practice) first.   */
+/* F1 weekend streams: StreamFree's racing category mixes the whole    */
+/* calendar (plus NASCAR/WRC/MotoGP) and may expose an always-on F1    */
+/* channel. A race-weekend hub narrows it to listings that mention     */
+/* THIS Grand Prix (name / circuit / locality) plus generic F1 feeds,  */
+/* then ranks the active session's stream (race / quali / practice)   */
+/* first.                                                              */
 /* ------------------------------------------------------------------ */
 
 /** Words that identify a Grand Prix, dropped when tokenizing a weekend. */
@@ -347,11 +407,22 @@ export function f1WeekTokens(words: Array<string | null | undefined>): string[] 
   return [...out]
 }
 
-/** Does a motor-sports listing belong to this Grand Prix weekend? */
+/** Does a racing listing belong to this Grand Prix weekend? */
 export function matchF1Weekend(title: string, tokens: string[]): boolean {
   if (tokens.length === 0) return true
   const hay = ` ${normalize(title)} `
   return tokens.some((t) => hay.includes(` ${t} `))
+}
+
+/**
+ * StreamFree exposes the always-on "Sky Sports F1" / "F1" channel alongside
+ * individual sessions. Those listings never name a Grand Prix, so a weekend
+ * filter must keep them regardless of the active circuit.
+ */
+export function isGenericF1Channel(title: string): boolean {
+  const hay = ` ${normalize(title)} `
+  if (hay.includes(' vs ')) return false
+  return hay.split(' ').includes('f1')
 }
 
 /**

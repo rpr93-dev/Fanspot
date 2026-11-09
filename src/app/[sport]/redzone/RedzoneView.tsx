@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -30,7 +31,7 @@ export function RedzoneView({ teamColor }: { teamColor: string }) {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/scoreboard/multi?date=${dateKey}&sports=NFL`, { cache: 'no-store' })
+      const res = await apiFetch(`/api/scoreboard/multi?date=${dateKey}&sports=NFL`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`board returned ${res.status}`)
       const json = await res.json()
       setGames(json?.leagues?.NFL ?? [])
@@ -91,7 +92,7 @@ export function RedzoneView({ teamColor }: { teamColor: string }) {
             ) : showStream && match ? (
               <div className="fs-panel p-4 sm:p-5">
                 <p className="fs-meta mb-3">
-                  {match.title} · via Streamed (third-party — expect ads or popups)
+                  {match.title} · via StreamFree (third-party — expect ads or popups)
                 </p>
                 <StreamPlayer key={match.id} match={match} />
                 <Link

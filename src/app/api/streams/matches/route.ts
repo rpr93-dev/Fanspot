@@ -1,44 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getCached, setCached, isFresh } from '@/lib/cache/cacheService'
-import { STREAM_CATEGORY, isValidWatchSport, type StreamMatch } from '@/lib/streams'
+import {
+  STREAM_CATEGORY,
+  isValidWatchSport,
+  shapeStreamFreeMatch,
+  type StreamMatch,
+} from '@/lib/streams'
 
 /**
  * GET /api/streams/matches?sport=nfl|nba|nhl|mlb|f1&scope=live|all
- *   Match listings from the Streamed directory (free, keyless). Live scope
+ *   Match listings from the StreamFree directory (free, keyless). Live scope
  *   caches 60s, full-day listings 5min. Upstream failures 502 with a message
  *   so the watch page can show a retry state instead of a dead player.
  */
 
-const STREAMED = 'https://streamed.pk'
+const STREAMFREE = 'https://streamfree.top'
 const LIVE_TTL_MS = 60_000
 const ALL_TTL_MS = 5 * 60_000
 const MAX_MATCHES = 200
-
-export function shape(m: any): StreamMatch | null {
-  if (!m || typeof m.id !== 'string' || typeof m.title !== 'string') return null
-  const sources = Array.isArray(m.sources)
-    ? m.sources
-        .filter((s: any) => typeof s?.source === 'string' && typeof s?.id === 'string')
-        .map((s: any) => ({ source: s.source, id: s.id }))
-    : []
-  if (sources.length === 0) return null
-  return {
-    id: m.id,
-    title: m.title,
-    category: typeof m.category === 'string' ? m.category : '',
-    date: typeof m.date === 'number' ? m.date : 0,
-    popular: m.popular === true,
-    poster: typeof m.poster === 'string' ? m.poster : null,
-    teams:
-      m.teams?.home?.name || m.teams?.away?.name
-        ? {
-            home: { name: m.teams?.home?.name ?? '' },
-            away: { name: m.teams?.away?.name ?? '' },
-          }
-        : null,
-    sources: sources.slice(0, 12),
-  }
-}
 
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = new URL(req.url)
@@ -65,22 +44,17 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   }
 
   try {
-    // Streamed exposes /matches/live (cross-sport) plus per-sport listings;
-    // live scope filters the live feed to this sport's category client-side.
-    const upstream =
-      scope === 'live'
-        ? `${STREAMED}/api/matches/live`
-        : `${STREAMED}/api/matches/${STREAM_CATEGORY[sport as keyof typeof STREAM_CATEGORY]}`
+    const category = STREAM_CATEGORY[sport]
+    const upstream = `${STREAMFREE}/api/v1/streams?category=${encodeURIComponent(category)}`
     const res = await fetch(upstream, { signal: AbortSignal.timeout(20000) })
-    if (!res.ok) throw new Error(`Streamed ${res.status}`)
+    if (!res.ok) throw new Error(`StreamFree ${res.status}`)
     const body = await res.json()
-    if (!Array.isArray(body)) throw new Error('Streamed bad shape')
-    const want = STREAM_CATEGORY[sport as keyof typeof STREAM_CATEGORY]
-    const matches = body
-      .map(shape)
-      .filter((m): m is StreamMatch => m !== null)
-      .filter((m) => (scope === 'live' ? m.category === want : true))
-      .sort((a, b) => Number(b.popular) - Number(a.popular) || a.date - b.date)
+    if (!Array.isArray(body?.streams)) throw new Error('StreamFree bad shape')
+    const matches = body.streams
+      .map(shapeStreamFreeMatch)
+      .filter((m: StreamMatch | null): m is StreamMatch => m !== null)
+      .filter((m: StreamMatch) => (scope === 'live' ? m.live === true : true))
+      .sort((a: StreamMatch, b: StreamMatch) => Number(b.popular) - Number(a.popular) || a.date - b.date)
       .slice(0, MAX_MATCHES)
     setCached(key, matches)
     return NextResponse.json({ matches, cached: false })

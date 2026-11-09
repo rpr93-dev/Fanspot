@@ -1,11 +1,12 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import { matchGame, type StreamMatch, type WatchSport } from '@/lib/streams'
 import { StreamPlayer } from './StreamPlayer'
 
 /**
- * Stream section for a game hub: finds this game's Streamed listing by
+ * Stream section for a game hub: finds this game's StreamFree listing by
  * matching BOTH team names, then hands the match to the shared player.
  * An optional preselect (from a /watch deep link) jumps a source to the
  * front of the resolution order. No listing → quiet empty state, never an
@@ -35,7 +36,7 @@ export function GameStreamPanel({
       setFailed(false)
       setChoice(0)
       try {
-        const res = await fetch(`/api/streams/matches?sport=${sport}&scope=all`, {
+        const res = await apiFetch(`/api/streams/matches?sport=${sport}&scope=all`, {
           signal: AbortSignal.timeout(25000),
         })
         const body = await res.json().catch(() => ({}))
@@ -89,7 +90,7 @@ export function GameStreamPanel({
       )}
       <div className="fs-panel p-4 sm:p-5">
         <p className="fs-meta mb-3">
-          {current.title} · via Streamed (third-party — expect ads or popups)
+          {current.title} · via StreamFree (third-party — expect ads or popups)
         </p>
         <StreamPlayer key={current.id} match={current} preselect={preselect} autoplay={autoplay} />
       </div>

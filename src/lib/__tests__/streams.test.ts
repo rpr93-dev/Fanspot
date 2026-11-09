@@ -5,12 +5,14 @@ import {
   filterCoveredMatches,
   findHubGame,
   isF1Session,
+  isGenericF1Channel,
   f1WeekTokens,
   matchF1Weekend,
   f1SessionScore,
   isValidStreamSource,
   isValidStreamId,
   isValidWatchSport,
+  shapeStreamFreeMatch,
   STREAM_CATEGORY,
   isRedzoneListing,
   findRedzoneStream,
@@ -64,32 +66,92 @@ describe('findGameStreams', () => {
   })
 })
 
-describe('validators', () => {  it('accepts known Streamed sources, rejects paths and URLs', () => {
-    expect(isValidStreamSource('delta')).toBe(true)
-    expect(isValidStreamSource('admin')).toBe(true)
+describe('validators', () => {
+  it('accepts StreamFree quality sources, rejects paths and URLs', () => {
+    expect(isValidStreamSource('fhd')).toBe(true)
+    expect(isValidStreamSource('sd')).toBe(true)
+    expect(isValidStreamSource('4k')).toBe(true)
     expect(isValidStreamSource('../admin')).toBe(false)
     expect(isValidStreamSource('https://evil.com')).toBe(false)
     expect(isValidStreamSource('')).toBe(false)
   })
 
-  it('accepts Streamed source ids, rejects traversal and URLs', () => {
-    expect(isValidStreamId('live_nhl_golden-knights-ducks-live-streaming-653567184')).toBe(true)
-    expect(isValidStreamId('1941')).toBe(true)
+  it('accepts StreamFree stream keys, rejects traversal and URLs', () => {
+    expect(isValidStreamId('ghana-vs-england')).toBe(true)
+    expect(isValidStreamId('portland-trail-blazers-vs-utah-jazz')).toBe(true)
+    expect(isValidStreamId('new-mexico-lobos-vs-san-josé-state-spartans')).toBe(true)
+    expect(isValidStreamId('redzone')).toBe(true)
     expect(isValidStreamId('../../etc/passwd')).toBe(false)
     expect(isValidStreamId('https://evil.com/x')).toBe(false)
     expect(isValidStreamId('')).toBe(false)
   })
 
-  it('maps every watch sport to a Streamed category', () => {
+  it('maps every watch sport to a StreamFree category', () => {
     expect(STREAM_CATEGORY).toEqual({
-      nfl: 'american-football',
+      nfl: 'football',
       nba: 'basketball',
       nhl: 'hockey',
       mlb: 'baseball',
-      f1: 'motor-sports',
+      f1: 'racing',
     })
     expect(isValidWatchSport('f1')).toBe(true)
     expect(isValidWatchSport('soccer')).toBe(false)
+  })
+})
+
+describe('shapeStreamFreeMatch', () => {
+  const raw = {
+    id: '2e10eb11-1329-49b1-b671-c9f1c9a6785a',
+    name: 'Ghana vs England',
+    category: 'soccer',
+    league: 'FIFA World Cup',
+    stream_key: 'ghana-vs-england',
+    match_timestamp: 1782244800,
+    viewers: 986,
+    thumbnail_url: 'https://streamfree.top/thumbnails/soccer_ghana-vs-england',
+    sources: [
+      { quality: 'FHD', url: 'https://strmfree.st/embed/soccer/ghana-vs-england1080p' },
+      { quality: 'SD', url: 'https://strmfree.st/embed/soccer/ghana-vs-england540p' },
+    ],
+    live_sources: [{ quality: 'FHD', url: 'https://strmfree.st/embed/soccer/ghana-vs-england1080p' }],
+  }
+
+  it('maps a listing onto the internal match shape', () => {
+    const m = shapeStreamFreeMatch(raw)
+    expect(m).toMatchObject({
+      id: 'ghana-vs-england',
+      title: 'Ghana vs England',
+      category: 'soccer',
+      league: 'FIFA World Cup',
+      date: 1782244800,
+      live: true,
+      popular: true,
+      poster: 'https://streamfree.top/thumbnails/soccer_ghana-vs-england',
+    })
+    expect(m?.sources).toEqual([
+      { source: 'fhd', id: 'ghana-vs-england' },
+      { source: 'sd', id: 'ghana-vs-england' },
+    ])
+  })
+
+  it('marks non-live listings and rejects unusable entries', () => {
+    expect(shapeStreamFreeMatch({ ...raw, live_sources: [] })?.live).toBe(false)
+    expect(shapeStreamFreeMatch({ ...raw, stream_key: '' })).toBeNull()
+    expect(shapeStreamFreeMatch({ ...raw, sources: [] })).toBeNull()
+    expect(shapeStreamFreeMatch({ ...raw, sources: [{ quality: 'FHD', url: 'http://insecure' }] })).toBeNull()
+    expect(shapeStreamFreeMatch(null)).toBeNull()
+  })
+
+  it('does not duplicate repeated qualities', () => {
+    const m = shapeStreamFreeMatch({
+      ...raw,
+      sources: [
+        { quality: 'FHD', url: 'https://strmfree.st/a' },
+        { quality: 'fhd', url: 'https://strmfree.st/b' },
+        { quality: 'SD', url: 'https://strmfree.st/c' },
+      ],
+    })
+    expect(m?.sources.map((s) => s.source)).toEqual(['fhd', 'sd'])
   })
 })
 
@@ -176,6 +238,8 @@ describe('isF1Session', () => {
     'Bahrain in Malaysia Grand Prix',
     'Formula 1 2026 - Singapore GP',
     'Japan Free Practice 2',
+    'Sky Sports F1',
+    'F1 2026 - United States Grand Prix',
   ])('keeps F1: %s', (t) => expect(isF1Session(t)).toBe(true))
 
   it.each([
@@ -214,6 +278,18 @@ describe('matchF1Weekend', () => {
   it('rejects other races and matches everything when tokenless', () => {
     expect(matchF1Weekend('Singapore Grand Prix - Race', tokens)).toBe(false)
     expect(matchF1Weekend('Anything', [])).toBe(true)
+  })
+})
+
+describe('isGenericF1Channel', () => {
+  it('keeps always-on F1 channels even when they name no Grand Prix', () => {
+    expect(isGenericF1Channel('Sky Sports F1')).toBe(true)
+    expect(isGenericF1Channel('F1')).toBe(true)
+    expect(isGenericF1Channel('Formula 1 2026 - Bahrain GP')).toBe(false)
+  })
+  it('rejects matchup entries and non-F1 titles', () => {
+    expect(isGenericF1Channel('NFL vs F1')).toBe(false)
+    expect(isGenericF1Channel('NASCAR Cup Series')).toBe(false)
   })
 })
 

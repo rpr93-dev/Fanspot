@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { pickActiveEmbed, type StreamMatch, type StreamOption } from '@/lib/streams'
@@ -71,8 +72,7 @@ export function StreamPlayer({
       const seen = new Set<string>()
       // Try sources in order until one yields playable embeds (max 3).
       for (const src of ordered.slice(0, 3)) {
-        const res = await fetch(
-          `/api/streams/embed?source=${encodeURIComponent(src.source)}&id=${encodeURIComponent(src.id)}`,
+        const res = await apiFetch(`/api/streams/embed?source=${encodeURIComponent(src.source)}&id=${encodeURIComponent(src.id)}`,
           { signal: AbortSignal.timeout(25000) },
         )
         if (res.status === 404) continue
@@ -144,8 +144,7 @@ export function StreamPlayer({
               onClick={() => setActiveUrl(o.embedUrl)}
               className="fs-btn inline-flex items-center gap-2"
             >
-              {o.hd && <span className="text-fs-turf font-bold">HD</span>}
-              {o.language}
+              <span className="text-fs-turf font-bold">{o.language}</span>
               {typeof o.viewers === 'number' && (
                 <span className="opacity-60 tabular-nums">{o.viewers} watching</span>
               )}
@@ -169,7 +168,7 @@ export function StreamPlayer({
             />
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-2">
-            {activeSource && <span className="fs-meta">Source {activeSource}</span>}
+            {activeSource && <span className="fs-meta">Quality {activeSource.toUpperCase()}</span>}
             <span className="flex-1" />
             {options.length > 1 && (
               <button type="button" className="fs-meta hover:text-fs-text" onClick={() => setActiveUrl(null)}>

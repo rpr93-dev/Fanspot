@@ -5,40 +5,41 @@ import {
   easternTimeParts,
   findRedzoneStream,
   isRedzoneWindow,
+  shapeStreamFreeMatch,
   type StreamMatch,
 } from '@/lib/streams'
 import { isLiveGame } from '@/lib/scheduleWeek'
 import { fetchScoreboardDay } from '../../scoreboard/route'
-import { shape } from '../matches/route'
 
 /**
  * GET /api/streams/redzone
  *   The NFL RedZone channel is only surfaced while Sunday games are actually
  *   being played. Returns { live: false, reason } unless the Eastern-time
  *   broadcast window is open AND at least one NFL game is in progress, in
- *   which case it resolves the Streamed "Redzone - Week N" listing.
+ *   which case it resolves the StreamFree "RedZone" listing.
  *
  *   Reasons: outside-window | no-live-games | no-listing | unavailable.
  */
 
-const STREAMED = 'https://streamed.pk'
+const STREAMFREE = 'https://streamfree.top'
 const MATCH_TTL_MS = 60_000
 
-/** Resolve the current RedZone listing from Streamed (60s memo). */
+/** Resolve the current RedZone listing from StreamFree (60s memo). */
 async function fetchRedzoneMatch(): Promise<StreamMatch | null> {
   const key = 'streams:redzone:match'
   const cached = getCached<StreamMatch | null>(key)
   if (cached && isFresh(cached.ts, MATCH_TTL_MS)) return cached.data
 
-  const res = await fetch(`${STREAMED}/api/matches/${STREAM_CATEGORY.nfl}`, {
-    signal: AbortSignal.timeout(20_000),
-  })
-  if (!res.ok) throw new Error(`Streamed ${res.status}`)
+  const res = await fetch(
+    `${STREAMFREE}/api/v1/streams?category=${encodeURIComponent(STREAM_CATEGORY.nfl)}`,
+    { signal: AbortSignal.timeout(20_000) },
+  )
+  if (!res.ok) throw new Error(`StreamFree ${res.status}`)
   const body = await res.json()
-  if (!Array.isArray(body)) throw new Error('Streamed bad shape')
-  const matches = body
-    .map(shape)
-    .filter((m): m is StreamMatch => m !== null)
+  if (!Array.isArray(body?.streams)) throw new Error('StreamFree bad shape')
+  const matches: StreamMatch[] = body.streams
+    .map(shapeStreamFreeMatch)
+    .filter((m: StreamMatch | null): m is StreamMatch => m !== null)
   const match = findRedzoneStream(matches)
   setCached(key, match)
   return match
