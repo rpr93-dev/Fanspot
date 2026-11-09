@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -36,15 +37,15 @@ export function F1Hub({ teamColor = '#E10600' }: { teamColor?: string }) {
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/f1/schedule')
+    apiFetch('/api/f1/schedule')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`schedule ${r.status}`))))
       .then((j) => { if (!cancelled) { setSchedule(j); setScheduleFailed(false) } })
       .catch(() => { if (!cancelled) setScheduleFailed(true) })
-    fetch('/api/f1/standings')
+    apiFetch('/api/f1/standings')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`standings ${r.status}`))))
       .then((j) => { if (!cancelled) { setStandings(j); setStandingsFailed(false) } })
       .catch(() => { if (!cancelled) setStandingsFailed(true) })
-    fetch('/api/f1/live')
+    apiFetch('/api/f1/live')
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (!cancelled && j?.state === 'live') {

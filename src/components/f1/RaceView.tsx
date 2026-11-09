@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -47,7 +48,7 @@ export function RaceView({ sessionKey, teamColor = '#E10600' }: { sessionKey?: s
   useEffect(() => {
     let cancelled = false
     setSessionError(false)
-    fetch(`/api/f1/session${sessionKey ? `?session_key=${encodeURIComponent(sessionKey)}` : ''}`)
+    apiFetch(`/api/f1/session${sessionKey ? `?session_key=${encodeURIComponent(sessionKey)}` : ''}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Session ${r.status}`))))
       .then((j) => {
         if (cancelled) return

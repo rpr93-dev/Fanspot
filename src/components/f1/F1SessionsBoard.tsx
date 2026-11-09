@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -56,11 +57,11 @@ export function useF1Sessions(): F1SessionItem[] | null {
     const tick = async () => {
       let next: F1SessionItem[] | null = null
       try {
-        const schedRes = await fetch('/api/f1/schedule', { signal: AbortSignal.timeout(15_000) })
+        const schedRes = await apiFetch('/api/f1/schedule', { signal: AbortSignal.timeout(15_000) })
         const sched = schedRes.ok ? await schedRes.json() : null
         const round = sched?.next
         if (round) {
-          const wRes = await fetch(`/api/f1/weekend?round=${encodeURIComponent(String(round.round))}`, {
+          const wRes = await apiFetch(`/api/f1/weekend?round=${encodeURIComponent(String(round.round))}`, {
             signal: AbortSignal.timeout(15_000),
           })
           const w = wRes.ok ? await wRes.json() : null

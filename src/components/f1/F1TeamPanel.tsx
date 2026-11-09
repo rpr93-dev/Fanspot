@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -46,19 +47,19 @@ export function F1TeamPanel({ team, teamColor }: { team: Team; teamColor: string
 
   useEffect(() => {
     let cancelled = false
-    fetch('/api/f1/standings')
+    apiFetch('/api/f1/standings')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`standings ${r.status}`))))
       .then((j) => { if (!cancelled) { setStandings(j); setStandingsFailed(false) } })
       .catch(() => { if (!cancelled) setStandingsFailed(true) })
-    fetch('/api/f1/schedule')
+    apiFetch('/api/f1/schedule')
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (!cancelled && j?.next) setNext(j.next) })
       .catch(() => {})
-    fetch(`/api/f1/constructor?team=${encodeURIComponent(team.abbreviation)}`)
+    apiFetch(`/api/f1/constructor?team=${encodeURIComponent(team.abbreviation)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`constructor ${r.status}`))))
       .then((j) => { if (!cancelled) { setDetail(j); setDetailFailed(false) } })
       .catch(() => { if (!cancelled) setDetailFailed(true) })
-    fetch(`/api/news-search?team=${encodeURIComponent(team.name)}&sport=f1`)
+    apiFetch(`/api/news-search?team=${encodeURIComponent(team.name)}&sport=f1`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`news ${r.status}`))))
       .then((j) => { if (!cancelled) { setNews(j.articles ?? []); setNewsFailed(false) } })
       .catch(() => { if (!cancelled) setNewsFailed(true) })

@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
@@ -90,7 +91,7 @@ export function WeekendView({ round, season }: { round: string; season?: string 
     let cancelled = false
     setError(false)
     const yr = season ?? String(new Date().getFullYear())
-    fetch(`/api/f1/weekend?season=${encodeURIComponent(yr)}&round=${encodeURIComponent(round)}`)
+    apiFetch(`/api/f1/weekend?season=${encodeURIComponent(yr)}&round=${encodeURIComponent(round)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Weekend ${r.status}`))))
       .then((j) => {
         if (!cancelled) setData(j)
@@ -162,7 +163,7 @@ export function WeekendView({ round, season }: { round: string; season?: string 
     if (!activeRaw || activeRaw.key < 0 || activeRaw.state !== 'final' || activeRaw.result.length > 0) return
     if (backfill[activeRaw.key]) return
     let cancelled = false
-    fetch(`/api/f1/session?session_key=${encodeURIComponent(String(activeRaw.key))}`)
+    apiFetch(`/api/f1/session?session_key=${encodeURIComponent(String(activeRaw.key))}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (cancelled || !j) return

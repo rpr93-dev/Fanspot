@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -57,7 +58,7 @@ export function DriverPanel({ code }: { code: string }) {
   useEffect(() => {
     let cancelled = false
     setError(false)
-    fetch(`/api/f1/driver?code=${encodeURIComponent(code)}`)
+    apiFetch(`/api/f1/driver?code=${encodeURIComponent(code)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`Driver ${r.status}`))))
       .then((j) => { if (!cancelled) setData(j) })
       .catch(() => { if (!cancelled) setError(true) })
@@ -67,7 +68,7 @@ export function DriverPanel({ code }: { code: string }) {
   useEffect(() => {
     if (!data?.driver?.name) return
     let cancelled = false
-    fetch(`/api/news-search?team=${encodeURIComponent(data.driver.name)}&sport=f1`)
+    apiFetch(`/api/news-search?team=${encodeURIComponent(data.driver.name)}&sport=f1`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (!cancelled && j) setNews(j.articles ?? []) })
       .catch(() => {})

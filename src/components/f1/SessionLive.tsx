@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { F1CarState, F1Driver, F1LiveSnapshot } from '@/lib/f1'
@@ -24,7 +25,7 @@ export function SessionLive({ sessionKey }: { sessionKey?: string }) {
   // Drivers + session identity (bridge or OpenF1, whichever is available).
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/f1/session${sessionKey ? `?session_key=${encodeURIComponent(sessionKey)}` : ''}`)
+    apiFetch(`/api/f1/session${sessionKey ? `?session_key=${encodeURIComponent(sessionKey)}` : ''}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (cancelled || !j) return
@@ -43,7 +44,7 @@ export function SessionLive({ sessionKey }: { sessionKey?: string }) {
     const tick = async () => {
       const sk = keyRef.current ?? sessionKey
       try {
-        const res = await fetch(`/api/f1/live${sk ? `?session_key=${encodeURIComponent(sk)}` : ''}`, {
+        const res = await apiFetch(`/api/f1/live${sk ? `?session_key=${encodeURIComponent(sk)}` : ''}`, {
           signal: AbortSignal.timeout(20000),
         })
         if (!res.ok) throw new Error(`live ${res.status}`)
@@ -69,7 +70,7 @@ export function SessionLive({ sessionKey }: { sessionKey?: string }) {
   useEffect(() => {
     let cancelled = false
     const want = sessionKey ? `?session_key=${encodeURIComponent(sessionKey)}` : ''
-    fetch(`/api/f1/track${want}`)
+    apiFetch(`/api/f1/track${want}`)
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => {
         if (!cancelled && j?.outline) setOutline(j.outline)
