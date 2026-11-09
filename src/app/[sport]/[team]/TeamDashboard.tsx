@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import Link from 'next/link'
@@ -26,29 +27,63 @@ function useTeamDashboard(sport: string, teamId: string, teamName: string) {
   useEffect(() => {
     if (!teamId || !teamName) { setLoading(false); return }
     let cancelled = false
+    let timer: ReturnType<typeof setTimeout>
+    // Read by schedule(): the freshest payload decides how long to idle.
+    const dataRef = { current: null as any }
+
+    // Clock-aware refetch: a "pre" snapshot must flip to live right after
+    // tipoff (the dashboard used to serve its pre-kickoff heroes all game),
+    // and a live dashboard keeps its scores moving. Away from gameday the
+    // cycle slows to the dashboard's own server-cache cadence so ESPN quota
+    // isn't burned off-season.
+    function pollInterval(d: any): number {
+      const status = (d as any)?.schedule?.upcoming?.competitions?.[0]?.status?.type
+      if (status?.state === 'in') return 30_000
+      const kickoff = new Date((d as any)?.schedule?.upcoming?.date ?? NaN).getTime()
+      if (Number.isFinite(kickoff) && Math.abs(kickoff - Date.now()) < 6 * 60 * 60 * 1000) return 30_000
+      return 300_000
+    }
+
+    function schedule() {
+      if (cancelled) return
+      clearTimeout(timer)
+      timer = setTimeout(poll, pollInterval(dataRef.current))
+    }
+
+    async function poll() {
+      if (cancelled) return
+      // Background tab: skip the fetch, keep the cycle alive.
+      if (!document.hidden) await load()
+      else schedule()
+    }
 
     async function load() {
       try {
-        const res = await fetch(`/api/team/${teamId}/dashboard?sport=${sport}&roster=false`, {
+        const res = await apiFetch(`/api/team/${teamId}/dashboard?sport=${sport}&roster=false`, {
           signal: AbortSignal.timeout(20000),
         })
         if (!res.ok) throw new Error(`Dashboard API returned ${res.status}`)
         const dashboard = await res.json()
         if (cancelled) return
-      setData(dashboard)
-      setError(null)
-    } catch (err) {
-      console.error('[dashboard] Failed to load:', err)
-      if (!cancelled) {
-        setData(null)
-        setError(err instanceof Error ? err.message : 'Failed to load team data')
+        dataRef.current = dashboard
+        setData(dashboard)
+        setError(null)
+      } catch (err) {
+        console.error('[dashboard] Failed to load:', err)
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Failed to load team data')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
       }
-    } finally {
-      if (!cancelled) setLoading(false)
-    }
+      schedule()
     }
 
     load()
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
   }, [teamId, sport, teamName])
 
   return { dashboard: data, loading, error }
@@ -320,7 +355,7 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
     if (!showRoster || rosterData || rosterLoading || !team) return
     setRosterLoading(true)
     const abbr = getEspnAbbr(team.id, team.abbreviation)
-    fetch(`/api/roster?sport=${team.sport}&team=${abbr}`)
+    apiFetch(`/api/roster?sport=${team.sport}&team=${abbr}`)
       .then((r) => r.ok ? r.json() : null)
       .then((res) => {
         setRosterData(res?.athletes ?? null)
@@ -346,7 +381,7 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
     setScraperLoading(true)
     setScraperError(null)
 
-    fetch('/api/scraper', {
+    apiFetch('/api/scraper', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -397,7 +432,7 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
         const gameId = lg || ug?.id
         const gameDate = ug?.date
         if (gameId && gameDate) url += `&eventId=${encodeURIComponent(gameId)}&date=${gameDate}`
-        const res = await fetch(url)
+        const res = await apiFetch(url)
         if (res.ok) {
           const json = await res.json()
           setData(p => p ? { ...p, oddsInfo: json.odds ?? null } : p)
@@ -451,7 +486,7 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
     const id = setInterval(async () => {
       if (document.hidden) return // background tab
       try {
-        const res = await fetch(`/api/standings?sport=${team.sport}&team=${abbr}`)
+        const res = await apiFetch(`/api/standings?sport=${team.sport}&team=${abbr}`)
         if (res.ok) {
           const json = await res.json()
           setData(p => p ? { ...p, standings: json.standings ?? [], teamStanding: json.teamStanding ?? '', standingsMessage: json.message ?? '' } : p)
@@ -491,7 +526,7 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
     async function fetchLiveBoxScore() {
       if (document.hidden) return // background tab
       try {
-        const res = await fetch(`/api/box-score?sport=${t.sport}&eventId=${eventId}`)
+        const res = await apiFetch(`/api/box-score?sport=${t.sport}&eventId=${eventId}`)
         if (res.ok) {
           const json = await res.json()
           if (json?.boxScore) {
@@ -536,7 +571,7 @@ export function TeamDashboard({ sport, teamId }: { sport: string; teamId: string
     setBoxScoreLoading(true)
     setBoxScoreData(null)
     const abbr = getEspnAbbr(team.id, team.abbreviation)
-    fetch(`/api/box-score?sport=${team.sport}&eventId=${selectedGameId}`)
+    apiFetch(`/api/box-score?sport=${team.sport}&eventId=${selectedGameId}`)
       .then((r) => r.ok ? r.json() : null)
       .then((res) => {
         setBoxScoreData(res?.boxScore ?? null)
