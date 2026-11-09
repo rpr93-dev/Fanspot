@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -30,52 +31,54 @@ export function MultiviewTile({
   spotlighted,
   canSpotlight,
   active,
+  audioFocused,
+  mutedByAudio,
   onSelectActive,
+  onSelectAudio,
   onTogglePause,
   onToggleSpotlight,
   onRemove,
+  onGame,
 }: {
   slot: MultiviewSlot
   autoplay: boolean
+  /** The user paused this screen explicitly. */
   paused: boolean
   spotlighted: boolean
   canSpotlight: boolean
   /** This tile supplies the statistics shown beside the board. */
   active?: boolean
   onSelectActive?: () => void
+  /** This tile owns the board's audio. */
+  audioFocused?: boolean
+  /** Another screen owns the audio, so this player is not running. */
+  mutedByAudio?: boolean
+  onSelectAudio?: () => void
   onTogglePause: () => void
   onToggleSpotlight: () => void
   onRemove: () => void
+  /** Fired whenever this tile's live game data refreshes (also on first load). */
+  onGame?: (game: NormalizedGame, slot: MultiviewSlot) => void
 }) {
-  if (isRedzoneSlot(slot)) {
-    return (
-      <RedzoneTile
-        paused={paused}
-        spotlighted={spotlighted}
-        canSpotlight={canSpotlight}
-        autoplay={autoplay}
-        active={active}
-        onSelectActive={onSelectActive}
-        onTogglePause={onTogglePause}
-        onToggleSpotlight={onToggleSpotlight}
-        onRemove={onRemove}
-      />
-    )
+  const shared = {
+    paused,
+    spotlighted,
+    canSpotlight,
+    autoplay,
+    active,
+    audioFocused,
+    mutedByAudio,
+    onSelectActive,
+    onSelectAudio,
+    onTogglePause,
+    onToggleSpotlight,
+    onRemove,
+    onGame,
   }
-  return (
-    <GameTile
-      slot={slot}
-      paused={paused}
-      spotlighted={spotlighted}
-      canSpotlight={canSpotlight}
-      autoplay={autoplay}
-      active={active}
-      onSelectActive={onSelectActive}
-      onTogglePause={onTogglePause}
-      onToggleSpotlight={onToggleSpotlight}
-      onRemove={onRemove}
-    />
-  )
+  if (isRedzoneSlot(slot)) {
+    return <RedzoneTile {...shared} />
+  }
+  return <GameTile slot={slot} {...shared} />
 }
 
 function TileShell({
@@ -120,7 +123,9 @@ function TileControls({
   spotlighted,
   canSpotlight,
   active,
+  audioFocused,
   onSelectActive,
+  onSelectAudio,
   onTogglePause,
   onToggleSpotlight,
   onRemove,
@@ -130,7 +135,9 @@ function TileControls({
   spotlighted: boolean
   canSpotlight: boolean
   active?: boolean
+  audioFocused?: boolean
   onSelectActive?: () => void
+  onSelectAudio?: () => void
   onTogglePause: () => void
   onToggleSpotlight: () => void
   onRemove: () => void
@@ -139,6 +146,21 @@ function TileControls({
   const btn = 'fs-meta px-2 py-1 rounded-md hover:text-fs-text hover:bg-white/5'
   return (
     <>
+      {onSelectAudio && (
+        <button
+          type="button"
+          className={`${btn} ${audioFocused ? '!text-fs-turf' : ''}`}
+          aria-pressed={!!audioFocused}
+          onClick={onSelectAudio}
+          title={
+            audioFocused
+              ? 'This screen owns the audio — press for sound on every screen'
+              : 'Play this screen’s audio (third-party embeds can’t be muted individually, so the other screens pause)'
+          }
+        >
+          {audioFocused ? '♪ Audio' : '♪ Mute'}
+        </button>
+      )}
       {onSelectActive && (
         <button
           type="button"
@@ -172,10 +194,14 @@ function GameTile({
   spotlighted,
   canSpotlight,
   active,
+  audioFocused,
+  mutedByAudio,
   onSelectActive,
+  onSelectAudio,
   onTogglePause,
   onToggleSpotlight,
   onRemove,
+  onGame,
 }: {
   slot: MultiviewSlot
   autoplay: boolean
@@ -183,26 +209,79 @@ function GameTile({
   spotlighted: boolean
   canSpotlight: boolean
   active?: boolean
+  audioFocused?: boolean
+  mutedByAudio?: boolean
   onSelectActive?: () => void
+  onSelectAudio?: () => void
   onTogglePause: () => void
   onToggleSpotlight: () => void
   onRemove: () => void
+  onGame?: (game: NormalizedGame, slot: MultiviewSlot) => void
 }) {
   const sportKey = normalizeSportKey(slot.sport)
   const [game, setGame] = useState<NormalizedGame | null>(null)
   const [failed, setFailed] = useState(false)
 
   const load = useCallback(async () => {
-    const res = await fetch(`/api/game?sport=${slot.sport.toUpperCase()}&eventId=${encodeURIComponent(slot.eventId)}`, {
+    const res = await apiFetch(`/api/game?sport=${slot.sport.toUpperCase()}&eventId=${encodeURIComponent(slot.eventId)}`, {
       cache: 'no-store',
     })
     if (!res.ok) throw new Error(`Game API returned ${res.status}`)
     const json = await res.json()
     const normalized = sportKey ? normalizeEvent(sportKey, json?.game) : null
     if (!normalized) throw new Error('No game data returned')
-    setGame(normalized)
+    // Merge in the summary feed's live score/clock for the header. The
+    // scoreboard feed (/api/game) and the summary feed (/api/box-score) are
+    // two ESPN endpoints that drift against each other mid-game — this card,
+    // the "on the wall" strip and the stats panel must all quote the SAME
+    // numbers, so the card adopts the box score the stats panel reads.
+    let merged = normalized
+    try {
+      const boxRes = await apiFetch(
+        `/api/box-score?sport=${slot.sport.toUpperCase()}&eventId=${encodeURIComponent(slot.eventId)}`,
+        { cache: 'no-store' },
+      )
+      if (boxRes.ok) {
+        const boxJson = await boxRes.json()
+        const bs = boxJson?.boxScore
+        if (bs) {
+          const st = bs.status
+          const phase = st?.completed ? 'final' : st?.state === 'in' ? 'live' : normalized.status.phase
+          const patch = (side: typeof normalized.away) => {
+            const abbr = (side as { abbr?: string }).abbr
+            if (!abbr) return side
+            const hit = (bs.teams ?? []).find(
+              (t: any) => (t.abbreviation ?? '').toUpperCase() === String(abbr).toUpperCase(),
+            )
+            if (!hit || hit.score?.displayValue == null) return side
+            const parsed = Number(hit.score.displayValue)
+            return {
+              ...side,
+              scoreDisplay: String(hit.score.displayValue),
+              score: Number.isFinite(parsed) ? parsed : side.score,
+            }
+          }
+          merged = {
+            ...normalized,
+            away: patch(normalized.away),
+            home: patch(normalized.home),
+            status: {
+              ...normalized.status,
+              phase,
+              completed: !!st?.completed,
+              shortDetail: st?.shortDetail ?? normalized.status.shortDetail,
+              detail: st?.detail ?? normalized.status.detail,
+            },
+          }
+        }
+      }
+    } catch {
+      /* header deltas are best-effort; the base game data above stands */
+    }
+    setGame(merged)
     setFailed(false)
-  }, [slot.sport, slot.eventId, sportKey])
+    onGame?.(merged, slot)
+  }, [slot, sportKey, onGame])
 
   useEffect(() => {
     let cancelled = false
@@ -216,7 +295,7 @@ function GameTile({
     }
   }, [load])
 
-  useLivePoll(load, () => (game?.status.phase === 'live' ? 30_000 : null), [load, game?.status.phase])
+  useLivePoll(load, () => (game?.status.phase === 'live' ? 15_000 : null), [load, game?.status.phase])
 
   const label = game ? `${game.away.abbr} at ${game.home.abbr}` : `${slot.sport.toUpperCase()} ${slot.eventId}`
   const hubHref = sportKey ? `/${SPORT_SLUGS[sportKey]}/game/${slot.eventId}` : null
@@ -251,7 +330,9 @@ function GameTile({
           spotlighted={spotlighted}
           canSpotlight={canSpotlight}
           active={active}
+          audioFocused={audioFocused}
           onSelectActive={onSelectActive}
+          onSelectAudio={onSelectAudio}
           onTogglePause={onTogglePause}
           onToggleSpotlight={onToggleSpotlight}
           onRemove={onRemove}
@@ -263,6 +344,16 @@ function GameTile({
         <ErrorState message={`Couldn't load ${label}.`} onRetry={() => void load().catch(() => setFailed(true))} />
       ) : !game ? (
         <div className="fs-skeleton h-40" aria-hidden="true" />
+      ) : mutedByAudio ? (
+        <div className="rounded-lg border border-fs-line-strong bg-black/40 p-6 text-center">
+          <p className="text-sm text-fs-muted">
+            Audio is focused on another screen, so this feed is not playing — the score above keeps
+            updating.
+          </p>
+          <button type="button" className="fs-btn mt-3" onClick={onSelectAudio ?? onTogglePause}>
+            ♪ Play this screen&rsquo;s audio
+          </button>
+        </div>
       ) : paused ? (
         <div className="rounded-lg border border-fs-line-strong bg-black/40 p-6 text-center">
           <p className="text-sm text-fs-muted">Stream paused — scores above keep updating.</p>
@@ -289,7 +380,10 @@ function RedzoneTile({
   canSpotlight,
   autoplay,
   active,
+  audioFocused,
+  mutedByAudio,
   onSelectActive,
+  onSelectAudio,
   onTogglePause,
   onToggleSpotlight,
   onRemove,
@@ -299,7 +393,10 @@ function RedzoneTile({
   canSpotlight: boolean
   autoplay: boolean
   active?: boolean
+  audioFocused?: boolean
+  mutedByAudio?: boolean
   onSelectActive?: () => void
+  onSelectAudio?: () => void
   onTogglePause: () => void
   onToggleSpotlight: () => void
   onRemove: () => void
@@ -337,7 +434,9 @@ function RedzoneTile({
           spotlighted={spotlighted}
           canSpotlight={canSpotlight}
           active={active}
+          audioFocused={audioFocused}
           onSelectActive={onSelectActive}
+          onSelectAudio={onSelectAudio}
           onTogglePause={onTogglePause}
           onToggleSpotlight={onToggleSpotlight}
           onRemove={onRemove}
@@ -347,6 +446,15 @@ function RedzoneTile({
     >
       {rz === null ? (
         <div className="fs-skeleton h-40" aria-hidden="true" />
+      ) : mutedByAudio ? (
+        <div className="rounded-lg border border-fs-line-strong bg-black/40 p-6 text-center">
+          <p className="text-sm text-fs-muted">
+            Audio is focused on another screen, so RedZone is not playing.
+          </p>
+          <button type="button" className="fs-btn mt-3" onClick={onSelectAudio ?? onTogglePause}>
+            ♪ Play this screen&rsquo;s audio
+          </button>
+        </div>
       ) : paused ? (
         <div className="rounded-lg border border-fs-line-strong bg-black/40 p-6 text-center">
           <p className="text-sm text-fs-muted">RedZone paused.</p>
@@ -359,7 +467,7 @@ function RedzoneTile({
       ) : (
         <div className="fs-panel p-4 sm:p-5">
           <p className="fs-meta mb-3">
-            {match.title} · via Streamed (third-party — expect ads or popups)
+            {match.title} · via StreamFree (third-party — expect ads or popups)
           </p>
           <StreamPlayer key={match.id} match={match} autoplay={autoplay} />
         </div>

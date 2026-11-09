@@ -26,6 +26,13 @@ export function useMultiviewSelection(initialSlots: MultiviewSlot[] = []) {
   const [spotlight, setSpotlight] = useState<number | null>(null)
   const [paused, setPaused] = useState<Set<string>>(new Set())
   const [autoplay, setAutoplay] = useState(false)
+  /**
+   * Audio focus — the one screen allowed to make noise. `null` (the default)
+   * is the existing behaviour: every screen plays its own audio. Third-party
+   * embeds cannot be muted from the page, so focusing one screen means the
+   * others stop playing; the board says so rather than pretending to mute.
+   */
+  const [audioKey, setAudioKey] = useState<string | null>(null)
 
   useEffect(() => {
     if (initialSlots.length > 0) {
@@ -64,6 +71,8 @@ export function useMultiviewSelection(initialSlots: MultiviewSlot[] = []) {
           next.delete(slotKey(removed))
           return next
         })
+        const key = slotKey(removed)
+        setAudioKey((a) => (a === key ? null : a))
       }
       return removeMultiviewSlot(prev, index)
     })
@@ -75,6 +84,24 @@ export function useMultiviewSelection(initialSlots: MultiviewSlot[] = []) {
     setSpotlight(null)
     setPaused(new Set())
     setAutoplay(false)
+    setAudioKey(null)
+  }, [])
+
+  /**
+   * Focus a screen's audio. Passing the focused key again hands the audio back
+   * to every screen; focusing a tile also un-pauses it, so picking audio never
+   * leaves a silent screen on stage.
+   */
+  const focusAudio = useCallback((key: string | null) => {
+    setAudioKey((prev) => (key && prev === key ? null : key))
+    if (key) {
+      setPaused((p) => {
+        if (!p.has(key)) return p
+        const next = new Set(p)
+        next.delete(key)
+        return next
+      })
+    }
   }, [])
 
   const togglePause = useCallback((slot: MultiviewSlot) => {
@@ -98,6 +125,8 @@ export function useMultiviewSelection(initialSlots: MultiviewSlot[] = []) {
     togglePause,
     autoplay,
     setAutoplay,
+    audioKey,
+    setAudioKey: focusAudio,
     hydrated,
   }
 }
