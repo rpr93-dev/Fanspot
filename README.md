@@ -267,7 +267,27 @@ site never keeps a second copy.
   prop-model/.venv.build-hide && npm run build; mv prop-model/.venv.build-hide
   prop-model/.venv`).
 - **Deploy**: `npm run build` then restart the pm2 process (`pm2 restart fanspot`);
-  `next start` only picks up a new bundle on restart.
+  `next start` only picks up a new bundle on restart. The public instance runs
+  `next start` on **port 3010** (`PORT` in the pm2 env) because the app is
+  published under a sub-path — see [Public URL](#public-url).
+
+## Public URL
+
+Fanspot is published at **https://khannaconsulting.ai/fanspot** through the
+`khannaconsulting` Cloudflare tunnel (ingress rule `^/fanspot(/.*)?$` →
+`http://localhost:3010`, above the bare-hostname rule that serves the main site
+from nginx:4000).
+
+The sub-path comes from `basePath: '/fanspot'` in `next.config.ts`:
+
+- `<Link>`, `useRouter`, redirects, and `_next`/`public` asset URLs are prefixed
+  by Next automatically.
+- Plain `fetch()` calls are **not** rewritten, so every app-relative request uses
+  `apiFetch(...)` (client) or `withBasePath(...)` (server-side URL building) from
+  `src/lib/api-base.ts`. Add new `/api/...` calls through those helpers, or they
+  will hit the consulting site's root instead.
+- `public/manifest.json` start_url/scope/icons and `sitemap.ts` carry the
+  `/fanspot` prefix explicitly.
 - First-ever model run downloads multi-MB league data (answered 503 `warmingUp`,
   retried in background); subsequent runs are fast.
 

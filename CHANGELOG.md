@@ -1,5 +1,36 @@
 # Changelog
 
+## Session — 2026-10-28
+
+**Game Hub v2 is now the main version.** The Watch/Command/Multiview redesign
+(`GameHubWorkspace`) is the default shell on every game page instead of an
+opt-in beta:
+
+- `DEFAULT_GAME_HUB_PREFS.shell` → `'v2'`; the toggle is relabelled **New /
+  Classic** (`Classic` is still one click away) and `New` is listed first.
+- Prefs key bumped to `localStorage['fanspot:gamehub:2']`. Legacy blobs from
+  `fanspot:gamehub` (which were written with `shell: 'old'` on every visit) are
+  imported once with the shell forced back to `v2` — returning visitors land on
+  the redesign and keep their saved split ratio, sidebar state and multiview
+  layout. After the import (or any toggle) the persisted choice wins normally.
+- Serializing an invalid shell falls back to `'v2'`, and `parseGameHubPrefs`
+  gained a `{ resetShell: true }` migration option (unit-tested).
+- Docs updated (`GAME_HUB_REDESIGN.md`, `AGENTS.md`).
+
+**Debugging sweep (v2 + the rest of the site):** `tsc --noEmit` clean; all 578
+vitest tests pass; production build compiles with no warnings. Runtime smoke
+test on the built site (`next start`): 12 pages all 200 (`/fanspot/*` game pages,
+team dashboards, `/scores`, `/search`, `/news`, `/favorites`, `/multiview`,
+`/fantasy`, `/f1`, `/graph`), plus the major APIs (`/api/game`, `box-score`,
+`plays`, `odds`, `scoreboard`, `schedule`, `standings(-league)`, `search`,
+`top-stories`, `stat-leaders`, `streams`, `f1/*`, `fantasy/steals` — all 200).
+No unexpected server errors; the only logged failures were expected upstream
+404s on `live-stats` for a game that had not started yet.
+
+⚠️ Operational note found during the sweep: a stale server left listening on a
+port makes `npm run start` fail with `EADDRINUSE` — check `ss -tlnp | grep <port>`
+before assuming local responses came from the app (see `AGENTS.md`).
+
 ## Session — 2026-07-31
 
 Three features plus a codebase audit. Every entry below is its own commit and can be
