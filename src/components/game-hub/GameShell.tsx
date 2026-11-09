@@ -1,31 +1,51 @@
 'use client'
 
-import type { ReactNode } from 'react'
+import { useEffect, type ReactNode } from 'react'
 import { useGameHubPrefs } from '@/hooks/useGameHubPrefs'
+import type { GameHubMode, GameHubShell } from '@/lib/gameHub'
 import { GameHubWorkspace } from './GameHubWorkspace'
 import { ShellToggle } from './ShellToggle'
 
 /**
  * Game Hub shell host. Owns the persisted prefs (single source of truth) and
  * renders either the original two-column layout or the Watch/Command/Multiview
- * redesign, with the Old / Beta v2 toggle visible on both.
+ * redesign, with the New / Classic toggle visible on both.
  *
- * The stream and the data column are passed as nodes, so each shell lays out
- * the exact same elements — nothing is duplicated between the old and new
- * implementations.
+ * The stream and the data nodes are passed in, so each shell lays out the exact
+ * same elements — nothing is duplicated between the old and new
+ * implementations, and the pre-game data cannot diverge.
  */
 export function GameShell({
   hasStream,
   stream,
   children,
+  commandPlays,
+  commandBox,
+  commandStats,
+  live,
+  onShellMode,
 }: {
   /** The game's stream block (or null when the sport has no stream). */
   stream: ReactNode
   /** The data column: tab nav + panels for this game. */
   children: ReactNode
+  /** Command mode panels — only the v2 workspace places them. */
+  commandPlays?: ReactNode
+  commandBox?: ReactNode
+  commandStats?: ReactNode
+  live?: boolean
   hasStream: boolean
+  /**
+   * Reports the active shell + workspace mode so the page can react (the v2
+   * Watch companion opens on the game overview until a tab is picked).
+   */
+  onShellMode?: (state: { shell: GameHubShell; mode: GameHubMode }) => void
 }) {
   const { prefs, patch, reset } = useGameHubPrefs()
+
+  useEffect(() => {
+    onShellMode?.({ shell: prefs.shell, mode: prefs.mode })
+  }, [prefs.shell, prefs.mode, onShellMode])
 
   return (
     <div className="space-y-3">
@@ -40,9 +60,12 @@ export function GameShell({
           reset={reset}
           hasStream={hasStream}
           stream={stream}
-        >
-          {children}
-        </GameHubWorkspace>
+          column={children}
+          commandPlays={commandPlays}
+          commandBox={commandBox}
+          commandStats={commandStats}
+          live={live}
+        />
       ) : (
         <div
           className={

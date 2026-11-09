@@ -1,9 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import {
   DEFAULT_GAME_HUB_PREFS,
+  RAIL_MAX,
+  RAIL_MIN,
   SPLIT_MAX,
   SPLIT_MIN,
   activeMultiviewPreset,
+  clampRailSplit,
   clampSplit,
   isGameHubMode,
   isGameHubShell,
@@ -25,6 +28,15 @@ describe('clampSplit', () => {
     expect(clampSplit('nope')).toBe(DEFAULT_GAME_HUB_PREFS.split)
     expect(clampSplit(undefined)).toBe(DEFAULT_GAME_HUB_PREFS.split)
     expect(clampSplit(NaN)).toBe(DEFAULT_GAME_HUB_PREFS.split)
+  })
+})
+
+describe('clampRailSplit', () => {
+  it('clamps the Command rail divider and defaults when unparsable', () => {
+    expect(clampRailSplit(0.5)).toBe(0.5)
+    expect(clampRailSplit(0)).toBe(RAIL_MIN)
+    expect(clampRailSplit(1)).toBe(RAIL_MAX)
+    expect(clampRailSplit('nope')).toBe(DEFAULT_GAME_HUB_PREFS.commandRailSplit)
   })
 })
 
@@ -72,17 +84,41 @@ describe('parseGameHubPrefs', () => {
     expect(p.mode).toBe(DEFAULT_GAME_HUB_PREFS.mode)
     expect(p.multiviewLayout).toBe(DEFAULT_GAME_HUB_PREFS.multiviewLayout)
   })
-  it('defaults the shell to Old and keeps a valid v2 opt-in', () => {
-    expect(parseGameHubPrefs(JSON.stringify({ mode: 'watch' })).shell).toBe('old')
-    expect(parseGameHubPrefs(JSON.stringify({ shell: 'v2' })).shell).toBe('v2')
-    expect(parseGameHubPrefs(JSON.stringify({ shell: 'v3' })).shell).toBe('old')
-    expect(DEFAULT_GAME_HUB_PREFS.shell).toBe('old')
+  it('defaults the shell to v2 (New) and accepts a Classic opt-back', () => {
+    expect(parseGameHubPrefs(JSON.stringify({ mode: 'watch' })).shell).toBe('v2')
+    expect(parseGameHubPrefs(JSON.stringify({ shell: 'old' })).shell).toBe('old')
+    expect(parseGameHubPrefs(JSON.stringify({ shell: 'v3' })).shell).toBe('v2')
+    expect(DEFAULT_GAME_HUB_PREFS.shell).toBe('v2')
+  })
+  it('migrates a legacy blob by forcing the shell to v2', () => {
+    const legacy = JSON.stringify({ shell: 'old', mode: 'command', split: 0.7 })
+    const migrated = parseGameHubPrefs(legacy, { resetShell: true })
+    expect(migrated.shell).toBe('v2')
+    expect(migrated.mode).toBe('command')
+    expect(migrated.split).toBe(0.7)
+    // Reading without the migration flag keeps the persisted choice.
+    expect(parseGameHubPrefs(legacy).shell).toBe('old')
+  })
+  it('defaults the Command workspace to fit-to-viewport', () => {
+    const older = parseGameHubPrefs(JSON.stringify({ mode: 'command' }))
+    expect(older.commandFit).toBe(true)
+    expect(older.commandRailSplit).toBe(DEFAULT_GAME_HUB_PREFS.commandRailSplit)
+    expect(parseGameHubPrefs(JSON.stringify({ commandFit: false })).commandFit).toBe(false)
+    expect(parseGameHubPrefs(JSON.stringify({ commandFit: 'yes' })).commandFit).toBe(true)
   })
 })
 
 describe('serialize/parse round-trip', () => {
   it('preserves a valid prefs object', () => {
-    const prefs = { shell: 'v2' as const, mode: 'multiview' as const, split: 0.4, sidebarCollapsed: true, multiviewLayout: 'stack' as const }
+    const prefs = {
+      shell: 'v2' as const,
+      mode: 'multiview' as const,
+      split: 0.4,
+      sidebarCollapsed: true,
+      commandFit: false,
+      commandRailSplit: 0.7,
+      multiviewLayout: 'stack' as const,
+    }
     expect(parseGameHubPrefs(serializeGameHubPrefs(prefs))).toEqual(prefs)
   })
   it('clamps the split on the way out', () => {
@@ -99,10 +135,18 @@ describe('multiview layout presets', () => {
     expect(multiviewBoardClass(1, 'focus')).toContain('grid-cols-1')
     expect(multiviewTileClass(1, 0, 'focus')).toBe('')
   })
+  it('goes 2-up as soon as there is desktop room, not only at xl', () => {
+    expect(multiviewBoardClass(2)).toBe('grid gap-3 grid-cols-1 md:grid-cols-2')
+    expect(multiviewBoardClass(4)).toBe('grid gap-3 grid-cols-1 md:grid-cols-2')
+  })
   it('lifts the first tile for a 3-up auto layout', () => {
-    expect(multiviewBoardClass(3)).toContain('xl:grid-cols-2')
-    expect(multiviewTileClass(3, 0)).toBe('xl:col-span-2')
+    expect(multiviewBoardClass(3)).toContain('md:grid-cols-2')
+    expect(multiviewTileClass(3, 0)).toBe('md:col-span-2')
     expect(multiviewTileClass(3, 1)).toBe('')
+  })
+  it('keeps the 2×2 tiling for four screens in auto layout', () => {
+    expect(multiviewTileClass(4, 0)).toBe('')
+    expect(multiviewTileClass(4, 3)).toBe('')
   })
   it('forces a single column in stack layout', () => {
     expect(multiviewBoardClass(4, 'stack')).toBe('grid gap-3 grid-cols-1')

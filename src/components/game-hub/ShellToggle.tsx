@@ -3,9 +3,10 @@
 import { GAME_HUB_SHELLS, GAME_HUB_SHELL_LABELS, type GameHubShell } from '@/lib/gameHub'
 
 /**
- * Switches the game hub between the original layout (`Old`) and the
- * Watch/Command/Multiview redesign (`Beta v2`). Rendered on both shells so you
- * can always flip back. Persisted with the rest of the hub prefs.
+ * Switches the game hub between the Watch/Command/Multiview redesign (`New`,
+ * the default) and the original two-column layout (`Classic`). Rendered on
+ * both shells so you can always flip back. Persisted with the rest of the
+ * hub prefs.
  */
 export function ShellToggle({
   shell,
@@ -26,7 +27,7 @@ export function ShellToggle({
           key={s}
           type="button"
           aria-pressed={shell === s}
-          title={s === 'old' ? 'The original game hub' : 'Beta v2 — Watch / Command / Multiview workspace'}
+          title={s === 'v2' ? 'Watch / Command / Multiview workspace (default)' : 'The original game hub'}
           onClick={() => onShell(s)}
           className={`fs-tab !px-3 !py-1 ${shell === s ? 'fs-tab-active' : ''}`}
         >

@@ -192,9 +192,12 @@ Explicitly **not** touched: prop model, fantasy tools, backend routes, `NextGame
 
 ## Status — implemented (Phases 2–6)
 
-Rollout: the redesign ships behind a persisted **Old / Beta v2** toggle on the game
-hub (`ShellToggle`, `GameShell`), defaulting to `Old` so the redesign is opt-in and
-reversible. `Old` and `Beta v2` lay out the same stream/data nodes.
+Rollout: the redesign **is** the game hub as of the v2 default switch — the
+persisted **New / Classic** toggle (`ShellToggle`, `GameShell`) now defaults to
+`New` (the Watch/Command/Multiview workspace) and stays reversible. Legacy prefs
+from the old opt-in era (`fanspot:gamehub`) are imported once with the shell
+forced to `New`, then read/written under the versioned key `fanspot:gamehub:2`.
+`Classic` and `New` lay out the same stream/data nodes.
 
 Delivered on this branch:
 - `src/lib/gameHub.ts` + `__tests__/game-hub.test.ts` — modes, prefs parse/serialize,
@@ -219,6 +222,51 @@ board; mobile (390px) has 0px horizontal overflow and a single-column split.
 Not yet done: Phase 7 exhaustive pass is partial (nav/sport pages not re-clicked
 exhaustively); no DOM test harness exists (vitest is node-env, no jsdom/RTL), so
 new interactive coverage is the pure-helper tests + browser verification.
+
+## Status — Phase 8: visual redesign (per-mode workspaces)
+
+The first v2 pass rearranged the existing sidebar; this pass gives each mode a
+purpose-built workspace. **No functionality was removed** — the old Game Hub is
+untouched behind the toggle, and every existing panel/tab still renders the same
+components with the same data.
+
+Changed / added:
+- `GameHubWorkspace` — the DOM structure is now identical in every mode. Only
+  classes, visibility and which slots are on stage change, so the stream node
+  never moves between parents (verified: Watch -> Command -> Multiview -> Watch
+  keeps one iframe and one `/api/streams/embed` resolve).
+- `Watch` — large player + companion column that opens on the game overview
+  (`Recent Plays` + `Game Leaders` + `Team Stats`), with Box Score / Plays /
+  Team Stats / Odds one tab away. A final game no longer jumps the v2 companion
+to the box score (`readGameHubShell` + `GameShell.onShellMode` + `tabPickedRef`).
+- `Command` — genuinely different layout: player beside a Live Plays / Player Box
+  Score rail (`HubPanel`, each body its own scroll container) plus a full-width
+  Team Stats strip. `ResizableSplit` gained a vertical orientation
+  (`orientation='vertical'`, Arrow Up/Down, `RAIL_MIN/MAX`); `commandFit` bounds
+  the rail to the viewport (Fit screen / Free scroll).
+- `Multiview` — 2-up / 3-up hero / 4-up 2x2 arrangements from `md`; audio focus
+  (`audioKey`) so one screen owns the sound (the others stop, and say why, since
+  third-party embeds cannot be muted); active-game statistics and add-games
+  picker unchanged.
+- New: `src/lib/gameLeaders.ts` (+ tests), `GameLeaders`, `HubPanel`.
+- `StatComparisonRow` no longer truncates anything (values `whitespace-nowrap`,
+  labels wrap in a bounded middle column, phones stack the label above the
+  values); `StatComparisonTable` is shared by the Team Stats tab, the overview
+  and the Command strip.
+- Prefs: `commandFit`, `commandRailSplit`, `split` default 0.62 (all persisted
+  under `fanspot:gamehub`).
+
+Verified in headless Chromium against the built server (75/75 checks): old hub
+default + tab switching, Watch/Command/Multiview layouts, both resize handles
+(pointer + keyboard), independent panel scroll, audio focus, multiview layout
+grid, mobile 390px stacking with zero horizontal overflow, `/multiview`, and
+stream continuity across v2 mode switches. Unit: 577 vitest pass, `tsc --noEmit`
+and `npm run build` clean.
+
+Known limitation (unchanged): the **New <-> Classic toggle** swaps the layout
+tree, so the player remounts and returns to its feed picker; switching modes
+*inside* v2 never does. Third-party embeds also cannot be muted from the page,
+which is why audio focus pauses the other screens.
 
 ## Pre-existing working-tree changes (unrelated to this redesign)
 `NextGamePanel.tsx`, `src/app/api/prop-ledger/route.ts` (+ test), `prop-model/line_refresh.py`,
