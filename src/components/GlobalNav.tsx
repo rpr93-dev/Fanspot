@@ -50,7 +50,10 @@ function DesktopSearch() {
   const showResults = open && query.trim().length >= 2
 
   return (
-    <div ref={boxRef} className="relative w-56 lg:w-72">
+    // Sized to leave the 768–1023 band to the ⌕ icon (the nav's ~650px of
+    // links plus this box overflowed those viewports at md width); the lg/xl
+    // steps widen it back once there is room, 72 full only ≥1280px.
+    <div ref={boxRef} className="relative w-48 lg:w-56 xl:w-72">
       <input
         type="search"
         value={query}
@@ -120,14 +123,14 @@ export function GlobalNav() {
   const pathname = usePathname()
   const [moreOpen, setMoreOpen] = useState(false)
 
-  const desktopLink = (href: string, label: string) => (
+  const desktopLink = (href: string, label: string, hideBelowLg = false) => (
     <Link
       key={href}
       href={href}
       aria-current={isActive(pathname, href) ? 'page' : undefined}
-      className={`fs-meta !text-[13px] px-3 py-2 rounded-lg transition-colors hover:text-fs-text hover:bg-white/5 ${
+      className={`fs-meta !text-[13px] px-2 lg:px-3 py-2 rounded-lg transition-colors hover:text-fs-text hover:bg-white/5 ${
         isActive(pathname, href) ? '!text-fs-text bg-white/5' : ''
-      }`}
+      } ${hideBelowLg ? 'hidden lg:inline-block' : ''}`}
     >
       {label}
     </Link>
@@ -165,17 +168,17 @@ export function GlobalNav() {
               {desktopLink('/scores', 'Scores')}
               {desktopLink('/multiview', 'Split')}
               {LEAGUE_LINKS.map((l) => desktopLink(l.href, l.label))}
-              {desktopLink('/fantasy', 'Fantasy')}
-              {desktopLink('/news', 'News')}
+              {desktopLink('/fantasy', 'Fantasy', true)}
+              {desktopLink('/news', 'News', true)}
               {desktopLink('/favorites', 'Saved')}
             </nav>
             <div className="flex-1" />
-            <div className="hidden md:block">
+            <div className="hidden lg:block">
               <DesktopSearch />
             </div>
             <Link
               href="/search"
-              className="md:hidden fs-btn !px-3 shrink-0"
+              className="lg:hidden fs-btn !px-3 shrink-0"
               aria-label="Search teams and players"
             >
               ⌕

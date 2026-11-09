@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -37,7 +38,7 @@ export default function WeeklySchedule({
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(`/api/schedule-week?sport=nfl&week=${week}`, { cache: 'no-store' })
+      const res = await apiFetch(`/api/schedule-week?sport=nfl&week=${week}`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`Schedule API returned ${res.status}`)
       const json = await res.json()
       setEvents((json?.events ?? []) as GameEvent[])

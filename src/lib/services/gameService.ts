@@ -1,6 +1,7 @@
 import { TTL, STALE, scheduleTtlFor } from '@/lib/cache/ttl'
 import { swr, fetchOrCache, getCached, setCachedChecked, isFresh } from '@/lib/cache/cacheService'
 import { getTeamSchedule as providerGetSchedule } from '@/lib/providers/index'
+import { withBasePath } from '@/lib/api-base'
 
 export interface GameScheduleResult {
   upcoming: any | null
@@ -37,7 +38,8 @@ export async function getSchedule(
 }
 
 function apiUrl(path: string, origin?: string): string {
-  return origin ? `${origin}${path}` : path
+  const prefixed = withBasePath(path)
+  return origin ? `${origin}${prefixed}` : prefixed
 }
 
 export async function getStandings(

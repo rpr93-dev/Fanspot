@@ -1,5 +1,6 @@
 import { getEspnAbbr } from '@/lib/providers/espn'
 import { teams } from '@/data/teams'
+import { withBasePath } from '@/lib/api-base'
 
 export interface ConciergeRequest {
   sport: string
@@ -107,7 +108,7 @@ export async function buildConciergeContext(
 
   const fetchJson = async (path: string): Promise<any> => {
     try {
-      const res = await fetch(`${origin}${path}`, { signal: AbortSignal.timeout(10000) })
+      const res = await fetch(`${origin}${withBasePath(path)}`, { signal: AbortSignal.timeout(10000) })
       return res.ok ? res.json() : null
     } catch { return null }
   }

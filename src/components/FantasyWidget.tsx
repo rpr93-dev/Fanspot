@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
@@ -70,8 +71,7 @@ export default function FantasyWidget({
         return
       }
       try {
-        const res = await fetch(
-          `/api/fantasy/team-outlook/${sport.toLowerCase()}/${teamAbbr.toLowerCase()}`,
+        const res = await apiFetch(`/api/fantasy/team-outlook/${sport.toLowerCase()}/${teamAbbr.toLowerCase()}`,
           { signal: AbortSignal.timeout(60000) },
         )
         const body = await res.json().catch(() => ({}))

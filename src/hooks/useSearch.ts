@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useRef, useState } from 'react'
 import type { PlayerResult, TeamResult } from '@/app/api/search/route'
@@ -32,7 +33,7 @@ export function useSearch(query: string, delayMs = 300) {
     const id = ++seq.current
     const timer = setTimeout(async () => {
       try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`)
+        const res = await apiFetch(`/api/search?q=${encodeURIComponent(q)}`)
         if (!res.ok) throw new Error(`Search returned ${res.status}`)
         const json = (await res.json()) as SearchData
         if (seq.current === id) setData({ teams: json.teams ?? [], players: json.players ?? [] })

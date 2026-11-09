@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
@@ -251,7 +252,7 @@ export default function MockDraftRoom({ sport }: { sport: string }) {
         'D/ST': String(s.starters['D/ST']),
         FLEX: String(s.starters.FLEX),
       })
-      const res = await fetch(`/api/fantasy/mock-draft/${sport}?${q}`, {
+      const res = await apiFetch(`/api/fantasy/mock-draft/${sport}?${q}`, {
         signal: AbortSignal.timeout(60000),
       })
       if (!res.ok) {

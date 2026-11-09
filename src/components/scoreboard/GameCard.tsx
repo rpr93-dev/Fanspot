@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import type { ReactNode } from 'react'
 import Link from 'next/link'
@@ -146,7 +147,7 @@ function LiveStatsBlock({ eventId }: { eventId: string }) {
     let cancelled = false
     async function grab() {
       try {
-        const res = await fetch(`/api/live-stats?eventId=${eventId}`, { cache: 'no-store' })
+        const res = await apiFetch(`/api/live-stats?eventId=${eventId}`, { cache: 'no-store' })
         if (!res.ok) {
           if (!cancelled) setAttempts((a) => a + 1)
           return

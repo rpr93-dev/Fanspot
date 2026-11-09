@@ -1,5 +1,6 @@
 import type { EspnEvent, EspnArticle } from '@/lib/sports-api'
 import { deduplicateById } from '@/lib/schedule-types'
+import { BASE_PATH } from '@/lib/api-base'
 
 export const espnSportMap: Record<string, string> = {
   NFL: 'football/nfl',
@@ -139,7 +140,7 @@ function computeSpotlightEventId(sport: string, events: EspnEvent[], teamAbbr: s
 }
 
 function apiOrigin(origin?: string): string {
-  return origin ?? ''
+  return `${origin ?? ''}${BASE_PATH}`
 }
 
 export async function fetchTeamSchedule(

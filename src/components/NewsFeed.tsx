@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
@@ -135,7 +136,7 @@ export function NewsFeed({
     try {
       const params = new URLSearchParams({ limit: String(limit), ranking })
       if (scope) params.set('leagues', scope)
-      const res = await fetch(`/api/top-stories?${params.toString()}`, {
+      const res = await apiFetch(`/api/top-stories?${params.toString()}`, {
         signal: AbortSignal.timeout(30000),
       })
       const body = await res.json().catch(() => ({}))

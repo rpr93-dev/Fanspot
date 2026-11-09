@@ -1,5 +1,6 @@
 import { TTL } from '@/lib/cache/ttl'
 import { fetchOrCache } from '@/lib/cache/cacheService'
+import { withBasePath } from '@/lib/api-base'
 
 export async function getNews(
   sport: string,
@@ -13,7 +14,7 @@ export async function getNews(
     TTL.NEWS,
     async () => {
       const res = await fetch(
-        `${base}/api/news-search?team=${encodeURIComponent(teamName)}&sport=${encodeURIComponent(sport)}`,
+        `${base}${withBasePath(`/api/news-search?team=${encodeURIComponent(teamName)}&sport=${encodeURIComponent(sport)}`)}`,
         { signal: AbortSignal.timeout(10000) },
       )
       if (!res.ok) return []

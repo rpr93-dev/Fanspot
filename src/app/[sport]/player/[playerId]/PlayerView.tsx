@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
@@ -137,7 +138,7 @@ function RelatedStories({ name }: { name: string }) {
     let cancelled = false
     const last = name.split(' ').slice(-1)[0]
     if (last.length < 4) return
-    fetch('/api/top-stories?limit=30&ranking=balanced')
+    apiFetch('/api/top-stories?limit=30&ranking=balanced')
       .then((r) => (r.ok ? r.json() : null))
       .then((json) => {
         if (cancelled || !json) return
@@ -177,7 +178,7 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
   useEffect(() => {
     if (!sport || !playerId) return
     let cancelled = false
-    fetch(`/api/player?sport=${sport}&id=${encodeURIComponent(playerId)}`)
+    apiFetch(`/api/player?sport=${sport}&id=${encodeURIComponent(playerId)}`)
       .then((r) => {
         if (r.status === 404) throw new Error('Player not found')
         if (!r.ok) throw new Error(`Player API returned ${r.status}`)
@@ -231,7 +232,7 @@ export function PlayerView({ sportParam, playerId }: { sportParam: string; playe
             onRetry={() => {
               setError(null)
               setData(null)
-              fetch(`/api/player?sport=${sport}&id=${encodeURIComponent(playerId)}`)
+              apiFetch(`/api/player?sport=${sport}&id=${encodeURIComponent(playerId)}`)
                 .then((r) => {
                   if (!r.ok) throw new Error(`Player API returned ${r.status}`)
                   return r.json()

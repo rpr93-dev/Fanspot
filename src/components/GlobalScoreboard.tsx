@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useRef, useState } from 'react'
 import {
@@ -62,8 +63,7 @@ export function GlobalScoreboard({
   const load = useCallback(async () => {
     const key = dateRef.current
     try {
-      const res = await fetch(
-        `/api/scoreboard/multi?date=${key}&sports=${sports.join(',').toLowerCase()}`,
+      const res = await apiFetch(`/api/scoreboard/multi?date=${key}&sports=${sports.join(',').toLowerCase()}`,
         { cache: 'no-store' },
       )
       if (!res.ok) throw new Error(`Scoreboard returned ${res.status}`)

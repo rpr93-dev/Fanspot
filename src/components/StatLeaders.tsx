@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -43,7 +44,7 @@ export function StatLeaders({ sport }: { sport: SportKey }) {
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/stat-leaders?sport=${sport}`)
+    apiFetch(`/api/stat-leaders?sport=${sport}`)
       .then((r) => {
         if (!r.ok) throw new Error(`Leaders returned ${r.status}`)
         return r.json()

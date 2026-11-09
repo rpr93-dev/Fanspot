@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { eventDateToAsOf, extractLiveStats, quartersPlayed, isGameComplete, namesMatch, periodLabel } from '@/lib/propLedger'
@@ -226,7 +227,7 @@ export default function NextGamePanel({
       params.set('spread', String(spread))
     }
     const load = () => {
-      fetch(`/api/props?${params.toString()}`, { signal: AbortSignal.timeout(15000) })
+      apiFetch(`/api/props?${params.toString()}`, { signal: AbortSignal.timeout(15000) })
         .then((r) => r.json().catch(() => ({ available: false })))
         .then((json) => { if (!cancelled) setProps(json) })
         .catch(() => { if (!cancelled) setProps({ available: false, reason: 'error' }) })
@@ -273,7 +274,7 @@ export default function NextGamePanel({
         if (backoff[attempt]) await new Promise((r) => setTimeout(r, backoff[attempt]))
         if (cancelled) return
         try {
-          const res = await fetch(`/api/fantasy/team-outlook/${sport.toLowerCase()}/${abbr.toLowerCase()}`, {
+          const res = await apiFetch(`/api/fantasy/team-outlook/${sport.toLowerCase()}/${abbr.toLowerCase()}`, {
             signal: AbortSignal.timeout(30000),
           })
           const body = await res.json().catch(() => ({}))
@@ -435,7 +436,7 @@ export default function NextGamePanel({
       return
     }
     try {
-      const res = await fetch('/api/prop-model', {
+      const res = await apiFetch('/api/prop-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targets, lines: buildLines(), preseason: !!isPreseason, eventDate, ...(isNbaModel ? { sport: 'nba' } : {}) }),
@@ -522,7 +523,7 @@ export default function NextGamePanel({
     if (!eventDate) { setLedgerChecked(true); return }
     let cancelled = false
     const [t1, t2] = ledgerPair()
-    fetch(`/api/prop-ledger?team=${t1}&opponent=${t2}&eventDate=${eventDate}`, { signal: AbortSignal.timeout(10000) })
+    apiFetch(`/api/prop-ledger?team=${t1}&opponent=${t2}&eventDate=${eventDate}`, { signal: AbortSignal.timeout(10000) })
       .then((r) => (r.ok ? r.json() : null))
       .then((j) => { if (!cancelled) { setLedger(j?.game ?? null); setLedgerChecked(true) } })
       .catch(() => { if (!cancelled) setLedgerChecked(true) })
@@ -545,7 +546,7 @@ export default function NextGamePanel({
       try {
         const abbrs = [teamAbbr, opponentAbbr].filter(Boolean)
         const results = await Promise.all(abbrs.map(async (abbr) => {
-          const res = await fetch(`/api/roster?sport=NFL&team=${abbr}`, { signal: AbortSignal.timeout(20000) })
+          const res = await apiFetch(`/api/roster?sport=NFL&team=${abbr}`, { signal: AbortSignal.timeout(20000) })
           if (!res.ok) return []
           return parseRosterInjuries(await res.json().catch(() => null))
         }))
@@ -607,7 +608,7 @@ export default function NextGamePanel({
         vegas: buildLines(),
         teams: { a: t1, b: t2 },
       }
-      fetch('/api/prop-ledger', {
+      apiFetch('/api/prop-ledger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'pre', team: t1, opponent: t2, eventDate, record: { ...meta, rows } }),
@@ -703,7 +704,7 @@ export default function NextGamePanel({
         source: (props as any)?.projectionSource ?? 'espn-season-avg',
         teams: { a: t1, b: t2 },
       }
-      fetch('/api/prop-ledger', {
+      apiFetch('/api/prop-ledger', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'pre', team: t1, opponent: t2, eventDate, record: { ...meta, rows } }),
@@ -721,7 +722,7 @@ export default function NextGamePanel({
             }))
           } else if (j?.error === 'SNAPSHOT_EXISTS') {
             // Another view won the race — reload so this panel grades too.
-            fetch(`/api/prop-ledger?team=${t1}&opponent=${t2}&eventDate=${eventDate}`)
+            apiFetch(`/api/prop-ledger?team=${t1}&opponent=${t2}&eventDate=${eventDate}`)
               .then((r) => (r.ok ? r.json() : null))
               .then((gg) => { if (gg?.game) setLedger(gg.game) })
               .catch(() => {})
@@ -833,7 +834,7 @@ export default function NextGamePanel({
       ...(subs.length ? { substitutions: subs } : {}),
       ...(backupProjections?.length ? { backupProjections } : {}),
     }
-    fetch('/api/prop-ledger', {
+    apiFetch('/api/prop-ledger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'live', team: t1, opponent: t2, eventDate, record: point }),
@@ -886,7 +887,7 @@ export default function NextGamePanel({
     if (!rows.length) return
     lastLinesSnapRef.current = Date.now()
     const [t1, t2] = ledgerPair()
-    fetch('/api/prop-ledger', {
+    apiFetch('/api/prop-ledger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'lines', team: t1, opponent: t2, eventDate, record: { lines: rows, source: 'panel-hourly' } }),
@@ -909,7 +910,7 @@ export default function NextGamePanel({
     if ((ledger as any)?.finalLines?.frozen) return
     if (!(ledger as any)?.pre) return
     const [t1, t2] = ledgerPair()
-    fetch('/api/prop-ledger', {
+    apiFetch('/api/prop-ledger', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'finalize', team: t1, opponent: t2, eventDate }),
@@ -936,7 +937,7 @@ export default function NextGamePanel({
         const prior = espnLineFor(backupName, stat)
         return { player: backupName, stat, team: teamCode, opponent: oppCode, prior: prior ?? undefined }
       })
-      const res = await fetch('/api/prop-model', {
+      const res = await apiFetch('/api/prop-model', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ targets, lines: buildLines(), preseason: !!isPreseason, eventDate }),

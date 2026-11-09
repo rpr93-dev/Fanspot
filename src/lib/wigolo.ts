@@ -1,3 +1,5 @@
+import { withBasePath } from '@/lib/api-base'
+
 export interface WigoloResult {
   title: string
   url: string
@@ -20,7 +22,7 @@ export async function searchWeb(
     const params = new URLSearchParams({ q: query })
     if (sport) params.set('sport', sport)
     const base = origin ?? 'http://localhost:3000'
-    const res = await fetch(`${base}/api/wigolo?${params}`, {
+    const res = await fetch(`${base}${withBasePath(`/api/wigolo?${params}`)}`, {
       signal: AbortSignal.timeout(15000),
     })
     if (!res.ok) return []

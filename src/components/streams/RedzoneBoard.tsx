@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -25,7 +26,7 @@ export function useRedzone(): RedzoneState | null {
     const tick = async () => {
       let next: RedzoneState | null = null
       try {
-        const res = await fetch('/api/streams/redzone', { signal: AbortSignal.timeout(15_000) })
+        const res = await apiFetch('/api/streams/redzone', { signal: AbortSignal.timeout(15_000) })
         if (res.ok) {
           const body = await res.json()
           next = { live: body?.live === true, reason: body?.reason, match: body?.match ?? null }

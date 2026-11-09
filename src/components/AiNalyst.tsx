@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useState, useRef, useEffect } from 'react'
 import dynamic from 'next/dynamic'
@@ -162,7 +163,7 @@ export default function AiNalyst({ sport, teamId, teamAbbreviation, teamColor, p
     setLoading(true)
     setOutput(null)
     try {
-      const res = await fetch('/api/concierge', {
+      const res = await apiFetch('/api/concierge', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

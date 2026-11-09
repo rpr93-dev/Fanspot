@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch, withBasePath } from '@/lib/api-base'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
@@ -29,7 +30,7 @@ export default function GraphPage() {
 
   const refresh = useCallback(async (force = false) => {
     try {
-      const res = await fetch('/api/graph-meta', { cache: 'no-store' })
+      const res = await apiFetch('/api/graph-meta', { cache: 'no-store' })
       if (!res.ok) throw new Error(`meta returned ${res.status}`)
       const m: GraphMeta = await res.json()
       setMeta(m)
@@ -89,7 +90,7 @@ export default function GraphPage() {
               ↻ Refresh
             </button>
             <a
-              href="/api/graph-html"
+              href={withBasePath('/api/graph-html')}
               target="_blank"
               rel="noopener noreferrer"
               className="hover-bright text-xs font-semibold px-3 py-1.5 rounded-full text-fs-muted hover:text-fs-text"
@@ -112,7 +113,7 @@ export default function GraphPage() {
             {meta?.html && (
               <iframe
                 key={frameKey}
-                src="/api/graph-html"
+                src={withBasePath('/api/graph-html')}
                 title="Graphify code graph"
                 onLoad={() => setFrameLoaded(true)}
                 className="w-full h-full block"

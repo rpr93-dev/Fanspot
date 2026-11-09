@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
@@ -303,7 +304,7 @@ export default function FantasySportPage() {
     setError(null)
     setOpenPlayer(null)
     try {
-      const res = await fetch(buildUrl(0), { signal: AbortSignal.timeout(60000) })
+      const res = await apiFetch(buildUrl(0), { signal: AbortSignal.timeout(60000) })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))
         throw new Error(body.message || body.error || `HTTP ${res.status}`)
@@ -361,7 +362,7 @@ export default function FantasySportPage() {
   async function loadMore() {
     setLoadingMore(true)
     try {
-      const res = await fetch(buildUrl(rows.length), { signal: AbortSignal.timeout(60000) })
+      const res = await apiFetch(buildUrl(rows.length), { signal: AbortSignal.timeout(60000) })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const data: BoardResponse = await res.json()
       setRows((prev) => [...prev, ...data.rows])
@@ -415,7 +416,7 @@ export default function FantasySportPage() {
 
     setDetails((prev) => ({ ...prev, [playerId]: { status: 'loading' } }))
     try {
-      const res = await fetch(`/api/fantasy/player/${sport}/${playerId}`, {
+      const res = await apiFetch(`/api/fantasy/player/${sport}/${playerId}`, {
         signal: AbortSignal.timeout(30000),
       })
       if (!res.ok) {

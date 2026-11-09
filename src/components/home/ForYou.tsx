@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -27,7 +28,7 @@ export function ForYou() {
   const load = useCallback(async () => {
     if (favAbbrs.size === 0) return
     try {
-      const res = await fetch(`/api/scoreboard/multi?date=${todayKey()}`, { cache: 'no-store' })
+      const res = await apiFetch(`/api/scoreboard/multi?date=${todayKey()}`, { cache: 'no-store' })
       if (!res.ok) throw new Error(`board returned ${res.status}`)
       const json = await res.json()
       const all: NormalizedGame[] = SPORT_KEYS.flatMap((s) => json?.leagues?.[s] ?? [])

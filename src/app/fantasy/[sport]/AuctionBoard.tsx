@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useCallback, useEffect, useState } from 'react'
 import { DetailPanel, type DetailState, type PlayerDetail } from './PlayerDetailPanel'
@@ -169,7 +170,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
     setLoading(true)
     setError(null)
     setMoreError(null)
-    fetch(buildUrl(0), { signal: AbortSignal.timeout(60000) })
+    apiFetch(buildUrl(0), { signal: AbortSignal.timeout(60000) })
       .then(async (r) => {
         const json = await r.json()
         if (!r.ok) throw new Error(json.message ?? json.error ?? 'Request failed')
@@ -195,7 +196,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
     setLoadingMore(true)
     setMoreError(null)
     try {
-      const r = await fetch(buildUrl(rows.length), { signal: AbortSignal.timeout(60000) })
+      const r = await apiFetch(buildUrl(rows.length), { signal: AbortSignal.timeout(60000) })
       const json = (await r.json()) as AuctionResponse & { message?: string; error?: string }
       if (!r.ok) throw new Error(json.message ?? json.error ?? 'Request failed')
       setRows((prev) => [...prev, ...json.rows])
@@ -216,7 +217,7 @@ export default function AuctionBoard({ sport, teamFilter }: { sport: string; tea
 
     setDetails((prev) => ({ ...prev, [playerId]: { status: 'loading' } }))
     try {
-      const res = await fetch(`/api/fantasy/player/${sport}/${playerId}`, {
+      const res = await apiFetch(`/api/fantasy/player/${sport}/${playerId}`, {
         signal: AbortSignal.timeout(30000),
       })
       if (!res.ok) {

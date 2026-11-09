@@ -1,4 +1,5 @@
 'use client'
+import { apiFetch } from '@/lib/api-base'
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
@@ -44,7 +45,7 @@ export function StandingsTable({ sport }: { sport: SportKey }) {
 
   useEffect(() => {
     let cancelled = false
-    fetch(`/api/standings-league?sport=${sport}`)
+    apiFetch(`/api/standings-league?sport=${sport}`)
       .then((r) => {
         if (!r.ok) throw new Error(`Standings returned ${r.status}`)
         return r.json()
