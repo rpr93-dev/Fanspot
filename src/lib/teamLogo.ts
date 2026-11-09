@@ -1,5 +1,6 @@
 import { teams, sportPath, type Team } from '@/data/teams'
 import { getEspnAbbr } from '@/lib/providers/espn'
+import { withBasePath } from '@/lib/api-base'
 
 /**
  * Team crest URL for a team record. A locally hosted `logo` wins (F1
@@ -7,7 +8,8 @@ import { getEspnAbbr } from '@/lib/providers/espn'
  * 500px crest keyed by the ESPN abbreviation.
  */
 export function teamLogoUrl(team: Team): string {
-  if (team.logo) return team.logo
+  // Local paths (F1) must be base-path aware or they 404 at the domain root.
+  if (team.logo) return withBasePath(team.logo)
   const path = sportPath[team.sport]
   if (!path) return ''
   const abbr = getEspnAbbr(team.id, team.abbreviation)

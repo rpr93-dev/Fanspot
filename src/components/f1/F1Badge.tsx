@@ -2,6 +2,7 @@
 
 import type { Team } from '@/data/teams'
 import { teams } from '@/data/teams'
+import { withBasePath } from '@/lib/api-base'
 
 /** Lookup a constructor record by local abbreviation (MCL, FER, …). */
 export function constructorByAbbr(abbr: string | null | undefined): Team | undefined {
@@ -51,7 +52,7 @@ export function F1Badge({
           title={record.name}
         >
           <img
-            src={record.logo}
+            src={withBasePath(record.logo)}
             alt={`${record.name} logo`}
             loading="lazy"
             draggable={false}
@@ -63,7 +64,7 @@ export function F1Badge({
     return (
       <span className={`shrink-0 inline-flex items-center ${fixed ? box : ''}`} title={record.name}>
         <img
-          src={record.logo}
+          src={withBasePath(record.logo)}
           alt={`${record.name} logo`}
           loading="lazy"
           draggable={false}
